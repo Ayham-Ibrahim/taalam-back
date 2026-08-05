@@ -1,0 +1,277 @@
+<?php
+
+namespace Tests\Feature\Reschedule;
+
+use App\Models\Booking;
+use App\Models\ClassSession;
+use App\Models\Package;
+use App\Models\SessionAttendee;
+use App\Models\Student;
+use App\Models\Subject;
+use App\Models\Teacher;
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
+use Tests\TestCase;
+
+class RescheduleFlowTest extends TestCase
+{
+    use RefreshDatabase;
+
+    public function test_request_within_free_window_does_not_require_reason_but_stays_pending(): void
+    {
+        [$teacher, $teacherToken] = $this->createVerifiedTeacher();
+        $session = $this->createSession($teacher, now()->addHours(5)); // أقل من نافذة 24 ساعة
+
+        $response = $this->as($teacherToken)->postJson("/api/class-sessions/{$session->id}/reschedule-requests", [
+            'proposed_scheduled_at' => now()->addDays(3)->toDateTimeString(),
+        ]);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('data.status', 'pending')
+            ->assertJsonPath('data.within_free_window', true);
+
+        $this->assertDatabaseHas('reschedule_requests', ['class_session_id' => $session->id, 'status' => 'pending']);
+    }
+
+    public function test_request_outside_free_window_requires_reason(): void
+    {
+        [$teacher, $teacherToken] = $this->createVerifiedTeacher();
+        $session = $this->createSession($teacher, now()->addDays(5)); // أكثر من نافذة 24 ساعة
+
+        $missingReason = $this->as($teacherToken)->postJson("/api/class-sessions/{$session->id}/reschedule-requests", [
+            'proposed_scheduled_at' => now()->addDays(6)->toDateTimeString(),
+        ]);
+        $missingReason->assertStatus(422);
+
+        $withReason = $this->as($teacherToken)->postJson("/api/class-sessions/{$session->id}/reschedule-requests", [
+            'proposed_scheduled_at' => now()->addDays(6)->toDateTimeString(),
+            'reason' => 'ظرف طارئ',
+        ]);
+        $withReason->assertStatus(201)
+            ->assertJsonPath('data.status', 'pending')
+            ->assertJsonPath('data.within_free_window', false);
+    }
+
+    public function test_admin_approval_updates_session_time_and_marks_approved(): void
+    {
+        [$teacher, $teacherToken] = $this->createVerifiedTeacher();
+        $session = $this->createSession($teacher, now()->addDays(5));
+
+        $create = $this->as($teacherToken)->postJson("/api/class-sessions/{$session->id}/reschedule-requests", [
+            'proposed_scheduled_at' => now()->addDays(6)->toDateTimeString(),
+            'reason' => 'سبب',
+        ]);
+        $requestId = $create->json('data.id');
+
+        [, $adminToken] = $this->createAdmin();
+
+        $approve = $this->as($adminToken)->postJson("/api/reschedule-requests/{$requestId}/approve");
+        $approve->assertStatus(200)->assertJsonPath('data.status', 'approved');
+
+        $this->assertDatabaseHas('class_sessions', [
+            'id' => $session->id,
+            'status' => 'scheduled',
+        ]);
+        $this->assertNotNull($session->fresh()->original_scheduled_at);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'reschedule.approved']);
+    }
+
+    public function test_admin_can_approve_with_alternative_time(): void
+    {
+        [$teacher, $teacherToken] = $this->createVerifiedTeacher();
+        $session = $this->createSession($teacher, now()->addDays(5));
+
+        $create = $this->as($teacherToken)->postJson("/api/class-sessions/{$session->id}/reschedule-requests", [
+            'proposed_scheduled_at' => now()->addDays(6)->toDateTimeString(),
+            'reason' => 'سبب',
+        ]);
+        $requestId = $create->json('data.id');
+
+        [, $adminToken] = $this->createAdmin();
+        $alternative = now()->addDays(7)->toDateTimeString();
+
+        $approve = $this->as($adminToken)->postJson("/api/reschedule-requests/{$requestId}/approve", [
+            'alternative_scheduled_at' => $alternative,
+        ]);
+
+        $approve->assertStatus(200)->assertJsonPath('data.status', 'approved_with_alternative');
+        $this->assertSame(
+            Carbon::parse($alternative)->toDateTimeString(),
+            $session->fresh()->scheduled_at->toDateTimeString(),
+        );
+    }
+
+    public function test_admin_reject_requires_reason_and_is_audit_logged(): void
+    {
+        [$teacher, $teacherToken] = $this->createVerifiedTeacher();
+        $session = $this->createSession($teacher, now()->addDays(5));
+
+        $create = $this->as($teacherToken)->postJson("/api/class-sessions/{$session->id}/reschedule-requests", [
+            'proposed_scheduled_at' => now()->addDays(6)->toDateTimeString(),
+            'reason' => 'سبب',
+        ]);
+        $requestId = $create->json('data.id');
+
+        [, $adminToken] = $this->createAdmin();
+
+        $missingReason = $this->as($adminToken)->postJson("/api/reschedule-requests/{$requestId}/reject");
+        $missingReason->assertStatus(422);
+
+        $reject = $this->as($adminToken)->postJson("/api/reschedule-requests/{$requestId}/reject", [
+            'reason' => 'لا يوجد موعد بديل متاح',
+        ]);
+        $reject->assertStatus(200)->assertJsonPath('data.status', 'rejected');
+        $this->assertDatabaseHas('audit_logs', ['action' => 'reschedule.rejected']);
+    }
+
+    public function test_non_admin_cannot_approve_or_reject(): void
+    {
+        [$teacher, $teacherToken] = $this->createVerifiedTeacher();
+        $session = $this->createSession($teacher, now()->addDays(5));
+
+        $create = $this->as($teacherToken)->postJson("/api/class-sessions/{$session->id}/reschedule-requests", [
+            'proposed_scheduled_at' => now()->addDays(6)->toDateTimeString(),
+            'reason' => 'سبب',
+        ]);
+        $requestId = $create->json('data.id');
+
+        $response = $this->as($teacherToken)->postJson("/api/reschedule-requests/{$requestId}/approve");
+        $response->assertStatus(403);
+    }
+
+    public function test_second_request_is_blocked_while_first_still_pending(): void
+    {
+        [$teacher, $teacherToken] = $this->createVerifiedTeacher();
+        $session = $this->createSession($teacher, now()->addDays(5));
+
+        $this->as($teacherToken)->postJson("/api/class-sessions/{$session->id}/reschedule-requests", [
+            'proposed_scheduled_at' => now()->addDays(6)->toDateTimeString(),
+            'reason' => 'سبب 1',
+        ])->assertStatus(201);
+
+        $second = $this->as($teacherToken)->postJson("/api/class-sessions/{$session->id}/reschedule-requests", [
+            'proposed_scheduled_at' => now()->addDays(8)->toDateTimeString(),
+            'reason' => 'سبب 2',
+        ]);
+
+        $second->assertStatus(422);
+    }
+
+    public function test_student_attending_the_session_can_request_reschedule(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        $session = $this->createSession($teacher, now()->addDays(5));
+
+        $studentUser = User::factory()->student()->create();
+        $student = Student::create(['user_id' => $studentUser->id, 'education_type' => 'school']);
+        SessionAttendee::create(['class_session_id' => $session->id, 'student_id' => $student->id, 'attendance' => 'registered']);
+        $studentToken = $studentUser->createToken('t')->plainTextToken;
+
+        $response = $this->as($studentToken)->postJson("/api/class-sessions/{$session->id}/reschedule-requests", [
+            'proposed_scheduled_at' => now()->addDays(6)->toDateTimeString(),
+            'reason' => 'سبب',
+        ]);
+
+        $response->assertStatus(201);
+    }
+
+    public function test_a_teacher_who_does_not_own_the_session_cannot_request_reschedule(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        $session = $this->createSession($teacher, now()->addDays(5));
+
+        [, $otherTeacherToken] = $this->createVerifiedTeacher();
+
+        $response = $this->as($otherTeacherToken)->postJson("/api/class-sessions/{$session->id}/reschedule-requests", [
+            'proposed_scheduled_at' => now()->addDays(6)->toDateTimeString(),
+            'reason' => 'سبب',
+        ]);
+
+        $response->assertStatus(403);
+    }
+
+    public function test_a_student_not_attending_the_session_cannot_request_reschedule(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        $session = $this->createSession($teacher, now()->addDays(5));
+
+        $otherStudentUser = User::factory()->student()->create();
+        Student::create(['user_id' => $otherStudentUser->id, 'education_type' => 'school']);
+        $otherStudentToken = $otherStudentUser->createToken('t')->plainTextToken;
+
+        $response = $this->as($otherStudentToken)->postJson("/api/class-sessions/{$session->id}/reschedule-requests", [
+            'proposed_scheduled_at' => now()->addDays(6)->toDateTimeString(),
+            'reason' => 'سبب',
+        ]);
+
+        $response->assertStatus(403);
+    }
+
+    /**
+     * @return array{0: Teacher, 1: string}
+     */
+    private function createVerifiedTeacher(): array
+    {
+        $teacherUser = User::factory()->teacher()->create();
+        $teacher = Teacher::create(['user_id' => $teacherUser->id, 'teacher_type' => 'school', 'status' => 'verified']);
+        $token = $teacherUser->createToken('t')->plainTextToken;
+
+        return [$teacher, $token];
+    }
+
+    /**
+     * @return array{0: User, 1: string}
+     */
+    private function createAdmin(): array
+    {
+        $admin = User::factory()->admin()->create();
+
+        return [$admin, $admin->createToken('t')->plainTextToken];
+    }
+
+    private function createSession(Teacher $teacher, Carbon $scheduledAt): ClassSession
+    {
+        $subject = Subject::create(['code' => 'rs-'.uniqid(), 'name_ar' => 'مادة']);
+
+        $package = Package::create([
+            'teacher_id' => $teacher->id,
+            'title' => 'باقة',
+            'subject_id' => $subject->id,
+            'session_format' => 'individual',
+            'capacity' => 1,
+            'sessions_count' => 4,
+            'teacher_price' => 100,
+            'platform_margin_percent' => 60,
+            'student_price' => 160,
+            'platform_revenue' => 60,
+            'status' => 'active',
+            'approved_at' => now(),
+        ]);
+
+        $studentUser = User::factory()->student()->create();
+        $student = Student::create(['user_id' => $studentUser->id, 'education_type' => 'school']);
+
+        $booking = Booking::create([
+            'reference' => 'BK-'.strtoupper(uniqid()),
+            'student_id' => $student->id,
+            'teacher_id' => $teacher->id,
+            'package_id' => $package->id,
+            'amount_paid' => 160,
+            'teacher_amount' => 100,
+            'platform_amount' => 60,
+            'margin_percent_snapshot' => 60,
+            'sessions_total' => 4,
+            'sessions_remaining' => 4,
+            'status' => 'confirmed',
+        ]);
+
+        return $booking->sessions()->create([
+            'teacher_id' => $teacher->id,
+            'sequence_no' => 1,
+            'scheduled_at' => $scheduledAt,
+            'duration_min' => 60,
+            'status' => 'scheduled',
+        ]);
+    }
+}

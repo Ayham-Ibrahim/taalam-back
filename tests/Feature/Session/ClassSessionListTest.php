@@ -1,0 +1,209 @@
+<?php
+
+namespace Tests\Feature\Session;
+
+use App\Models\Booking;
+use App\Models\ClassSession;
+use App\Models\Package;
+use App\Models\SessionAttendee;
+use App\Models\Student;
+use App\Models\Subject;
+use App\Models\Teacher;
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
+use Tests\TestCase;
+
+class ClassSessionListTest extends TestCase
+{
+    use RefreshDatabase;
+
+    public function test_teacher_sees_only_their_own_sessions_via_index(): void
+    {
+        [$teacherA, $tokenA] = $this->createVerifiedTeacher();
+        [$teacherB] = $this->createVerifiedTeacher();
+
+        [, $sessionA] = $this->createBookingWithSession($teacherA, now()->addDay());
+        [, $sessionB] = $this->createBookingWithSession($teacherB, now()->addDay());
+
+        $response = $this->as($tokenA)->getJson('/api/class-sessions');
+
+        $response->assertStatus(200);
+        $ids = collect($response->json('data'))->pluck('id');
+        $this->assertTrue($ids->contains($sessionA->id));
+        $this->assertFalse($ids->contains($sessionB->id));
+    }
+
+    public function test_student_sees_only_sessions_they_attend(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+
+        [$booking1, $session1] = $this->createBookingWithSession($teacher, now()->addDay());
+        $student1User = User::find($booking1->student->user_id);
+        $student1Token = $student1User->createToken('t')->plainTextToken;
+        $this->attendeeFor($session1, $booking1);
+
+        [$booking2, $session2] = $this->createBookingWithSession($teacher, now()->addDays(2));
+        $this->attendeeFor($session2, $booking2);
+
+        $response = $this->as($student1Token)->getJson('/api/class-sessions');
+
+        $response->assertStatus(200);
+        $ids = collect($response->json('data'))->pluck('id');
+        $this->assertTrue($ids->contains($session1->id));
+        $this->assertFalse($ids->contains($session2->id));
+    }
+
+    public function test_admin_sees_sessions_across_all_teachers(): void
+    {
+        [$teacherA] = $this->createVerifiedTeacher();
+        [$teacherB] = $this->createVerifiedTeacher();
+        [, $sessionA] = $this->createBookingWithSession($teacherA, now()->addDay());
+        [, $sessionB] = $this->createBookingWithSession($teacherB, now()->addDay());
+
+        $admin = User::factory()->admin()->create();
+        $adminToken = $admin->createToken('t')->plainTextToken;
+
+        $response = $this->as($adminToken)->getJson('/api/class-sessions');
+
+        $response->assertStatus(200);
+        $ids = collect($response->json('data'))->pluck('id');
+        $this->assertTrue($ids->contains($sessionA->id));
+        $this->assertTrue($ids->contains($sessionB->id));
+    }
+
+    public function test_status_filter_is_applied(): void
+    {
+        [$teacher, $token] = $this->createVerifiedTeacher();
+        [, $scheduled] = $this->createBookingWithSession($teacher, now()->addDay());
+        [, $completed] = $this->createBookingWithSession($teacher, now()->addDays(2));
+        $completed->update(['status' => 'completed']);
+
+        $response = $this->as($token)->getJson('/api/class-sessions?status=completed');
+
+        $response->assertStatus(200);
+        $ids = collect($response->json('data'))->pluck('id');
+        $this->assertTrue($ids->contains($completed->id));
+        $this->assertFalse($ids->contains($scheduled->id));
+    }
+
+    public function test_teacher_can_filter_sessions_by_student_id(): void
+    {
+        [$teacher, $token] = $this->createVerifiedTeacher();
+
+        [$bookingA, $sessionA] = $this->createBookingWithSession($teacher, now()->addDay());
+        $this->attendeeFor($sessionA, $bookingA);
+
+        [$bookingB, $sessionB] = $this->createBookingWithSession($teacher, now()->addDays(2));
+        $this->attendeeFor($sessionB, $bookingB);
+
+        $response = $this->as($token)->getJson("/api/class-sessions?student_id={$bookingA->student_id}");
+
+        $response->assertStatus(200);
+        $ids = collect($response->json('data'))->pluck('id');
+        $this->assertEquals([$sessionA->id], $ids->all());
+    }
+
+    public function test_show_endpoint_rejects_student_not_attending_the_session(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        [$booking, $session] = $this->createBookingWithSession($teacher, now()->addDay());
+        $this->attendeeFor($session, $booking);
+
+        $outsider = User::factory()->student()->create();
+        $outsiderToken = $outsider->createToken('t')->plainTextToken;
+
+        $response = $this->as($outsiderToken)->getJson("/api/class-sessions/{$session->id}");
+
+        $response->assertStatus(403);
+    }
+
+    public function test_show_endpoint_hides_teacher_join_url_from_student(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        [$booking, $session] = $this->createBookingWithSession($teacher, now()->addDay());
+        $session->update(['join_url_teacher' => 'https://bbb.example.com/join/teacher', 'join_url_student' => 'https://bbb.example.com/join/student']);
+        $this->attendeeFor($session, $booking);
+
+        $studentUser = User::find($booking->student->user_id);
+        $studentToken = $studentUser->createToken('t')->plainTextToken;
+
+        $response = $this->as($studentToken)->getJson("/api/class-sessions/{$session->id}");
+
+        $response->assertStatus(200);
+        $this->assertNull($response->json('data.join_url_teacher'));
+        $this->assertNotNull($response->json('data.join_url_student'));
+    }
+
+    /**
+     * @return array{0: Teacher, 1: string}
+     */
+    private function createVerifiedTeacher(): array
+    {
+        $teacherUser = User::factory()->teacher()->create();
+        $teacher = Teacher::create(['user_id' => $teacherUser->id, 'teacher_type' => 'school', 'status' => 'verified']);
+        $token = $teacherUser->createToken('t')->plainTextToken;
+
+        return [$teacher, $token];
+    }
+
+    /**
+     * @return array{0: Booking, 1: ClassSession}
+     */
+    private function createBookingWithSession(Teacher $teacher, Carbon $scheduledAt): array
+    {
+        $subject = Subject::create(['code' => 'cs-'.uniqid(), 'name_ar' => 'مادة']);
+
+        $package = Package::create([
+            'teacher_id' => $teacher->id,
+            'title' => 'باقة',
+            'subject_id' => $subject->id,
+            'session_format' => 'individual',
+            'capacity' => 1,
+            'sessions_count' => 4,
+            'teacher_price' => 100,
+            'platform_margin_percent' => 60,
+            'student_price' => 160,
+            'platform_revenue' => 60,
+            'status' => 'active',
+            'approved_at' => now(),
+        ]);
+
+        $studentUser = User::factory()->student()->create();
+        $student = Student::create(['user_id' => $studentUser->id, 'education_type' => 'school']);
+
+        $booking = Booking::create([
+            'reference' => 'BK-'.strtoupper(uniqid()),
+            'student_id' => $student->id,
+            'teacher_id' => $teacher->id,
+            'package_id' => $package->id,
+            'amount_paid' => 160,
+            'teacher_amount' => 100,
+            'platform_amount' => 60,
+            'margin_percent_snapshot' => 60,
+            'sessions_total' => 4,
+            'sessions_remaining' => 4,
+            'status' => 'confirmed',
+        ]);
+
+        $session = $booking->sessions()->create([
+            'teacher_id' => $teacher->id,
+            'sequence_no' => 1,
+            'scheduled_at' => $scheduledAt,
+            'duration_min' => 60,
+            'status' => 'scheduled',
+        ]);
+
+        return [$booking, $session];
+    }
+
+    private function attendeeFor(ClassSession $session, Booking $booking): SessionAttendee
+    {
+        return SessionAttendee::create([
+            'class_session_id' => $session->id,
+            'student_id' => $booking->student_id,
+            'booking_id' => $booking->id,
+            'attendance' => 'registered',
+        ]);
+    }
+}

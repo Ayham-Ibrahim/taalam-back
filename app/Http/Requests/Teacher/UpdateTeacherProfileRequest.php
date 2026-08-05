@@ -1,0 +1,41 @@
+<?php
+
+namespace App\Http\Requests\Teacher;
+
+use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
+
+class UpdateTeacherProfileRequest extends FormRequest
+{
+    public function authorize(): bool
+    {
+        return $this->user()->can('update', $this->route('teacher'));
+    }
+
+    public function rules(): array
+    {
+        $isTrainingCenter = $this->route('teacher')?->isTrainingCenter();
+
+        return [
+            'bio' => ['nullable', 'string', 'max:2000'],
+            'qualification' => ['nullable', Rule::in(['bachelor', 'master', 'phd', 'professional_cert', 'diploma'])],
+            'experience_years' => ['nullable', Rule::in(['under_1', '1_3', '3_5', 'over_5'])],
+            'age_groups' => ['nullable', 'array'],
+            'teaching_methods' => ['nullable', 'array'],
+            'max_daily_sessions' => ['nullable', 'integer', 'min:1', 'max:24'],
+
+            'display_name_en' => [$isTrainingCenter ? 'required' : 'nullable', 'string', 'max:180'],
+            'commercial_register' => [$isTrainingCenter ? 'required' : 'nullable', 'string', 'max:60'],
+            'website' => ['nullable', 'string', 'max:255'],
+            'address' => ['nullable', 'string', 'max:255'],
+            'city' => ['nullable', 'string', 'max:80'],
+
+            'subject_ids' => ['nullable', 'array'],
+            'subject_ids.*' => ['integer', 'exists:subjects,id'],
+            'curriculum_ids' => ['nullable', 'array'],
+            'curriculum_ids.*' => ['integer', 'exists:curricula,id'],
+            'language_ids' => ['nullable', 'array'],
+            'language_ids.*' => ['integer', 'exists:languages,id'],
+        ];
+    }
+}

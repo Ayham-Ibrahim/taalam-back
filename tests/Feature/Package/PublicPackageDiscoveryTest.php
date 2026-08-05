@@ -1,0 +1,116 @@
+<?php
+
+namespace Tests\Feature\Package;
+
+use App\Models\AvailabilitySlot;
+use App\Models\Package;
+use App\Models\Student;
+use App\Models\Subject;
+use App\Models\Teacher;
+use App\Models\User;
+use App\Services\PricingService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
+
+class PublicPackageDiscoveryTest extends TestCase
+{
+    use RefreshDatabase;
+
+    public function test_student_can_list_a_verified_teachers_active_packages_only(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        $active = $this->createIndividualPackage($teacher, status: 'active');
+        $this->createIndividualPackage($teacher, status: 'draft');
+        $this->createIndividualPackage($teacher, status: 'pending_approval');
+
+        $student = $this->createStudent();
+        $studentToken = User::find($student->user_id)->createToken('t')->plainTextToken;
+
+        $response = $this->as($studentToken)->getJson("/api/teachers/{$teacher->id}/packages");
+
+        $response->assertStatus(200);
+        $ids = collect($response->json('data'))->pluck('id');
+        $this->assertEquals([$active->id], $ids->all());
+        $this->assertArrayNotHasKey('teacher_price', $response->json('data.0'));
+    }
+
+    public function test_packages_of_unverified_teacher_are_not_discoverable(): void
+    {
+        $teacherUser = User::factory()->teacher()->create();
+        $teacher = Teacher::create(['user_id' => $teacherUser->id, 'teacher_type' => 'school', 'status' => 'pending_verification']);
+
+        $student = $this->createStudent();
+        $studentToken = User::find($student->user_id)->createToken('t')->plainTextToken;
+
+        $response = $this->as($studentToken)->getJson("/api/teachers/{$teacher->id}/packages");
+
+        $response->assertStatus(404);
+    }
+
+    public function test_student_can_view_a_verified_teachers_availability_slots(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        AvailabilitySlot::create(['teacher_id' => $teacher->id, 'day_of_week' => 3]);
+
+        $student = $this->createStudent();
+        $studentToken = User::find($student->user_id)->createToken('t')->plainTextToken;
+
+        $response = $this->as($studentToken)->getJson("/api/teachers/{$teacher->id}/availability-slots");
+
+        $response->assertStatus(200);
+        $this->assertCount(1, $response->json('data'));
+    }
+
+    public function test_student_cannot_view_unverified_teachers_availability_slots(): void
+    {
+        $teacherUser = User::factory()->teacher()->create();
+        $teacher = Teacher::create(['user_id' => $teacherUser->id, 'teacher_type' => 'school', 'status' => 'active_unverified']);
+
+        $student = $this->createStudent();
+        $studentToken = User::find($student->user_id)->createToken('t')->plainTextToken;
+
+        $response = $this->as($studentToken)->getJson("/api/teachers/{$teacher->id}/availability-slots");
+
+        $response->assertStatus(403);
+    }
+
+    /**
+     * @return array{0: Teacher, 1: string}
+     */
+    private function createVerifiedTeacher(): array
+    {
+        $teacherUser = User::factory()->teacher()->create();
+        $teacher = Teacher::create(['user_id' => $teacherUser->id, 'teacher_type' => 'school', 'status' => 'verified']);
+        $token = $teacherUser->createToken('t')->plainTextToken;
+
+        return [$teacher, $token];
+    }
+
+    private function createStudent(): Student
+    {
+        $user = User::factory()->student()->create();
+
+        return Student::create(['user_id' => $user->id, 'education_type' => 'school']);
+    }
+
+    private function createIndividualPackage(Teacher $teacher, string $status): Package
+    {
+        $subject = Subject::create(['code' => 'subj-'.uniqid(), 'name_ar' => 'مادة', 'education_type' => 'school']);
+        $computed = app(PricingService::class)->calculateStudentPrice(100, 60, 4);
+
+        return Package::create([
+            'teacher_id' => $teacher->id,
+            'title' => 'باقة فردية',
+            'subject_id' => $subject->id,
+            'session_format' => 'individual',
+            'capacity' => 1,
+            'sessions_count' => 4,
+            'teacher_price' => 100,
+            'platform_margin_percent' => 60,
+            'student_price' => $computed['student_price'],
+            'platform_revenue' => $computed['platform_revenue'],
+            'status' => $status,
+            'approved_at' => $status === 'active' ? now() : null,
+        ]);
+    }
+}
