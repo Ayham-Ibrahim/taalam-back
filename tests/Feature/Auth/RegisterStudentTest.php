@@ -69,4 +69,20 @@ class RegisterStudentTest extends TestCase
 
         $response->assertStatus(422)->assertJsonValidationErrors(['email']);
     }
+
+    /** Password::defaults() الموحّدة: 8 أحرف على الأقل + حرف كبير وصغير + رقم */
+    public function test_registration_rejects_a_weak_password(): void
+    {
+        $response = $this->postJson('/api/auth/register/student', [
+            'name' => 'Test Student',
+            'email' => 'weakpass@example.com',
+            'password' => 'password',
+            'password_confirmation' => 'password',
+            'education_type' => 'training',
+            'level' => 'beginner',
+        ]);
+
+        $response->assertStatus(422)->assertJsonValidationErrors(['password']);
+        $this->assertDatabaseMissing('users', ['email' => 'weakpass@example.com']);
+    }
 }

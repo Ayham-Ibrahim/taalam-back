@@ -29,8 +29,8 @@ use App\Http\Controllers\TeacherSearchController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('auth')->group(function () {
-    Route::post('register/student', [AuthController::class, 'registerStudent']);
-    Route::post('login', [AuthController::class, 'login']);
+    Route::middleware('throttle:register')->post('register/student', [AuthController::class, 'registerStudent']);
+    Route::middleware('throttle:login')->post('login', [AuthController::class, 'login']);
 
     Route::middleware('auth:sanctum')->group(function () {
         Route::post('logout', [AuthController::class, 'logout']);
@@ -38,7 +38,7 @@ Route::prefix('auth')->group(function () {
     });
 });
 
-Route::middleware('auth:sanctum')->post('me/avatar', [ProfileController::class, 'uploadAvatar']);
+Route::middleware(['auth:sanctum', 'throttle:uploads'])->post('me/avatar', [ProfileController::class, 'uploadAvatar']);
 
 Route::post('teachers/accept-invitation', [TeacherController::class, 'acceptInvitation']);
 
@@ -85,7 +85,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('teachers/{teacher}/reject', [TeacherController::class, 'reject']);
     Route::post('teachers/{teacher}/suspend', [TeacherController::class, 'suspend']);
 
-    Route::post('teachers/{teacher}/verification-documents', [VerificationDocumentController::class, 'store']);
+    Route::middleware('throttle:uploads')->post('teachers/{teacher}/verification-documents', [VerificationDocumentController::class, 'store']);
     Route::get('verification-documents', [VerificationDocumentController::class, 'index']);
     Route::post('verification-documents/{document}/approve', [VerificationDocumentController::class, 'approve']);
     Route::post('verification-documents/{document}/reject', [VerificationDocumentController::class, 'reject']);

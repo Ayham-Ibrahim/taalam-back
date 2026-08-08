@@ -25,6 +25,8 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Str;
+use Illuminate\Validation\Rules\Password;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -60,6 +62,36 @@ class AppServiceProvider extends ServiceProvider
             return $request->user()
                 ? Limit::perMinute(120)->by('user:'.$request->user()->id)
                 : Limit::perMinute(30)->by('guest:'.$request->ip());
+        });
+
+        // 5 محاولات/دقيقة لكل (إيميل + IP) معاً — يمنع التخمين المتكرر بلا التأثير
+        // على مستخدم شرعي ينسى كلمة المرور مرة أو اثنتين. راجع routes/api.php (login).
+        RateLimiter::for('login', function (Request $request) {
+            $key = Str::transliterate(Str::lower((string) $request->input('email'))).'|'.$request->ip();
+
+            return Limit::perMinute(5)->by($key);
+        });
+
+        // تسجيل ذاتي — أندر من محاولات الدخول لكن هدفه مختلف: منع إنشاء حسابات
+        // وهمية بالجملة (سبام) بدل التخمين. 10/ساعة لكل IP كافية لمستخدم حقيقي.
+        RateLimiter::for('register', function (Request $request) {
+            return Limit::perHour(10)->by('register:'.$request->ip());
+        });
+
+        // رفع ملفات (صورة شخصية، وثيقة توثيق) — عملية مكلفة (تخزين + تحقق أبعاد/نوع)
+        // لكل مستخدم موثّق فقط (المسارات كلها خلف auth:sanctum أصلاً)؛ 15/دقيقة يكفي
+        // أي استخدام شرعي (إعادة محاولة رفع بعد خطأ) ويمنع استنزاف مساحة التخزين.
+        RateLimiter::for('uploads', function (Request $request) {
+            return Limit::perMinute(15)->by('uploads:'.$request->user()?->id);
+        });
+
+        // حد أدنى موحّد لكل كلمات المرور في التطبيق (تسجيل ذاتي، حساب ينشئه الأدمن...):
+        // 8 أحرف + حرف كبير وصغير + رقم دائماً، وفحص كلمات مرور مسرَّبة (uncompromised)
+        // في الإنتاج فقط — يستدعي Have I Been Pwned عبر الشبكة، لا داعي له محلياً/بالاختبارات.
+        Password::defaults(function () {
+            $rule = Password::min(8)->mixedCase()->numbers();
+
+            return $this->app->isProduction() ? $rule->uncompromised() : $rule;
         });
     }
 }

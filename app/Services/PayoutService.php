@@ -11,6 +11,7 @@ use App\Models\SessionAttendee;
 use App\Models\Teacher;
 use App\Models\User;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
 
 class PayoutService
@@ -43,24 +44,34 @@ class PayoutService
             'status' => 'pending',
         ]);
 
+        $amounts = $this->calculateSessionAmounts($sessions);
+
         $gross = 0.0;
         $count = 0;
+        $now = now();
+        $items = [];
 
         foreach ($sessions as $session) {
-            $amount = $this->calculateSessionAmount($session);
+            $amount = $amounts[$session->id] ?? 0.0;
 
             if ($amount <= 0) {
                 continue;
             }
 
-            PayoutItem::create([
+            $items[] = [
                 'payout_id' => $payout->id,
                 'class_session_id' => $session->id,
                 'amount' => round($amount, 2),
-            ]);
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
 
             $gross += $amount;
             $count++;
+        }
+
+        if ($items !== []) {
+            PayoutItem::insert($items);
         }
 
         $payout->update([
@@ -107,43 +118,78 @@ class PayoutService
     }
 
     /**
-     * دورة: مستحق المركز الكلي من كل تسجيلات الدورة النشطة ÷ عدد جلساتها.
-     * باقة: مستحق كل حجز يحضر هذه الجلسة (فردي أو حجوزات المجموعة المشتركة عبر
-     * session_attendees) ÷ عدد جلسات ذلك الحجز، مجموعة على بعضها.
+     * مبلغ كل جلسة دفعة واحدة لكل الجلسات معاً — بدل استعلامين أو أكثر *لكل جلسة*
+     * (كان معلم بمئات الجلسات في فترة واحدة يولّد مئات الاستعلامات). أربعة استعلامات
+     * ثابتة بغض النظر عن العدد:
+     *   دورة: مستحق المركز الكلي من كل تسجيلات الدورة النشطة ÷ عدد جلساتها —
+     *     يُحسب مرة واحدة لكل دورة (لا لكل جلسة، حتى لو تكررت الدورة عبر عدة جلسات).
+     *   باقة: مستحق كل حجز يحضر هذه الجلسة (فردي أو حجوزات المجموعة المشتركة عبر
+     *     session_attendees) ÷ عدد جلسات ذلك الحجز، مجموعة على بعضها.
+     *
+     * @return array<int, float> [class_session_id => amount]
      */
-    private function calculateSessionAmount(ClassSession $session): float
+    private function calculateSessionAmounts(Collection $sessions): array
     {
-        if ($session->course_id) {
-            $course = $session->course;
+        $amounts = [];
 
-            if (! $course || $course->total_sessions <= 0) {
-                return 0.0;
-            }
+        $courseSessions = $sessions->filter(fn (ClassSession $s) => $s->course_id !== null);
 
-            $providerRevenue = (float) Enrollment::where('course_id', $course->id)
+        if ($courseSessions->isNotEmpty()) {
+            $courseIds = $courseSessions->pluck('course_id')->unique();
+
+            $revenueByCourseId = Enrollment::whereIn('course_id', $courseIds)
                 ->whereIn('status', ['confirmed', 'in_progress', 'completed'])
-                ->sum('provider_amount');
+                ->selectRaw('course_id, SUM(provider_amount) as total')
+                ->groupBy('course_id')
+                ->pluck('total', 'course_id');
 
-            return $providerRevenue / $course->total_sessions;
-        }
+            foreach ($courseSessions as $session) {
+                $course = $session->course;
 
-        $bookingIds = SessionAttendee::where('class_session_id', $session->id)
-            ->pluck('booking_id')
-            ->filter()
-            ->unique();
-
-        if ($bookingIds->isEmpty() && $session->booking_id) {
-            $bookingIds = collect([$session->booking_id]);
-        }
-
-        $total = 0.0;
-
-        foreach (Booking::whereIn('id', $bookingIds)->get() as $booking) {
-            if ($booking->sessions_total > 0) {
-                $total += ((float) $booking->teacher_amount) / $booking->sessions_total;
+                $amounts[$session->id] = ($course && $course->total_sessions > 0)
+                    ? ((float) ($revenueByCourseId[$course->id] ?? 0)) / $course->total_sessions
+                    : 0.0;
             }
         }
 
-        return $total;
+        $bookingSessions = $sessions->filter(fn (ClassSession $s) => $s->course_id === null);
+
+        if ($bookingSessions->isNotEmpty()) {
+            $sessionIds = $bookingSessions->pluck('id');
+
+            $bookingIdsBySession = SessionAttendee::whereIn('class_session_id', $sessionIds)
+                ->whereNotNull('booking_id')
+                ->get(['class_session_id', 'booking_id'])
+                ->groupBy('class_session_id')
+                ->map(fn ($rows) => $rows->pluck('booking_id')->unique());
+
+            $allBookingIds = $bookingIdsBySession->flatten()
+                ->merge($bookingSessions->pluck('booking_id')->filter())
+                ->unique();
+
+            $bookingsById = Booking::whereIn('id', $allBookingIds)->get()->keyBy('id');
+
+            foreach ($bookingSessions as $session) {
+                $bookingIds = $bookingIdsBySession->get($session->id, collect());
+
+                if ($bookingIds->isEmpty() && $session->booking_id) {
+                    $bookingIds = collect([$session->booking_id]);
+                }
+
+                $total = 0.0;
+
+                foreach ($bookingIds as $bookingId) {
+                    $booking = $bookingsById->get($bookingId);
+
+                    if ($booking && $booking->sessions_total > 0) {
+                        $total += ((float) $booking->teacher_amount) / $booking->sessions_total;
+                    }
+                }
+
+                $amounts[$session->id] = $total;
+            }
+        }
+
+        return $amounts;
     }
 }

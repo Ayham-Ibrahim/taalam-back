@@ -105,24 +105,11 @@ return new class extends Migration
             CHECK (amount_paid = teacher_amount + platform_amount)
         ');
 
-        // الحجز اليدوي يجب أن يحمل سبباً وهوية الأدمن
-        DB::statement('
-            ALTER TABLE bookings
-            ADD CONSTRAINT chk_bookings_manual
-            CHECK (
-                is_manual = 0
-                OR (created_by_admin_id IS NOT NULL AND manual_reason IS NOT NULL)
-            )
-        ');
-
-        DB::statement('
-            ALTER TABLE enrollments
-            ADD CONSTRAINT chk_enrollments_manual
-            CHECK (
-                is_manual = 0
-                OR (created_by_admin_id IS NOT NULL AND manual_reason IS NOT NULL)
-            )
-        ');
+        // الحجز اليدوي يجب أن يحمل سبباً وهوية الأدمن — عبر Trigger لا CHECK،
+        // إذ created_by_admin_id عمود FK بـ SET NULL (nullOnDelete)، وMySQL 8
+        // (خطأ 3823) يرفض CHECK على عمود مستهدف بإجراء SET NULL/CASCADE.
+        // MariaDB المحلية لا تفرض هذا القيد فتصمت، لكن MySQL الحقيقي يرفض
+        // إنشاء القيد من الأساس — لذا Trigger هو البديل المتوافق مع الاثنين.
 
         // ── الجداول الزمنية ──
         // package_schedules: جماعية تملأ date+start_time+end_time، فردية day_of_week فقط (الباقي NULL)
@@ -186,10 +173,67 @@ return new class extends Migration
                 END IF;
             END
         ");
+
+        /**
+         * ═══════ Triggers بديلة عن chk_bookings_manual / chk_enrollments_manual ═══════
+         * نفس القاعدة تماماً: is_manual=0 أو (created_by_admin_id وmanual_reason كلاهما موجود).
+         * BEFORE INSERT وBEFORE UPDATE معاً — تغطية كاملة تعادل ما كان CHECK سيفرضه.
+         */
+        DB::unprepared("
+            CREATE TRIGGER trg_bookings_manual_insert
+            BEFORE INSERT ON bookings
+            FOR EACH ROW
+            BEGIN
+                IF NEW.is_manual = 1 AND (NEW.created_by_admin_id IS NULL OR NEW.manual_reason IS NULL) THEN
+                    SIGNAL SQLSTATE '45000'
+                    SET MESSAGE_TEXT = 'Manual bookings must set created_by_admin_id and manual_reason';
+                END IF;
+            END
+        ");
+
+        DB::unprepared("
+            CREATE TRIGGER trg_bookings_manual_update
+            BEFORE UPDATE ON bookings
+            FOR EACH ROW
+            BEGIN
+                IF NEW.is_manual = 1 AND (NEW.created_by_admin_id IS NULL OR NEW.manual_reason IS NULL) THEN
+                    SIGNAL SQLSTATE '45000'
+                    SET MESSAGE_TEXT = 'Manual bookings must set created_by_admin_id and manual_reason';
+                END IF;
+            END
+        ");
+
+        DB::unprepared("
+            CREATE TRIGGER trg_enrollments_manual_insert
+            BEFORE INSERT ON enrollments
+            FOR EACH ROW
+            BEGIN
+                IF NEW.is_manual = 1 AND (NEW.created_by_admin_id IS NULL OR NEW.manual_reason IS NULL) THEN
+                    SIGNAL SQLSTATE '45000'
+                    SET MESSAGE_TEXT = 'Manual enrollments must set created_by_admin_id and manual_reason';
+                END IF;
+            END
+        ");
+
+        DB::unprepared("
+            CREATE TRIGGER trg_enrollments_manual_update
+            BEFORE UPDATE ON enrollments
+            FOR EACH ROW
+            BEGIN
+                IF NEW.is_manual = 1 AND (NEW.created_by_admin_id IS NULL OR NEW.manual_reason IS NULL) THEN
+                    SIGNAL SQLSTATE '45000'
+                    SET MESSAGE_TEXT = 'Manual enrollments must set created_by_admin_id and manual_reason';
+                END IF;
+            END
+        ");
     }
 
     public function down(): void
     {
+        DB::unprepared('DROP TRIGGER IF EXISTS trg_enrollments_manual_update');
+        DB::unprepared('DROP TRIGGER IF EXISTS trg_enrollments_manual_insert');
+        DB::unprepared('DROP TRIGGER IF EXISTS trg_bookings_manual_update');
+        DB::unprepared('DROP TRIGGER IF EXISTS trg_bookings_manual_insert');
         DB::unprepared('DROP TRIGGER IF EXISTS trg_courses_teacher_type');
         DB::unprepared('DROP TRIGGER IF EXISTS trg_packages_teacher_type');
 
@@ -198,8 +242,7 @@ return new class extends Migration
             'availability_slots' => ['chk_avail_day'],
             'course_schedules' => ['chk_crs_sched_time'],
             'package_schedules' => ['chk_pkg_sched_time'],
-            'enrollments' => ['chk_enrollments_manual'],
-            'bookings' => ['chk_bookings_manual', 'chk_bookings_amounts', 'chk_bookings_sessions'],
+            'bookings' => ['chk_bookings_amounts', 'chk_bookings_sessions'],
             'courses' => ['chk_courses_active_pricing', 'chk_courses_price', 'chk_courses_seats', 'chk_courses_dates'],
             'packages' => ['chk_packages_active_pricing', 'chk_packages_student_price', 'chk_packages_price', 'chk_packages_enrolled', 'chk_packages_capacity'],
         ];

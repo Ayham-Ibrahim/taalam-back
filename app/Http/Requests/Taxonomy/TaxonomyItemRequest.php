@@ -22,14 +22,14 @@ class TaxonomyItemRequest extends FormRequest
                 'code' => ['required', 'string', 'max:30', Rule::unique('curricula', 'code')->ignore($id)],
                 'name_ar' => ['required', 'string', 'max:100'],
                 'name_en' => ['nullable', 'string', 'max:100'],
-                'sort_order' => ['nullable', 'integer'],
+                'sort_order' => ['nullable', 'integer', 'min:0', 'max:10000'],
                 'is_active' => ['nullable', 'boolean'],
             ],
             'stages' => [
                 'code' => ['required', 'string', 'max:30', Rule::unique('stages', 'code')->ignore($id)],
                 'name_ar' => ['required', 'string', 'max:100'],
                 'education_type' => ['required', Rule::in(['school', 'university', 'training'])],
-                'sort_order' => ['nullable', 'integer'],
+                'sort_order' => ['nullable', 'integer', 'min:0', 'max:10000'],
                 'is_active' => ['nullable', 'boolean'],
             ],
             'subjects' => [
@@ -37,7 +37,7 @@ class TaxonomyItemRequest extends FormRequest
                 'name_ar' => ['required', 'string', 'max:120'],
                 'name_en' => ['nullable', 'string', 'max:120'],
                 'education_type' => ['required', Rule::in(['school', 'university', 'training'])],
-                'sort_order' => ['nullable', 'integer'],
+                'sort_order' => ['nullable', 'integer', 'min:0', 'max:10000'],
                 'is_active' => ['nullable', 'boolean'],
             ],
             'universities' => [
@@ -54,7 +54,7 @@ class TaxonomyItemRequest extends FormRequest
             'course_fields' => [
                 'code' => ['required', 'string', 'max:50', Rule::unique('course_fields', 'code')->ignore($id)],
                 'name_ar' => ['required', 'string', 'max:120'],
-                'sort_order' => ['nullable', 'integer'],
+                'sort_order' => ['nullable', 'integer', 'min:0', 'max:10000'],
                 'is_active' => ['nullable', 'boolean'],
             ],
             'languages' => [

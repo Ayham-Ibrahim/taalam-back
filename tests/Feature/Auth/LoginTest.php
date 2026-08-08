@@ -40,6 +40,20 @@ class LoginTest extends TestCase
         $response->assertStatus(422)->assertJsonPath('status', 'error');
     }
 
+    /** يمنع تخمين كلمة المرور المتكرر — 5 محاولات/دقيقة لكل (إيميل+IP)، مهما كانت النتيجة (نجاح أو فشل) */
+    public function test_login_is_rate_limited_after_five_attempts(): void
+    {
+        $user = User::factory()->admin()->create(['password' => 'Password123!']);
+
+        for ($i = 0; $i < 5; $i++) {
+            $this->postJson('/api/auth/login', ['email' => $user->email, 'password' => 'wrong-password'])
+                ->assertStatus(422);
+        }
+
+        $sixth = $this->postJson('/api/auth/login', ['email' => $user->email, 'password' => 'wrong-password']);
+        $sixth->assertStatus(429);
+    }
+
     public function test_inactive_user_cannot_login(): void
     {
         $user = User::factory()->admin()->create([

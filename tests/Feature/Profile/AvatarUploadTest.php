@@ -63,4 +63,23 @@ class AvatarUploadTest extends TestCase
 
         Storage::disk('public')->assertMissing($firstPath);
     }
+
+    /** 15 رفعة/دقيقة لكل مستخدم (throttle:uploads) — يمنع استنزاف مساحة التخزين */
+    public function test_avatar_uploads_are_rate_limited(): void
+    {
+        Storage::fake('public');
+
+        $user = User::factory()->student()->create();
+        $token = $user->createToken('t')->plainTextToken;
+
+        for ($i = 0; $i < 15; $i++) {
+            $this->as($token)->post('/api/me/avatar', [
+                'avatar' => UploadedFile::fake()->image("avatar{$i}.jpg", 500, 500),
+            ])->assertStatus(200);
+        }
+
+        $this->as($token)->post('/api/me/avatar', [
+            'avatar' => UploadedFile::fake()->image('avatar16.jpg', 500, 500),
+        ])->assertStatus(429);
+    }
 }

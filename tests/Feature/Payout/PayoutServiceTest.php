@@ -16,6 +16,7 @@ use App\Models\User;
 use App\Services\PayoutService;
 use App\Services\PricingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
@@ -130,6 +131,28 @@ class PayoutServiceTest extends TestCase
         $paid = app(PayoutService::class)->markPaid($approved, 'REF-123');
         $this->assertSame('paid', $paid->status);
         $this->assertSame('REF-123', $paid->transfer_reference);
+    }
+
+    /**
+     * التوليد يجب ألا يولّد استعلاماً منفصلاً لكل جلسة (كان النمط القديم يفعل هذا
+     * تماماً) — عدد الاستعلامات يجب أن يبقى شبه ثابت بصرف النظر عن عدد الجلسات.
+     */
+    public function test_generating_a_payout_does_not_scale_queries_with_session_count(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher('school');
+
+        for ($i = 0; $i < 8; $i++) {
+            $this->createCompletedPackageSession($teacher, teacherPrice: 50, sessionsTotal: 1);
+        }
+
+        DB::enableQueryLog();
+        app(PayoutService::class)->generateForPeriod($teacher, now()->subDay(), now()->addDay());
+        $queryCount = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        // ثابت بغض النظر عن العدد؛ النمط القديم كان يولّد ~2 استعلام إضافي *لكل جلسة*
+        // (16+ لثماني جلسات) — أي رقم أقل من ذلك بكثير يثبت عدم التوسّع الخطي.
+        $this->assertLessThan(20, $queryCount, "Expected a bounded query count, got {$queryCount} for 8 sessions");
     }
 
     /**
