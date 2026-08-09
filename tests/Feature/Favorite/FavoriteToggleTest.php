@@ -92,6 +92,7 @@ class FavoriteToggleTest extends TestCase
         $courseItem = $items->firstWhere('type', 'course');
         $this->assertNotNull($courseItem);
         $this->assertSame('دورة بايثون', $courseItem['course']['title']);
+        $this->assertSame($center->id, $courseItem['course']['teacherId']);
         $this->assertSame('مركز النخبة', $courseItem['course']['providerName']);
         $this->assertEquals(150, $courseItem['course']['price']);
     }

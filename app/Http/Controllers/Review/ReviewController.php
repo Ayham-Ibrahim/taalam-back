@@ -9,6 +9,7 @@ use App\Http\Requests\Review\ReportReviewRequest;
 use App\Http\Requests\Review\RespondToReviewRequest;
 use App\Http\Requests\Review\UpdateReviewRequest;
 use App\Http\Resources\Review\AdminReviewResource;
+use App\Http\Resources\Review\MyReviewResource;
 use App\Models\ClassSession;
 use App\Models\Review;
 use App\Models\Teacher;
@@ -18,6 +19,19 @@ use Illuminate\Http\Request;
 class ReviewController extends Controller
 {
     public function __construct(private readonly ReviewService $reviewService) {}
+
+    /** تقييمات الطالب الحالي هو نفسه — يغذّي تبويب "التقييمات" بلوحة تحكم الطالب */
+    public function myReviews(Request $request)
+    {
+        $student = $request->user()->loadMissing('student')->student;
+
+        $reviews = Review::where('student_id', $student?->id ?? 0)
+            ->with('teacher.user:id,name,avatar_path')
+            ->latest()
+            ->paginate($request->integer('per_page', 20));
+
+        return $this->paginate($reviews->through(fn (Review $review) => new MyReviewResource($review)));
+    }
 
     /** لوحة إشراف الأدمن على كل التقييمات — يرى المخفي والمُبلَّغ عنه أيضاً */
     public function index(Request $request)

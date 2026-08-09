@@ -15,6 +15,12 @@ class SessionAttendanceController extends Controller
 {
     public function __construct(private readonly SessionService $sessionService) {}
 
+    /**
+     * Summary of markPresent
+     * @param Request $request
+     * @param SessionAttendee $attendee
+     * @return \Illuminate\Http\JsonResponse
+     */
     public function markPresent(Request $request, SessionAttendee $attendee)
     {
         abort_unless($request->user()->isAdmin() || $request->user()->isTeacher(), 403);
@@ -24,6 +30,12 @@ class SessionAttendanceController extends Controller
         return $this->success($attendee, 'تم تسجيل الحضور');
     }
 
+    /**
+     * Summary of recordAbsence
+     * @param RecordAbsenceRequest $request
+     * @param SessionAttendee $attendee
+     * @return \Illuminate\Http\JsonResponse
+     */
     public function recordAbsence(RecordAbsenceRequest $request, SessionAttendee $attendee)
     {
         $notifiedAt = $request->validated('notified_at') ? Carbon::parse($request->validated('notified_at')) : null;

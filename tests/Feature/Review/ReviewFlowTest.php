@@ -109,6 +109,34 @@ class ReviewFlowTest extends TestCase
         $second->assertStatus(422);
     }
 
+    public function test_student_can_list_their_own_reviews(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        [, $studentToken, $session] = $this->createAttendedCompletedSession($teacher);
+        $this->as($studentToken)->postJson("/api/class-sessions/{$session->id}/reviews", ['rating' => 4, 'comment' => 'جيد'])
+            ->assertStatus(201);
+
+        // مراجعة طالب آخر لنفس المعلم — يجب ألا تظهر ضمن "تقييماتي" لهذا الطالب
+        [, $otherToken, $otherSession] = $this->createAttendedCompletedSession($teacher);
+        $this->as($otherToken)->postJson("/api/class-sessions/{$otherSession->id}/reviews", ['rating' => 2])
+            ->assertStatus(201);
+
+        $response = $this->as($studentToken)->getJson('/api/me/reviews');
+
+        $response->assertStatus(200);
+        $items = collect($response->json('data'));
+        $this->assertCount(1, $items);
+        $this->assertSame(4, $items->first()['rating']);
+        $this->assertSame('جيد', $items->first()['comment']);
+        $this->assertTrue($items->first()['can_edit']);
+        $this->assertSame($session->id, $items->first()['class_session_id']);
+    }
+
+    public function test_guest_cannot_list_reviews(): void
+    {
+        $this->getJson('/api/me/reviews')->assertStatus(401);
+    }
+
     public function test_review_edit_window_is_enforced(): void
     {
         [$teacher] = $this->createVerifiedTeacher();

@@ -55,7 +55,7 @@ class StudentController extends Controller
     {
         $this->authorize('view', $student);
 
-        $student->load(['user:id,name,email,phone,avatar_path', 'curriculum:id,name_ar', 'stage:id,name_ar', 'university:id,name_ar', 'major:id,name_ar', 'courseField:id,name_ar']);
+        $student->load(['user:id,name,email,phone,avatar_path,whatsapp,gender', 'curriculum:id,name_ar', 'stage:id,name_ar', 'university:id,name_ar', 'major:id,name_ar', 'courseField:id,name_ar']);
 
         return $this->success(new StudentProfileResource($student));
     }

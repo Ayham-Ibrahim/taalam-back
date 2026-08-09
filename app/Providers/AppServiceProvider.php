@@ -85,6 +85,12 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute(15)->by('uploads:'.$request->user()?->id);
         });
 
+        // تغيير كلمة المرور يتطلب كلمة المرور الحالية أصلاً، لكن هذا سطر دفاع إضافي
+        // ضد تخمينها بالقوة الغاشمة عبر نداءات متكررة لنفس الحساب الموثّق.
+        RateLimiter::for('password-change', function (Request $request) {
+            return Limit::perHour(5)->by('password-change:'.$request->user()?->id);
+        });
+
         // حد أدنى موحّد لكل كلمات المرور في التطبيق (تسجيل ذاتي، حساب ينشئه الأدمن...):
         // 8 أحرف + حرف كبير وصغير + رقم دائماً، وفحص كلمات مرور مسرَّبة (uncompromised)
         // في الإنتاج فقط — يستدعي Have I Been Pwned عبر الشبكة، لا داعي له محلياً/بالاختبارات.

@@ -39,6 +39,8 @@ Route::prefix('auth')->group(function () {
 });
 
 Route::middleware(['auth:sanctum', 'throttle:uploads'])->post('me/avatar', [ProfileController::class, 'uploadAvatar']);
+Route::middleware('auth:sanctum')->put('me/profile', [ProfileController::class, 'updateProfile']);
+Route::middleware(['auth:sanctum', 'throttle:password-change'])->put('me/password', [ProfileController::class, 'updatePassword']);
 
 Route::post('teachers/accept-invitation', [TeacherController::class, 'acceptInvitation']);
 
@@ -158,6 +160,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('payouts/{payout}/approve', [PayoutController::class, 'approve']);
     Route::post('payouts/{payout}/mark-paid', [PayoutController::class, 'markPaid']);
 
+    Route::get('me/reviews', [ReviewController::class, 'myReviews']);
     Route::get('reviews', [ReviewController::class, 'index']);
     Route::post('class-sessions/{session}/reviews', [ReviewController::class, 'store']);
     Route::put('reviews/{review}', [ReviewController::class, 'update']);

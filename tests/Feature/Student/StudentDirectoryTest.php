@@ -82,6 +82,33 @@ class StudentDirectoryTest extends TestCase
         $otherResponse->assertStatus(403);
     }
 
+    public function test_student_profile_show_includes_ids_and_settings_only_fields(): void
+    {
+        $studentUser = User::factory()->student()->create(['whatsapp' => '0599999999', 'gender' => 'male']);
+        $student = Student::create([
+            'user_id' => $studentUser->id,
+            'education_type' => 'school',
+            'guardian_name' => 'أبو الطالب',
+            'guardian_phone' => '0588888888',
+            'birth_date' => '2008-01-15',
+        ]);
+        $curriculum = \App\Models\Curriculum::create(['code' => 'sd-1', 'name_ar' => 'منهج']);
+        $stage = \App\Models\Stage::create(['code' => 'sd-1', 'name_ar' => 'مرحلة', 'education_type' => 'school']);
+        $student->update(['curriculum_id' => $curriculum->id, 'stage_id' => $stage->id]);
+        $token = $studentUser->createToken('t')->plainTextToken;
+
+        $response = $this->as($token)->getJson("/api/students/{$student->id}");
+
+        $response->assertStatus(200);
+        $data = $response->json('data');
+        $this->assertSame($curriculum->id, $data['curriculum_id']);
+        $this->assertSame($stage->id, $data['stage_id']);
+        $this->assertSame('0599999999', $data['whatsapp']);
+        $this->assertSame('male', $data['gender']);
+        $this->assertSame('أبو الطالب', $data['guardian_name']);
+        $this->assertSame('0588888888', $data['guardian_phone']);
+    }
+
     /**
      * @return array{0: Teacher, 1: string}
      */

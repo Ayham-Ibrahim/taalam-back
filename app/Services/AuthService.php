@@ -109,4 +109,31 @@ class AuthService
 
         return $user;
     }
+
+    /** بيانات الحساب الأساسية فقط (اسم/هاتف/واتساب/جنس) — بصرف النظر عن الدور */
+    public function updateProfile(User $user, array $data): User
+    {
+        $user->update([
+            'name' => $data['name'],
+            'phone' => $data['phone'] ?? null,
+            'whatsapp' => $data['whatsapp'] ?? null,
+            'gender' => $data['gender'] ?? null,
+        ]);
+
+        return $user;
+    }
+
+    public function updatePassword(User $user, string $currentPassword, string $newPassword): void
+    {
+        if (! $user->password || ! Hash::check($currentPassword, $user->password)) {
+            throw ValidationException::withMessages([
+                'current_password' => ['كلمة المرور الحالية غير صحيحة'],
+            ]);
+        }
+
+        $user->update(['password' => $newPassword]);
+
+        // إبطال كل الجلسات الأخرى دفاعاً في العمق — الجلسة الحالية فقط تبقى صالحة
+        $user->tokens()->where('id', '!=', $user->currentAccessToken()?->id)->delete();
+    }
 }

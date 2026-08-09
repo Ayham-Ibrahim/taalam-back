@@ -43,6 +43,8 @@ class FavoriteResource extends JsonResource
                 'course' => [
                     'id' => $target->id,
                     'title' => $target->title,
+                    // يحتاجها الفرونت للربط بصفحة ملف المركز — الدورة لا تملك صفحة تفصيل مستقلة، تُعرض ضمن ملف المركز فقط
+                    'teacherId' => $target->teacher_id,
                     'providerName' => $target->teacher?->user?->name,
                     'providerAvatar' => $target->teacher?->user?->avatar_path,
                     'subject' => $target->subject?->name_ar,

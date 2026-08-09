@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\Profile\UpdateMyProfileRequest;
+use App\Http\Requests\Profile\UpdatePasswordRequest;
 use App\Http\Requests\Profile\UploadAvatarRequest;
 use App\Http\Resources\UserResource;
 use App\Services\AuthService;
@@ -16,5 +18,23 @@ class ProfileController extends Controller
         $user = $this->authService->updateAvatar($request->user(), $request->file('avatar'));
 
         return $this->success(new UserResource($user), 'تم تحديث الصورة الشخصية بنجاح');
+    }
+
+    public function updateProfile(UpdateMyProfileRequest $request)
+    {
+        $user = $this->authService->updateProfile($request->user(), $request->validated());
+
+        return $this->success(new UserResource($user), 'تم تحديث البيانات بنجاح');
+    }
+
+    public function updatePassword(UpdatePasswordRequest $request)
+    {
+        $this->authService->updatePassword(
+            $request->user(),
+            $request->validated('current_password'),
+            $request->validated('password'),
+        );
+
+        return $this->success(null, 'تم تحديث كلمة المرور بنجاح');
     }
 }
