@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Foundation;
 
+use App\Models\Setting;
 use App\Services\SettingsService;
 use Database\Seeders\SettingsSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -47,5 +48,26 @@ class SettingsServiceTest extends TestCase
         $this->expectException(RuntimeException::class);
 
         $settings->set('reschedule_requires_admin', '0');
+    }
+
+    public function test_set_stores_a_boolean_false_value_correctly_instead_of_an_empty_string(): void
+    {
+        Setting::create([
+            'key' => 'test_editable_flag',
+            'value' => '1',
+            'type' => 'boolean',
+            'group' => 'accounts',
+            'label_ar' => 'إعداد تجريبي',
+            'is_editable' => true,
+        ]);
+        $settings = app(SettingsService::class);
+
+        $settings->set('test_editable_flag', false);
+
+        $this->assertSame('0', Setting::where('key', 'test_editable_flag')->value('value'));
+        $this->assertFalse($settings->get('test_editable_flag'));
+
+        $settings->set('test_editable_flag', true);
+        $this->assertTrue($settings->get('test_editable_flag'));
     }
 }

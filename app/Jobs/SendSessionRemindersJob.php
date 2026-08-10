@@ -14,8 +14,8 @@ use Illuminate\Queue\SerializesModels;
 
 /**
  * تُشغَّل كل دقيقة (routes/console.php). ترسل رابط الجلسة تلقائياً للطالب والمعلم
- * معاً بمجرد دخول الجلسة ضمن مهلة session_reminder_minutes_before (30 افتراضياً) —
- * reminder_sent_at يمنع الإرسال المكرر لنفس الجلسة.
+ * معاً بمجرد دخول الجلسة ضمن مهلة session_reminder_minutes_before (120 دقيقة/ساعتان
+ * افتراضياً) — reminder_sent_at يمنع الإرسال المكرر لنفس الجلسة.
  */
 class SendSessionRemindersJob implements ShouldQueue
 {
@@ -23,7 +23,7 @@ class SendSessionRemindersJob implements ShouldQueue
 
     public function handle(SettingsService $settings, NotificationService $notifications): void
     {
-        $minutesBefore = (int) $settings->get('session_reminder_minutes_before', 30);
+        $minutesBefore = (int) $settings->get('session_reminder_minutes_before', 120);
 
         $sessions = ClassSession::query()
             ->where('status', 'scheduled')

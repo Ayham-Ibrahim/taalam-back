@@ -20,6 +20,7 @@ class SettingsController extends Controller
             'category' => $setting->group,
             'label' => $setting->label_ar,
             'description' => $setting->description,
+            'type' => $setting->type,
             'value' => $setting->castValue(),
             'isEditable' => $setting->is_editable,
         ]);
@@ -36,6 +37,7 @@ class SettingsController extends Controller
             'category' => $setting->group,
             'label' => $setting->label_ar,
             'description' => $setting->description,
+            'type' => $setting->type,
             'value' => $setting->castValue(),
             'isEditable' => $setting->is_editable,
         ], 'تم تحديث الإعداد بنجاح');

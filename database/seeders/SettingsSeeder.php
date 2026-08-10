@@ -145,7 +145,7 @@ class SettingsSeeder extends Seeder
             ],
             [
                 'key' => 'session_reminder_minutes_before',
-                'value' => '30',
+                'value' => '120',
                 'type' => 'integer',
                 'group' => 'attendance',
                 'label_ar' => 'إرسال رابط الجلسة تلقائياً قبل موعدها بـ (دقيقة)',

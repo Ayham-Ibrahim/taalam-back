@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Admin\AdminDashboardController;
+use App\Http\Controllers\Admin\AuditLogController;
 use App\Http\Controllers\Admin\SettingsController;
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\Booking\BookingController;
@@ -190,4 +191,5 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('admin/settings', [SettingsController::class, 'index']);
     Route::put('admin/settings/{key}', [SettingsController::class, 'update']);
+    Route::get('admin/audit-log', [AuditLogController::class, 'index']);
 });

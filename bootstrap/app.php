@@ -10,6 +10,7 @@ use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Exceptions\ThrottleRequestsException;
 use Illuminate\Http\Middleware\HandleCors;
 use Illuminate\Validation\ValidationException;
+use Stripe\Exception\ApiErrorException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 return Application::configure(basePath: dirname(__DIR__))
@@ -81,6 +82,20 @@ return Application::configure(basePath: dirname(__DIR__))
                     'status' => 'error',
                     'message' => 'عدد كبير جداً من الطلبات، حاول لاحقاً',
                 ], 429);
+            }
+        });
+
+        // فشل التواصل مع Stripe (مفتاح غير صالح، بطاقة مرفوضة، انقطاع اتصال...) كان
+        // يصل غير معالَج فيظهر للمستخدم كخطأ 500 فارغ — يُسجَّل هنا بكامل تفاصيله
+        // ويُرَدّ برسالة واضحة بدلاً من ذلك.
+        $exceptions->render(function (ApiErrorException $e, $request) {
+            if ($request->is('api/*') || $request->expectsJson()) {
+                report($e);
+
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'تعذّر الاتصال ببوابة الدفع حالياً، يرجى المحاولة لاحقاً',
+                ], 502);
             }
         });
     })->create();

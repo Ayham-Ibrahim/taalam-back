@@ -44,7 +44,10 @@ class SettingsService
         }
 
         $oldValue = $setting->value;
-        $setting->update(['value' => (string) $value]);
+        // (string) false === '' وليس '0'، ما يفسد castValue() لاحقاً لإعداد boolean —
+        // لذا نحوّل القيم المنطقية صراحةً قبل التخزين.
+        $stored = is_bool($value) ? ($value ? '1' : '0') : (string) $value;
+        $setting->update(['value' => $stored]);
 
         Cache::forget(self::CACHE_KEY);
 
