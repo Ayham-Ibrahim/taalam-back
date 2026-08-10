@@ -247,9 +247,12 @@ return new class extends Migration
             'packages' => ['chk_packages_active_pricing', 'chk_packages_student_price', 'chk_packages_price', 'chk_packages_enrolled', 'chk_packages_capacity'],
         ];
 
+        // بلا IF EXISTS عمداً — up() ينشئ كل قيد أعلاه بلا أي شرط، فهو موجود دائماً هنا.
+        // "DROP CONSTRAINT IF EXISTS" غير مدعوم في كل إصدارات MySQL/MariaDB (خطأ syntax
+        // 1064 على بعض الخوادم) — بخلاف "DROP TRIGGER IF EXISTS" أعلاه المدعوم عالمياً.
         foreach ($constraints as $table => $names) {
             foreach ($names as $name) {
-                DB::statement("ALTER TABLE {$table} DROP CONSTRAINT IF EXISTS {$name}");
+                DB::statement("ALTER TABLE {$table} DROP CONSTRAINT {$name}");
             }
         }
     }
