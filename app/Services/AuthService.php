@@ -113,12 +113,36 @@ class AuthService
     /** بيانات الحساب الأساسية فقط (اسم/هاتف/واتساب/جنس) — بصرف النظر عن الدور */
     public function updateProfile(User $user, array $data): User
     {
-        $user->update([
+        $updates = [
             'name' => $data['name'],
             'phone' => $data['phone'] ?? null,
             'whatsapp' => $data['whatsapp'] ?? null,
             'gender' => $data['gender'] ?? null,
-        ]);
+        ];
+
+        // اختيار يدوي صريح لتفعيل/تعطيل الاكتشاف التلقائي من الإعدادات — يطغى دائماً على نتيجة syncTimezone التالية
+        if (array_key_exists('timezone_auto', $data) && $data['timezone_auto'] !== null) {
+            $updates['timezone_auto'] = (bool) $data['timezone_auto'];
+            if (! $data['timezone_auto'] && ! empty($data['timezone'])) {
+                $updates['timezone'] = $data['timezone'];
+            }
+        } elseif (! empty($data['timezone'])) {
+            // قيمة منطقة زمنية بلا توضيح صريح لـ timezone_auto — يُفترض هذا اختياراً يدوياً من المستخدم
+            $updates['timezone'] = $data['timezone'];
+            $updates['timezone_auto'] = false;
+        }
+
+        $user->update($updates);
+
+        return $user;
+    }
+
+    /** مزامنة صامتة من متصفح المستخدم — تُطبَّق فقط إن لم يُثبِّت المستخدم منطقته يدوياً من قبل (timezone_auto) */
+    public function syncTimezone(User $user, string $timezone): User
+    {
+        if ($user->timezone_auto) {
+            $user->update(['timezone' => $timezone]);
+        }
 
         return $user;
     }

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\Profile\SyncTimezoneRequest;
 use App\Http\Requests\Profile\UpdateMyProfileRequest;
 use App\Http\Requests\Profile\UpdatePasswordRequest;
 use App\Http\Requests\Profile\UploadAvatarRequest;
@@ -25,6 +26,14 @@ class ProfileController extends Controller
         $user = $this->authService->updateProfile($request->user(), $request->validated());
 
         return $this->success(new UserResource($user), 'تم تحديث البيانات بنجاح');
+    }
+
+    /** يُستدعى تلقائياً وبصمت من الفرونت في كل تحميل للتطبيق — بلا أثر إن كان المستخدم قد ثبَّت منطقته يدوياً */
+    public function syncTimezone(SyncTimezoneRequest $request)
+    {
+        $user = $this->authService->syncTimezone($request->user(), $request->validated('timezone'));
+
+        return $this->success(new UserResource($user));
     }
 
     public function updatePassword(UpdatePasswordRequest $request)

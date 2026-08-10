@@ -27,6 +27,73 @@ class UpdateProfileTest extends TestCase
         $this->assertDatabaseHas('users', ['id' => $user->id, 'name' => 'اسم جديد', 'phone' => '0599999999']);
     }
 
+    public function test_timezone_sync_updates_when_auto_detect_is_enabled(): void
+    {
+        $user = User::factory()->student()->create(['timezone' => 'UTC', 'timezone_auto' => true]);
+        $token = $user->createToken('t')->plainTextToken;
+
+        $response = $this->as($token)->putJson('/api/me/timezone/sync', ['timezone' => 'Asia/Tokyo']);
+
+        $response->assertStatus(200);
+        $this->assertDatabaseHas('users', ['id' => $user->id, 'timezone' => 'Asia/Tokyo']);
+    }
+
+    public function test_timezone_sync_is_a_silent_no_op_once_the_user_set_it_manually(): void
+    {
+        $user = User::factory()->student()->create(['timezone' => 'Asia/Riyadh', 'timezone_auto' => false]);
+        $token = $user->createToken('t')->plainTextToken;
+
+        $response = $this->as($token)->putJson('/api/me/timezone/sync', ['timezone' => 'Asia/Tokyo']);
+
+        // لا يفشل الطلب — لكن لا يُطبَّق أي تحديث فوق اختيار المستخدم اليدوي
+        $response->assertStatus(200);
+        $this->assertDatabaseHas('users', ['id' => $user->id, 'timezone' => 'Asia/Riyadh']);
+    }
+
+    public function test_manual_profile_update_with_timezone_disables_future_auto_sync(): void
+    {
+        $user = User::factory()->student()->create(['timezone' => 'UTC', 'timezone_auto' => true]);
+        $token = $user->createToken('t')->plainTextToken;
+
+        $this->as($token)->putJson('/api/me/profile', [
+            'name' => $user->name,
+            'timezone' => 'Europe/London',
+            'timezone_auto' => false,
+        ])->assertStatus(200);
+
+        $this->assertDatabaseHas('users', ['id' => $user->id, 'timezone' => 'Europe/London', 'timezone_auto' => false]);
+
+        // مزامنة تلقائية لاحقة لا يجب أن تطغى على هذا الاختيار اليدوي
+        $this->as($token)->putJson('/api/me/timezone/sync', ['timezone' => 'Asia/Tokyo'])->assertStatus(200);
+        $this->assertDatabaseHas('users', ['id' => $user->id, 'timezone' => 'Europe/London']);
+    }
+
+    public function test_re_enabling_auto_detect_allows_future_sync_to_update_again(): void
+    {
+        $user = User::factory()->student()->create(['timezone' => 'Europe/London', 'timezone_auto' => false]);
+        $token = $user->createToken('t')->plainTextToken;
+
+        $this->as($token)->putJson('/api/me/profile', [
+            'name' => $user->name,
+            'timezone_auto' => true,
+        ])->assertStatus(200);
+
+        $this->assertDatabaseHas('users', ['id' => $user->id, 'timezone_auto' => true]);
+
+        $this->as($token)->putJson('/api/me/timezone/sync', ['timezone' => 'Asia/Tokyo'])->assertStatus(200);
+        $this->assertDatabaseHas('users', ['id' => $user->id, 'timezone' => 'Asia/Tokyo']);
+    }
+
+    public function test_timezone_sync_rejects_an_invalid_timezone_identifier(): void
+    {
+        $user = User::factory()->student()->create();
+        $token = $user->createToken('t')->plainTextToken;
+
+        $response = $this->as($token)->putJson('/api/me/timezone/sync', ['timezone' => 'Not/A_Real_Zone']);
+
+        $response->assertStatus(422)->assertJsonValidationErrors(['timezone']);
+    }
+
     public function test_profile_update_rejects_a_phone_already_used_by_another_user(): void
     {
         User::factory()->student()->create(['phone' => '0511111111']);

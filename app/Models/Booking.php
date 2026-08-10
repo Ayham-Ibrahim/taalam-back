@@ -32,6 +32,7 @@ class Booking extends Model
         'extension_days',
         'requested_date',
         'requested_start_time',
+        'requested_timezone',
         'policy_accepted_at',
         'is_manual',
         'created_by_admin_id',

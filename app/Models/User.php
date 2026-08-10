@@ -31,6 +31,7 @@ class User extends Authenticatable
         'gender',
         'locale',
         'timezone',
+        'timezone_auto',
         'is_active',
     ];
 
@@ -56,6 +57,7 @@ class User extends Authenticatable
             'last_login_at' => 'datetime',
             'password' => 'hashed',
             'is_active' => 'boolean',
+            'timezone_auto' => 'boolean',
         ];
     }
 

@@ -16,6 +16,7 @@ class Course extends Model
 
     protected $fillable = [
         'teacher_id',
+        'schedule_timezone',
         'title',
         'description',
         'course_field_id',

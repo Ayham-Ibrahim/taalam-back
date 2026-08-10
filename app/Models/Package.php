@@ -21,6 +21,7 @@ class Package extends Model
 
     protected $fillable = [
         'teacher_id',
+        'schedule_timezone',
         'title',
         'description',
         'subject_id',

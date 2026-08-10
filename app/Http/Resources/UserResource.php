@@ -20,6 +20,8 @@ class UserResource extends JsonResource
             'phone' => $this->phone,
             'role' => $this->role,
             'avatar_path' => $this->avatar_path,
+            'timezone' => $this->timezone,
+            'timezone_auto' => $this->timezone_auto,
             'teacher' => $this->whenLoaded('teacher', fn () => $this->teacher ? new TeacherResource($this->teacher) : null),
             'student' => $this->whenLoaded('student', fn () => $this->student ? new StudentResource($this->student) : null),
         ];

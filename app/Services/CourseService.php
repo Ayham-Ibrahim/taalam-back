@@ -32,6 +32,9 @@ class CourseService
         $course = Course::create(array_merge($data, [
             'teacher_id' => $teacher->id,
             'status' => 'draft',
+            // منطقة المركز وقت إنشاء الجدول — لتحويل أوقات course_schedules الخام
+            // إلى UTC بدقة لاحقاً (EnrollmentService::courseSessionsFor)
+            'schedule_timezone' => $teacher->loadMissing('user')->user->timezone ?? 'UTC',
         ]));
 
         if ($curriculumIds) {

@@ -57,6 +57,9 @@ class BookingService
             'status' => 'pending_teacher_confirmation',
             'requested_date' => $requestedDate->toDateString(),
             'requested_start_time' => $startTime,
+            // تُحفَظ الآن كي نستطيع لاحقاً (عند موافقة المعلم) تحويل هذا الوقت الخام
+            // بدقة إلى UTC حسب منطقة الطالب الفعلية وقت الطلب، لا افتراض UTC ساذج.
+            'requested_timezone' => $this->studentTimezone($student),
             'hold_expires_at' => null,
         ]);
     }
@@ -78,7 +81,15 @@ class BookingService
         $this->assertPackageBookable($booking->package);
 
         return DB::transaction(function () use ($booking, $teacher) {
-            $anchor = Carbon::parse($booking->requested_date)->setTimeFromTimeString((string) $booking->requested_start_time);
+            // requested_date/requested_start_time أُدخِلا كوقت حائط محلي لدى الطالب —
+            // parse($date, $tz) يفسّرهما كذلك، وsetTimezone() يحوّلهما فعلياً لتوقيت
+            // النظام (UTC) قبل التخزين، لا مجرد وسم رقمين خام بمنطقة مختلفة.
+            // ملاحظة: requested_date مُحوَّل مسبقاً لكائن Carbon (date cast) — يجب تمرير
+            // نص خام (toDateString) لا الكائن نفسه، وإلا Carbon::parse يتجاهل $tz تماماً
+            // لأن الكائن يحمل منطقته الزمنية الخاصة أصلاً (UTC من الـ cast).
+            $anchor = Carbon::parse($booking->requested_date->toDateString(), $booking->requested_timezone ?? 'UTC')
+                ->setTimeFromTimeString((string) $booking->requested_start_time)
+                ->setTimezone(config('app.timezone'));
             $sessions = $this->sessionsFromAnchor($booking->package, $booking, $anchor);
 
             foreach ($sessions as $session) {
@@ -193,9 +204,11 @@ class BookingService
             ]);
 
             if ($package->isIndividual()) {
-                $requestedDate = Carbon::parse($date);
+                // نفس منطقة الطالب المستهدَف — الأدمن يحجز نيابةً عنه فالوقت المقصود هو وقته المحلي هو، لا وقت الأدمن
+                $requestedDate = Carbon::parse($date, $this->studentTimezone($student));
                 $this->assertDateMatchesPackageDays($package, $requestedDate);
-                $sessions = $this->sessionsFromAnchor($package, $booking, $requestedDate->setTimeFromTimeString($startTime));
+                $anchor = $requestedDate->setTimeFromTimeString($startTime)->setTimezone(config('app.timezone'));
+                $sessions = $this->sessionsFromAnchor($package, $booking, $anchor);
             } else {
                 $sessions = $this->sessionsFor($package, $booking);
             }
@@ -249,6 +262,11 @@ class BookingService
                 'package' => ['هذه الباقة غير متاحة للحجز حالياً'],
             ]);
         }
+    }
+
+    private function studentTimezone(Student $student): string
+    {
+        return $student->loadMissing('user')->user->timezone ?? 'UTC';
     }
 
     /**
@@ -349,7 +367,12 @@ class BookingService
         $durationMinutes = $this->defaultSessionDurationMinutes();
 
         return $schedules->values()->map(function ($schedule, int $index) use ($ownerBooking, $package, $durationMinutes) {
-            $scheduledAt = Carbon::parse($schedule->date)->setTimeFromTimeString((string) $schedule->start_time);
+            // start_time أُدخِل بمنطقة المعلم وقت إنشاء الباقة (Package::schedule_timezone) — لا UTC
+            // ساذجة. schedule->date كائن Carbon مُحوَّل مسبقاً (date cast) لا نص خام — toDateString()
+            // ضروري هنا، وإلا Carbon::parse يتجاهل $tz تماماً (نفس ملاحظة approveIndividualRequest).
+            $scheduledAt = Carbon::parse($schedule->date->toDateString(), $package->schedule_timezone ?? 'UTC')
+                ->setTimeFromTimeString((string) $schedule->start_time)
+                ->setTimezone(config('app.timezone'));
 
             return $ownerBooking->sessions()->create([
                 'teacher_id' => $package->teacher_id,

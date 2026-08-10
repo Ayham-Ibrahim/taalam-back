@@ -223,7 +223,10 @@ class EnrollmentService
         while ($cursor->lessThanOrEqualTo($course->end_date)) {
             foreach ($schedules as $schedule) {
                 if ((int) $cursor->dayOfWeek === (int) $schedule->day_of_week) {
-                    $dates[] = $cursor->copy()->setTimeFromTimeString($schedule->start_time);
+                    // start_time أُدخِل بمنطقة المركز وقت إنشاء الدورة (Course::schedule_timezone) — لا UTC ساذجة
+                    $dates[] = Carbon::parse($cursor->toDateString(), $course->schedule_timezone ?? 'UTC')
+                        ->setTimeFromTimeString($schedule->start_time)
+                        ->setTimezone(config('app.timezone'));
                 }
             }
 

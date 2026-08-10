@@ -36,6 +36,9 @@ class PackageService
         $package = Package::create(array_merge($data, [
             'teacher_id' => $teacher->id,
             'status' => 'draft',
+            // منطقة المعلم وقت إنشاء الجدول — تُستخدَم لاحقاً لتحويل أوقات package_schedules
+            // الخام (start_time) إلى UTC بدقة بدل افتراضها UTC ساذجاً (BookingService::sessionsFor)
+            'schedule_timezone' => $teacher->loadMissing('user')->user->timezone ?? 'UTC',
         ]));
 
         if ($curriculumIds) {
