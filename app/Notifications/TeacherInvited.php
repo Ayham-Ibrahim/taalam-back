@@ -23,11 +23,11 @@ class TeacherInvited extends Notification implements ShouldQueue
     public function toMail($notifiable): MailMessage
     {
         return (new MailMessage)
-            ->subject('دعوة للانضمام كمعلم في منصة تعلّم')
-            ->greeting("مرحباً {$notifiable->name}")
-            ->line('تمت دعوتك للانضمام كمعلم في منصة تعلّم.')
-            ->action('تفعيل الحساب', url('/invitations/'.$this->invitation->token))
-            ->line('صلاحية رابط الدعوة محدودة، يرجى تفعيل الحساب في أقرب وقت.');
+            ->subject("You're Invited to Join Taalam as a Teacher")
+            ->greeting("Hello {$notifiable->name},")
+            ->line("You've been invited to join Taalam as a teacher.")
+            ->action('Activate Your Account', url('/invitations/'.$this->invitation->token))
+            ->line('This invitation link expires soon — please activate your account as soon as possible.');
     }
 
     public function toArray($notifiable): array

@@ -56,6 +56,65 @@ class CourseEnrollmentFlowTest extends TestCase
         ]);
     }
 
+    /**
+     * الطالب قد يُغلق نافذة Stripe الأولى بلا إكمال الدفع — يجب أن يبقى قادراً
+     * على إعادة محاولة الدفع لاحقاً بدل أن يُحرَم منها (كان EnrollmentController
+     * يفتقر لمسار مكافئ لـ BookingController::checkout قبل هذا الإصلاح).
+     */
+    public function test_student_can_retry_checkout_for_a_pending_payment_enrollment(): void
+    {
+        [$center] = $this->createVerifiedCenter();
+        $start = Carbon::now()->next(1)->startOfDay();
+        $course = $this->createActiveCourse($center, teacherPrice: 100, margin: 50, start: $start, end: $start->copy()->addDays(6));
+        $course->schedules()->create(['day_of_week' => 1, 'start_time' => '09:00', 'end_time' => '10:00']);
+
+        $student = $this->createStudent();
+        $studentToken = User::find($student->user_id)->createToken('t')->plainTextToken;
+
+        $enrollment = app(EnrollmentService::class)->initiateEnrollment($student, $course);
+
+        $checkout = $this->as($studentToken)->postJson("/api/enrollments/{$enrollment->id}/checkout");
+
+        $checkout->assertStatus(200);
+        $this->assertNotEmpty($checkout->json('data.checkout_url'));
+    }
+
+    public function test_checkout_rejects_an_enrollment_that_is_not_pending_payment(): void
+    {
+        [$center] = $this->createVerifiedCenter();
+        $start = Carbon::now()->next(1)->startOfDay();
+        $course = $this->createActiveCourse($center, teacherPrice: 100, margin: 50, start: $start, end: $start->copy()->addDays(6));
+        $course->schedules()->create(['day_of_week' => 1, 'start_time' => '09:00', 'end_time' => '10:00']);
+
+        $student = $this->createStudent();
+        $studentToken = User::find($student->user_id)->createToken('t')->plainTextToken;
+        $admin = User::factory()->admin()->create();
+
+        $enrollment = app(EnrollmentService::class)->createManualEnrollment($student, $course, $admin, 'تسوية');
+
+        $checkout = $this->as($studentToken)->postJson("/api/enrollments/{$enrollment->id}/checkout");
+
+        $checkout->assertStatus(422);
+    }
+
+    public function test_other_students_cannot_checkout_someone_elses_enrollment(): void
+    {
+        [$center] = $this->createVerifiedCenter();
+        $start = Carbon::now()->next(1)->startOfDay();
+        $course = $this->createActiveCourse($center, teacherPrice: 100, margin: 50, start: $start, end: $start->copy()->addDays(6));
+        $course->schedules()->create(['day_of_week' => 1, 'start_time' => '09:00', 'end_time' => '10:00']);
+
+        $owner = $this->createStudent();
+        $intruder = $this->createStudent();
+        $intruderToken = User::find($intruder->user_id)->createToken('t')->plainTextToken;
+
+        $enrollment = app(EnrollmentService::class)->initiateEnrollment($owner, $course);
+
+        $checkout = $this->as($intruderToken)->postJson("/api/enrollments/{$enrollment->id}/checkout");
+
+        $checkout->assertStatus(403);
+    }
+
     public function test_student_cannot_enroll_twice_in_same_course(): void
     {
         [$center] = $this->createVerifiedCenter();

@@ -68,6 +68,24 @@ class EnrollmentController extends Controller
         ], 'تم إنشاء التسجيل، أكمل الدفع لتأكيده', 201);
     }
 
+    /**
+     * إعادة محاولة الدفع لتسجيل ما زال بانتظار الدفع — الطالب قد يكون أغلق نافذة
+     * Stripe الأولى بلا إكمال الدفع؛ بلا هذا المسار لا وسيلة لإعادة المحاولة إطلاقاً
+     * (على عكس الحجوزات التي تملك BookingController::checkout المكافئ).
+     */
+    public function checkout(Request $request, Enrollment $enrollment)
+    {
+        $this->authorize('view', $enrollment);
+
+        if ($enrollment->status !== 'pending_payment') {
+            return $this->error('هذا التسجيل ليس بانتظار الدفع', 422);
+        }
+
+        $checkoutUrl = $this->paymentService->createCheckoutSessionForEnrollment($enrollment);
+
+        return $this->success(['checkout_url' => $checkoutUrl]);
+    }
+
     public function createManual(CreateManualEnrollmentRequest $request, Course $course)
     {
         $student = Student::findOrFail($request->validated('student_id'));

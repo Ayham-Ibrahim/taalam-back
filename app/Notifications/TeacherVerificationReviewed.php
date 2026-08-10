@@ -24,14 +24,14 @@ class TeacherVerificationReviewed extends Notification implements ShouldQueue
 
     public function toMail($notifiable): MailMessage
     {
-        $mail = (new MailMessage)->greeting("مرحباً {$notifiable->name}");
+        $mail = (new MailMessage)->greeting("Hello {$notifiable->name},");
 
         return $this->approved
-            ? $mail->subject('تمت الموافقة على حسابك')
-                ->line('تهانينا! تمت الموافقة على توثيق حسابك ويمكنك الآن إنشاء باقاتك.')
-            : $mail->subject('تم رفض طلب التوثيق')
-                ->line('نأسف، تم رفض طلب توثيق حسابك.')
-                ->line('السبب: '.$this->reason);
+            ? $mail->subject('Your Account Has Been Verified')
+                ->line('Congratulations! Your account verification has been approved — you can now create your packages.')
+            : $mail->subject('Your Verification Request Was Declined')
+                ->line("We're sorry, your account verification request was declined.")
+                ->line('Reason: '.$this->reason);
     }
 
     public function toArray($notifiable): array

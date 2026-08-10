@@ -24,6 +24,7 @@ use App\Http\Controllers\Student\StudentImportController;
 use App\Http\Controllers\TaxonomyController;
 use App\Http\Controllers\Teacher\BadgeController;
 use App\Http\Controllers\Teacher\TeacherController;
+use App\Http\Controllers\Teacher\TeacherImportController;
 use App\Http\Controllers\Teacher\VerificationDocumentController;
 use App\Http\Controllers\TeacherSearchController;
 use Illuminate\Support\Facades\Route;
@@ -80,6 +81,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('teachers', [TeacherController::class, 'index']);
     Route::post('teachers', [TeacherController::class, 'store']);
     Route::post('teachers/create-account', [TeacherController::class, 'createAccount']);
+    Route::post('teachers/import', [TeacherImportController::class, 'store']);
     Route::get('teachers/{teacher}/admin-detail', [TeacherController::class, 'adminDetail']);
     Route::put('teachers/{teacher}', [TeacherController::class, 'update']);
     Route::post('teachers/{teacher}/submit-for-verification', [TeacherController::class, 'submitForVerification']);
@@ -134,6 +136,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('enrollments/{enrollment}', [EnrollmentController::class, 'show']);
     Route::post('courses/{course}/enrollments', [EnrollmentController::class, 'store']);
     Route::post('courses/{course}/enrollments/manual', [EnrollmentController::class, 'createManual']);
+    Route::post('enrollments/{enrollment}/checkout', [EnrollmentController::class, 'checkout']);
 
     Route::get('reschedule-requests', [RescheduleRequestController::class, 'index']);
     Route::get('reschedule-requests/{rescheduleRequest}', [RescheduleRequestController::class, 'show']);

@@ -29,15 +29,15 @@ class AccountCreatedByAdmin extends Notification implements ShouldQueue
 
     public function toMail($notifiable): MailMessage
     {
-        $roleLabel = $this->role === 'teacher' ? 'معلم' : 'طالب';
+        $roleLabel = $this->role === 'teacher' ? 'teacher' : 'student';
 
         return (new MailMessage)
-            ->subject('تم إنشاء حسابك على منصة تعلّم')
-            ->greeting("مرحباً {$notifiable->name}")
-            ->line("قام فريق تعلّم بإنشاء حساب {$roleLabel} لك على المنصة. بيانات الدخول:")
-            ->line("البريد الإلكتروني: {$notifiable->email}")
-            ->line("كلمة المرور: {$this->plainPassword}")
-            ->action('الدخول إلى المنصة', url('/login'))
-            ->line('يُنصح بتغيير كلمة المرور بعد أول تسجيل دخول.');
+            ->subject('Your Taalam Account Has Been Created')
+            ->greeting("Hello {$notifiable->name},")
+            ->line("Our team has created a {$roleLabel} account for you on Taalam. Here are your login details:")
+            ->line("**Email:** {$notifiable->email}")
+            ->line("**Password:** {$this->plainPassword}")
+            ->action('Log In to Taalam', url('/login'))
+            ->line('For your security, we recommend changing your password after your first login.');
     }
 }

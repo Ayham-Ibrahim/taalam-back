@@ -26,11 +26,11 @@ class SessionReminder extends Notification implements ShouldQueue
     public function toMail($notifiable): MailMessage
     {
         return (new MailMessage)
-            ->subject('تذكير: جلستك التعليمية تبدأ قريباً')
-            ->greeting("مرحباً {$notifiable->name}")
-            ->line("جلستك ستبدأ الساعة {$this->session->scheduled_at->format('H:i')} بتاريخ {$this->session->scheduled_at->format('Y-m-d')}.")
-            ->action('انضمام إلى الجلسة', $this->joinUrl)
-            ->line('يرجى الانضمام قبل الموعد بدقائق للتأكد من جاهزية الاتصال والصوت.');
+            ->subject('Reminder: Your Session Starts Soon')
+            ->greeting("Hello {$notifiable->name},")
+            ->line("Your session is scheduled to start at {$this->session->scheduled_at->format('H:i')} on {$this->session->scheduled_at->format('Y-m-d')}.")
+            ->action('Join Session', $this->joinUrl)
+            ->line('Please join a few minutes early to make sure your connection and audio are ready.');
     }
 
     public function toArray($notifiable): array

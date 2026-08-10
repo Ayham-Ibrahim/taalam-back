@@ -220,6 +220,13 @@ class SettingsSeeder extends Seeder
                 'group' => 'accounts',
                 'label_ar' => 'أقصى عدد صفوف في استيراد الطلاب',
             ],
+            [
+                'key' => 'teacher_import_max_rows',
+                'value' => '500',
+                'type' => 'integer',
+                'group' => 'accounts',
+                'label_ar' => 'أقصى عدد صفوف في استيراد المعلمين',
+            ],
 
             // ═══════ خوارزمية الترتيب ═══════
             [

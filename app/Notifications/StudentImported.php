@@ -23,11 +23,11 @@ class StudentImported extends Notification implements ShouldQueue
     public function toMail($notifiable): MailMessage
     {
         return (new MailMessage)
-            ->subject('تم إنشاء حسابك في منصة تعلّم')
-            ->greeting("مرحباً {$notifiable->name}")
-            ->line('قامت إدارة المنصة بإنشاء حساب لك في منصة تعلّم.')
-            ->action('تفعيل الحساب', url('/invitations/'.$this->invitation->token))
-            ->line('صلاحية رابط التفعيل محدودة، يرجى تفعيل الحساب في أقرب وقت.');
+            ->subject('Your Taalam Account Is Ready')
+            ->greeting("Hello {$notifiable->name},")
+            ->line('Our team has created a student account for you on Taalam.')
+            ->action('Activate Your Account', url('/invitations/'.$this->invitation->token))
+            ->line('This activation link expires soon — please activate your account as soon as possible.');
     }
 
     public function toArray($notifiable): array
