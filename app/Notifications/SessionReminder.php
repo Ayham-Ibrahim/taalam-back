@@ -25,10 +25,16 @@ class SessionReminder extends Notification implements ShouldQueue
 
     public function toMail($notifiable): MailMessage
     {
+        // scheduled_at مخزّنة بتوقيت الخادم (UTC) دائماً — يجب تحويلها لتوقيت
+        // المستلم نفسه (مدرس أو طالب، كل بمنطقته) قبل العرض، وإلا يظهر وقت
+        // مختلف تماماً عمّا اتفق عليه الطرفان فعلياً عند الحجز (نفس المشكلة
+        // التي عولجت سابقاً في الحجز والجدولة — هنا فقط لم تُطبَّق في البريد).
+        $localTime = $this->session->scheduled_at->clone()->setTimezone($notifiable->timezone ?? config('app.timezone'));
+
         return (new MailMessage)
             ->subject('Reminder: Your Session Starts Soon')
             ->greeting("Hello {$notifiable->name},")
-            ->line("Your session is scheduled to start at {$this->session->scheduled_at->format('H:i')} on {$this->session->scheduled_at->format('Y-m-d')}.")
+            ->line("Your session is scheduled to start at {$localTime->format('H:i')} on {$localTime->format('Y-m-d')} ({$localTime->format('e')} time).")
             ->action('Join Session', $this->joinUrl)
             ->line('Please join a few minutes early to make sure your connection and audio are ready.');
     }
