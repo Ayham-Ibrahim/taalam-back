@@ -12,10 +12,13 @@ use App\Models\Subject;
 use App\Models\Teacher;
 use App\Models\User;
 use App\Notifications\SessionReminder;
+use App\Services\NotificationService;
 use App\Services\SettingsService;
 use Database\Seeders\SettingsSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification;
+use RuntimeException;
 use Tests\TestCase;
 
 class SendSessionRemindersJobTest extends TestCase
@@ -87,6 +90,39 @@ class SendSessionRemindersJobTest extends TestCase
 
         Notification::assertSentToTimes($teacherUser, SessionReminder::class, 1);
         Notification::assertSentToTimes($studentUser, SessionReminder::class, 1);
+    }
+
+    /**
+     * دليل الإصلاح: كان فشل إرسال التذكير لطرف واحد (المعلم مثلاً) — سواء برمي
+     * استثناء فعلي أو بضياعه بصمت داخل قفزة طابور غير مراقَبة — يمنع وصوله
+     * للطرف الآخر (الطالب) إطلاقاً دون أي أثر أو محاولة لاحقة. الآن: الفشل
+     * يُسجَّل صراحةً في اللوغ، ومحاولة الإرسال للطرف الآخر تستمر رغم ذلك.
+     */
+    public function test_a_failure_sending_to_one_recipient_does_not_block_the_other_and_is_logged(): void
+    {
+        $this->seed(SettingsSeeder::class);
+
+        [$teacher, $teacherUser] = $this->createVerifiedTeacher();
+        [, $studentUser, $session] = $this->createConfirmedUpcomingSession($teacher, minutesUntilStart: 90);
+
+        $this->mock(NotificationService::class, function ($mock) use ($teacherUser, $studentUser) {
+            $mock->shouldReceive('sendNow')
+                ->once()
+                ->withArgs(fn ($notifiable) => $notifiable->is($teacherUser))
+                ->andThrow(new RuntimeException('SMTP auth failed'));
+
+            $mock->shouldReceive('sendNow')
+                ->once()
+                ->withArgs(fn ($notifiable) => $notifiable->is($studentUser));
+        });
+
+        Log::shouldReceive('error')->once()->withArgs(
+            fn ($message, array $context) => $context['notifiable_id'] === $teacherUser->id
+        );
+
+        app(SendSessionRemindersJob::class)->handle(app(SettingsService::class), app(NotificationService::class));
+
+        $this->assertNotNull($session->fresh()->reminder_sent_at);
     }
 
     /**
