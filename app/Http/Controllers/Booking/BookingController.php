@@ -10,14 +10,17 @@ use App\Models\Booking;
 use App\Models\Package;
 use App\Models\Student;
 use App\Services\BookingService;
+use App\Services\InvoicePdfService;
 use App\Services\PaymentService;
 use Illuminate\Http\Request;
+use RuntimeException;
 
 class BookingController extends Controller
 {
     public function __construct(
         private readonly BookingService $bookingService,
         private readonly PaymentService $paymentService,
+        private readonly InvoicePdfService $invoicePdfService,
     ) {}
 
     public function index(Request $request)
@@ -126,6 +129,20 @@ class BookingController extends Controller
             'booking' => $booking,
             'checkout_url' => $checkoutUrl,
         ], 'تم إنشاء الحجز، أكمل الدفع لتأكيده', 201);
+    }
+
+    /** تنزيل فاتورة الحجز كملف PDF — لا فاتورة قبل إتمام الدفع. */
+    public function downloadInvoice(Request $request, Booking $booking)
+    {
+        $this->authorize('view', $booking);
+
+        try {
+            $pdf = $this->invoicePdfService->forBooking($booking);
+        } catch (RuntimeException $e) {
+            return $this->error($e->getMessage(), 422);
+        }
+
+        return $pdf->download("invoice-{$booking->reference}.pdf");
     }
 
     public function createManual(CreateManualBookingRequest $request, Package $package)

@@ -8,14 +8,17 @@ use App\Models\Course;
 use App\Models\Enrollment;
 use App\Models\Student;
 use App\Services\EnrollmentService;
+use App\Services\InvoicePdfService;
 use App\Services\PaymentService;
 use Illuminate\Http\Request;
+use RuntimeException;
 
 class EnrollmentController extends Controller
 {
     public function __construct(
         private readonly EnrollmentService $enrollmentService,
         private readonly PaymentService $paymentService,
+        private readonly InvoicePdfService $invoicePdfService,
     ) {}
 
     public function index(Request $request)
@@ -84,6 +87,20 @@ class EnrollmentController extends Controller
         $checkoutUrl = $this->paymentService->createCheckoutSessionForEnrollment($enrollment);
 
         return $this->success(['checkout_url' => $checkoutUrl]);
+    }
+
+    /** تنزيل فاتورة التسجيل كملف PDF — لا فاتورة قبل إتمام الدفع. */
+    public function downloadInvoice(Request $request, Enrollment $enrollment)
+    {
+        $this->authorize('view', $enrollment);
+
+        try {
+            $pdf = $this->invoicePdfService->forEnrollment($enrollment);
+        } catch (RuntimeException $e) {
+            return $this->error($e->getMessage(), 422);
+        }
+
+        return $pdf->download("invoice-{$enrollment->reference}.pdf");
     }
 
     public function createManual(CreateManualEnrollmentRequest $request, Course $course)

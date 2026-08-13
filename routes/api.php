@@ -133,12 +133,14 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('bookings/{booking}/approve', [BookingController::class, 'approveRequest']);
     Route::post('bookings/{booking}/reject', [BookingController::class, 'rejectRequest']);
     Route::post('bookings/{booking}/checkout', [BookingController::class, 'checkout']);
+    Route::get('bookings/{booking}/invoice', [BookingController::class, 'downloadInvoice']);
 
     Route::get('enrollments', [EnrollmentController::class, 'index']);
     Route::get('enrollments/{enrollment}', [EnrollmentController::class, 'show']);
     Route::post('courses/{course}/enrollments', [EnrollmentController::class, 'store']);
     Route::post('courses/{course}/enrollments/manual', [EnrollmentController::class, 'createManual']);
     Route::post('enrollments/{enrollment}/checkout', [EnrollmentController::class, 'checkout']);
+    Route::get('enrollments/{enrollment}/invoice', [EnrollmentController::class, 'downloadInvoice']);
 
     Route::get('reschedule-requests', [RescheduleRequestController::class, 'index']);
     Route::get('reschedule-requests/{rescheduleRequest}', [RescheduleRequestController::class, 'show']);
