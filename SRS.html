@@ -1,0 +1,823 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>TAALAM — وثيقة متطلبات النظام (SRS)</title>
+<style>
+  :root {
+    --primary: #3B5998;
+    --primary-dark: #2E477A;
+    --accent: #C2185B;
+    --success: #2E9E6B;
+    --warning: #F5A623;
+    --danger: #D64545;
+    --ink: #1A1A2E;
+    --ink-soft: #6B7280;
+    --line: #E5E7EB;
+    --bg: #F7F8FA;
+    --surface: #FFFFFF;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', Tahoma, 'Cairo', Arial, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    margin: 0;
+    line-height: 1.7;
+  }
+  .wrap { display: flex; max-width: 1400px; margin: 0 auto; }
+  nav.toc {
+    width: 270px;
+    flex-shrink: 0;
+    position: sticky;
+    top: 0;
+    align-self: flex-start;
+    height: 100vh;
+    overflow-y: auto;
+    background: var(--surface);
+    border-left: 1px solid var(--line);
+    padding: 24px 16px;
+  }
+  nav.toc h2 { font-size: 13px; color: var(--ink-soft); text-transform: uppercase; letter-spacing: .05em; margin: 0 0 12px; }
+  nav.toc a {
+    display: block;
+    padding: 6px 10px;
+    border-radius: 8px;
+    color: var(--ink);
+    text-decoration: none;
+    font-size: 13.5px;
+    margin-bottom: 2px;
+  }
+  nav.toc a:hover { background: var(--bg); color: var(--primary); }
+  nav.toc a.sub { padding-right: 22px; font-size: 12.5px; color: var(--ink-soft); }
+  main { flex: 1; padding: 40px 56px; max-width: 980px; }
+  header.doc-header {
+    background: linear-gradient(120deg, var(--primary), var(--primary-dark));
+    color: #fff;
+    border-radius: 16px;
+    padding: 36px 40px;
+    margin-bottom: 36px;
+  }
+  header.doc-header h1 { margin: 0 0 8px; font-size: 26px; }
+  header.doc-header p { margin: 4px 0; opacity: .92; font-size: 14px; }
+  .meta-table { width: 100%; border-collapse: collapse; margin-top: 18px; font-size: 13px; }
+  .meta-table td { padding: 6px 0; border-top: 1px solid rgba(255,255,255,.2); }
+  .meta-table td:first-child { color: rgba(255,255,255,.75); width: 160px; }
+  section { margin-bottom: 44px; }
+  h2 {
+    font-size: 20px;
+    color: var(--primary-dark);
+    border-bottom: 2px solid var(--primary);
+    padding-bottom: 8px;
+    margin-top: 0;
+  }
+  h3 { font-size: 16.5px; color: var(--ink); margin-top: 28px; }
+  h4 { font-size: 14.5px; color: var(--primary-dark); margin-top: 20px; margin-bottom: 8px; }
+  p { font-size: 14.5px; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 14px 0 22px;
+    font-size: 13.5px;
+    background: var(--surface);
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,.05);
+  }
+  th, td { padding: 9px 12px; text-align: right; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: #EEF1F8; color: var(--primary-dark); font-weight: 700; }
+  tr:last-child td { border-bottom: none; }
+  code {
+    background: #EEF1F8;
+    color: var(--primary-dark);
+    padding: 1px 6px;
+    border-radius: 5px;
+    font-size: 12.5px;
+    direction: ltr;
+    display: inline-block;
+  }
+  .badge {
+    display: inline-block;
+    padding: 2px 9px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: 700;
+  }
+  .badge.get { background: #E3F5EC; color: var(--success); }
+  .badge.post { background: #FDEEF3; color: var(--accent); }
+  .badge.put { background: #FFF3E0; color: var(--warning); }
+  .badge.delete { background: #FBEAEA; color: var(--danger); }
+  .role-admin { background: #EDE7F6; color: #5E35B1; }
+  .role-teacher { background: #E8ECF5; color: var(--primary-dark); }
+  .role-student { background: #E3F5EC; color: var(--success); }
+  .role-guest { background: #F1F1F1; color: var(--ink-soft); }
+  .role-pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 700; margin: 2px; }
+  .callout {
+    border-right: 4px solid var(--primary);
+    background: #EEF1F8;
+    padding: 14px 18px;
+    border-radius: 0 10px 10px 0;
+    font-size: 13.5px;
+    margin: 16px 0;
+  }
+  .callout.warn { border-color: var(--warning); background: #FFF8EA; }
+  .callout.critical { border-color: var(--danger); background: #FCEEEE; }
+  .callout strong { color: var(--primary-dark); }
+  .callout.warn strong { color: #92650A; }
+  .callout.critical strong { color: var(--danger); }
+  ul, ol { font-size: 14.5px; padding-inline-start: 22px; }
+  li { margin-bottom: 4px; }
+  .fr-id { font-weight: 700; color: var(--primary-dark); }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px 18px;
+  }
+  footer { text-align: center; color: var(--ink-soft); font-size: 12.5px; padding: 30px 0 60px; }
+  @media print {
+    nav.toc { display: none; }
+    .wrap { display: block; }
+    main { max-width: 100%; padding: 0; }
+  }
+  @media (max-width: 900px) {
+    .wrap { flex-direction: column; }
+    nav.toc { position: static; width: 100%; height: auto; border-left: none; border-bottom: 1px solid var(--line); }
+    main { padding: 24px; }
+    .two-col { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<nav class="toc">
+  <h2>المحتويات</h2>
+  <a href="#intro">1. مقدمة</a>
+  <a href="#overview">2. نظرة عامة على النظام</a>
+  <a href="#roles">3. أدوار المستخدمين والصلاحيات</a>
+  <a href="#modules">4. الوحدات الوظيفية</a>
+  <a class="sub" href="#m1">4.1 الحسابات والمصادقة</a>
+  <a class="sub" href="#m2">4.2 المعلمون والتوثيق</a>
+  <a class="sub" href="#m3">4.3 الباقات والدورات</a>
+  <a class="sub" href="#m4">4.4 الحجز والتسجيل</a>
+  <a class="sub" href="#m5">4.5 الدفع والفواتير</a>
+  <a class="sub" href="#m6">4.6 الجلسات و BigBlueButton</a>
+  <a class="sub" href="#m7">4.7 الحضور والغياب</a>
+  <a class="sub" href="#m8">4.8 تغيير المواعيد</a>
+  <a class="sub" href="#m9">4.9 التقييمات</a>
+  <a class="sub" href="#m10">4.10 الشكاوى</a>
+  <a class="sub" href="#m11">4.11 الإشعارات</a>
+  <a class="sub" href="#m12">4.12 المفضلة والبحث</a>
+  <a class="sub" href="#m13">4.13 لوحة تحكم الأدمن</a>
+  <a class="sub" href="#m14">4.14 المنطقة الزمنية</a>
+  <a href="#rules">5. الإعدادات وقواعد العمل القابلة للضبط</a>
+  <a href="#nonfunc">6. المتطلبات غير الوظيفية</a>
+  <a href="#critical">7. سيناريوهات اختبار حرجة (يجب تغطيتها)</a>
+  <a href="#matrix">8. مصفوفة حالات الكيانات</a>
+  <a href="#api">9. ملحق: قائمة كل نقاط الـ API</a>
+  <a href="#glossary">10. ملحق: قاموس المصطلحات</a>
+</nav>
+
+<main>
+
+<header class="doc-header">
+  <h1>TAALAM (تعلّم) — وثيقة متطلبات النظام (SRS)</h1>
+  <p>منصة سوق تعليمي إلكتروني تربط الطلاب بالمعلمين ومراكز التدريب — حجز جلسات فردية/جماعية، تسجيل بدورات، دفع إلكتروني، جلسات فيديو مباشرة، وإدارة كاملة من لوحة أدمن.</p>
+  <table class="meta-table">
+    <tr><td>الإصدار</td><td>1.0</td></tr>
+    <tr><td>الجمهور المستهدف</td><td>فريق ضمان الجودة (QA) لإجراء اختبار شامل قبل الإطلاق</td></tr>
+    <tr><td>التقنيات</td><td>Backend: Laravel 12 (PHP) + MySQL/MariaDB &nbsp;|&nbsp; Frontend: React 18 + Vite + Tailwind (RTL)</td></tr>
+    <tr><td>اللغة الأساسية للواجهة</td><td>العربية (RTL) — دعم كامل لاتجاه الكتابة من اليمين لليسار</td></tr>
+  </table>
+</header>
+
+<section id="intro">
+  <h2>1. مقدمة</h2>
+  <h3>1.1 الغرض</h3>
+  <p>تصف هذه الوثيقة المتطلبات الوظيفية وغير الوظيفية الكاملة لمنصة TAALAM، بهدف تمكين فريق ضمان الجودة من تصميم وتنفيذ خطة اختبار شاملة تغطي كل الأدوار (طالب، معلم/مركز تدريب، أدمن) وكل دورات حياة الكيانات الأساسية (حساب، باقة، دورة، حجز، تسجيل، جلسة، دفعة، فاتورة).</p>
+  <h3>1.2 النطاق</h3>
+  <p>تغطي الوثيقة النظام الكامل: الواجهة الخلفية (API)، وواجهة المستخدم (لوحات تحكم الطالب/المعلم/الأدمن + الصفحات العامة)، والتكاملات الخارجية (Stripe للدفع، BigBlueButton لجلسات الفيديو، بريد إلكتروني عبر SMTP).</p>
+  <h3>1.3 لا يغطيه هذا المستند</h3>
+  <ul>
+    <li>تفاصيل التصميم الداخلي للكود (بنية الجداول، الخوارزميات) — هذا مستند متطلبات وظيفية للاختبار وليس مستند تصميم تقني.</li>
+    <li>خطط الاختبار التفصيلية (test cases) نفسها — الوثيقة توفر الأساس لبنائها.</li>
+  </ul>
+</section>
+
+<section id="overview">
+  <h2>2. نظرة عامة على النظام</h2>
+  <p>TAALAM سوق إلكتروني ثلاثي الأطراف:</p>
+  <ul>
+    <li><strong>الطالب</strong> يبحث عن معلمين/مراكز تدريب، يحجز باقات فردية أو جماعية، يسجّل بدورات، يحضر جلسات فيديو مباشرة، يقيّم المعلمين.</li>
+    <li><strong>المعلم / مركز التدريب</strong> ينشئ باقات ودورات (بعد توثيق حسابه)، يوافق على طلبات الحجز الفردي، يدير جدوله، يستلم مستحقاته المالية (payouts).</li>
+    <li><strong>الأدمن</strong> يوثّق المعلمين، يوافق على الباقات/الدورات قبل ظهورها للعامة، يدير الإعدادات العامة للمنصة، يراقب الشكاوى وطلبات تغيير المواعيد، يصدر المستحقات المالية، ويراجع سجل التدقيق (audit log).</li>
+  </ul>
+  <div class="callout">
+    <strong>ملاحظة معمارية مهمة للاختبار:</strong> كل عمليات الدفع تمر حصراً عبر Stripe Checkout، والتأكيد الفعلي للحجز/التسجيل لا يحدث إلا بعد وصول Webhook موقّع من Stripe — أي حجز في حالة <code>pending_payment</code> لم يكتمل دفعه فعلياً <u>لا يجب</u> أن يمنح وصولاً لرابط الجلسة أو فاتورة أو تذكير بريدي. هذا سلوك متعمّد ويجب التحقق منه صراحة في الاختبار (انظر القسم 7).
+  </div>
+</section>
+
+<section id="roles">
+  <h2>3. أدوار المستخدمين والصلاحيات</h2>
+  <table>
+    <tr><th>الدور</th><th>كيف يُنشأ الحساب</th><th>أهم الصلاحيات</th></tr>
+    <tr>
+      <td><span class="role-pill role-guest">زائر (بلا تسجيل)</span></td>
+      <td>—</td>
+      <td>تصفح الصفحة الرئيسية، البحث عن معلمين، عرض ملف معلم عام وباقاته النشطة وتقييماته — بلا حجز.</td>
+    </tr>
+    <tr>
+      <td><span class="role-pill role-student">طالب</span></td>
+      <td>تسجيل ذاتي (نموذج عام) أو إنشاء حساب من الأدمن (فردي أو استيراد Excel جماعي)</td>
+      <td>حجز/تسجيل، دفع، حضور جلسات، تقييم بعد الجلسة، طلب تغيير موعد، تقديم شكوى، إدارة المفضلة، تنزيل فواتيره.</td>
+    </tr>
+    <tr>
+      <td><span class="role-pill role-teacher">معلم / مركز تدريب</span></td>
+      <td>دعوة من الأدمن (رابط دعوة صالح 48 ساعة) أو إنشاء مباشر من الأدمن أو استيراد Excel جماعي</td>
+      <td>إنشاء باقات/دورات (بانتظار موافقة الأدمن)، إدارة التوفر، الموافقة/الرفض على طلبات الحجز الفردي، حضور الجلسات كمشرف (moderator)، الرد على التقييمات.</td>
+    </tr>
+    <tr>
+      <td><span class="role-pill role-admin">أدمن</span></td>
+      <td>—</td>
+      <td>صلاحية كاملة: توثيق المعلمين، الموافقة على الباقات/الدورات، إدارة الإعدادات، سجل التدقيق، المستحقات المالية، الشارات (badges)، التصنيفات (taxonomy)، حل النزاعات.</td>
+    </tr>
+  </table>
+  <div class="callout">
+    <strong>نقطة اختبار صلاحيات مهمة:</strong> رابط انضمام الطالب (<code>join_url_student</code>) لا يظهر أبداً لمستخدم بدور معلم في نفس الجلسة، والعكس صحيح — كل طرف يرى رابطه الخاص فقط عبر الـ API (الأدمن يرى الاثنين). تحقق من ذلك مباشرة عبر استجابة <code>GET /class-sessions/{id}</code> وليس فقط من الواجهة.
+  </div>
+</section>
+
+<section id="modules">
+  <h2>4. الوحدات الوظيفية</h2>
+
+  <section id="m1">
+    <h3>4.1 الحسابات والمصادقة</h3>
+    <table>
+      <tr><th>#</th><th>المتطلب</th></tr>
+      <tr><td class="fr-id">FR-1.1</td><td>يمكن للزائر إنشاء حساب طالب ذاتياً عبر <code>POST /auth/register/student</code> (اسم، بريد، كلمة مرور، تأكيد كلمة المرور).</td></tr>
+      <tr><td class="fr-id">FR-1.2</td><td>كلمة المرور يجب أن تكون 8 أحرف على الأقل، تحتوي حرفاً كبيراً وصغيراً ورقماً واحداً على الأقل. في بيئة الإنتاج فقط: تُرفض كلمات المرور المسرَّبة (فحص عبر خدمة Have I Been Pwned).</td></tr>
+      <tr><td class="fr-id">FR-1.3</td><td>لا يوجد تسجيل ذاتي للمعلمين — الحساب يُنشأ فقط عبر دعوة من الأدمن، أو إنشاء مباشر، أو استيراد جماعي من ملف Excel.</td></tr>
+      <tr><td class="fr-id">FR-1.4</td><td>عند إنشاء حساب طالب أو معلم من قبل الأدمن، يصل للمستخدم بريد إلكتروني ترحيبي يحتوي البريد وكلمة المرور المؤقتة (قالب بريد احترافي بهوية المنصة البصرية).</td></tr>
+      <tr><td class="fr-id">FR-1.5</td><td>تسجيل الدخول محدود بـ 5 محاولات/دقيقة لكل توليفة (بريد + IP) — تجاوز الحد يُرجع 429.</td></tr>
+      <tr><td class="fr-id">FR-1.6</td><td>التسجيل الذاتي محدود بـ 10 حسابات/ساعة لكل IP.</td></tr>
+      <tr><td class="fr-id">FR-1.7</td><td>المصادقة عبر Bearer Token (Laravel Sanctum) — يُرسَل في ترويسة <code>Authorization</code> على كل طلب محمي.</td></tr>
+      <tr><td class="fr-id">FR-1.8</td><td>يمكن للمستخدم تحديث ملفه الشخصي، رفع صورة شخصية، وتغيير كلمة المرور (محدود بـ 5 مرات/ساعة).</td></tr>
+      <tr><td class="fr-id">FR-1.9</td><td>رابط دعوة المعلم صالح لمدة 48 ساعة فقط (قابلة للتعديل من إعدادات الأدمن) — بعدها يُرفض بوضوح لا بخطأ عام.</td></tr>
+    </table>
+  </section>
+
+  <section id="m2">
+    <h3>4.2 المعلمون والتوثيق</h3>
+    <table>
+      <tr><th>#</th><th>المتطلب</th></tr>
+      <tr><td class="fr-id">FR-2.1</td><td>دورة حياة حساب المعلم: <code>created → invited → active_unverified → pending_verification → verified</code>، أو <code>rejected</code> / <code>suspended</code> في أي مرحلة لاحقة.</td></tr>
+      <tr><td class="fr-id">FR-2.2</td><td>نوع المعلم أحد ثلاثة: <code>school</code> (مدرسي)، <code>university</code> (جامعي)، <code>training_center</code> (مركز تدريب). الدورات (Courses) لا يمكن إنشاؤها إلا من <code>training_center</code> فقط — قيد يُفرض على مستوى قاعدة البيانات (trigger)، وليس فقط واجهة المستخدم.</td></tr>
+      <tr><td class="fr-id">FR-2.3</td><td>يرفع المعلم وثائق توثيق (شهادات/هوية) — الأدمن يوافق أو يرفض كل وثيقة على حدة مع سبب.</td></tr>
+      <tr><td class="fr-id">FR-2.4</td><td>روابط تنزيل الوثائق موقّعة مؤقتاً (signed URL) ولا تتطلب تسجيل دخول — لكنها تنتهي صلاحيتها؛ يجب اختبار انتهاء الصلاحية ورفض الروابط المعدَّلة يدوياً.</td></tr>
+      <tr><td class="fr-id">FR-2.5</td><td>الأدمن يمنح/يسحب "شارات" (Badges) للمعلم (مثال: معلم مميز) — تظهر على ملفه العام.</td></tr>
+      <tr><td class="fr-id">FR-2.6</td><td>ترتيب ظهور المعلمين في نتائج البحث يُحسب من 5 عوامل موزونة: التقييم، معدل الإتمام، سرعة الرد، اكتمال الملف، حداثة المراجعات (الأوزان قابلة للتعديل من الإعدادات — القسم 5).</td></tr>
+      <tr><td class="fr-id">FR-2.7</td><td>معلم بحالة <code>suspended</code> لا يظهر في نتائج البحث العامة ولا يمكنه إنشاء باقات/دورات جديدة، لكن جلساته المؤكَّدة سابقاً تبقى قائمة.</td></tr>
+    </table>
+  </section>
+
+  <section id="m3">
+    <h3>4.3 الباقات والدورات</h3>
+    <table>
+      <tr><th>#</th><th>المتطلب</th></tr>
+      <tr><td class="fr-id">FR-3.1</td><td>الباقة (Package) نوعان: <code>individual</code> (فردية — الطالب يقترح موعداً يوافق عليه المعلم) أو <code>group</code> (جماعية — جدول ثابت، الطالب ينضم مباشرة).</td></tr>
+      <tr><td class="fr-id">FR-3.2</td><td>دورة حياة الباقة/الدورة: <code>draft → pending_approval → active</code>، أو <code>rejected</code>. تتحول تلقائياً إلى <code>full</code> عند اكتمال النصاب (مقارنة <code>enrolled_count</code> بـ <code>max_seats</code>) وتعود <code>active</code> تلقائياً عند توفر مقعد.</td></tr>
+      <tr><td class="fr-id">FR-3.3</td><td>سعر الطالب يُحسب تلقائياً من سعر المعلم + نسبة هامش المنصة (قابلة للتعديل لكل باقة، ضمن حدين أدنى/أقصى قابلين للضبط عاماً — القسم 5).</td></tr>
+      <tr><td class="fr-id">FR-3.4</td><td>باقة/دورة بحالة <code>draft</code> أو <code>pending_approval</code> لا تظهر إطلاقاً في نتائج البحث العامة أو صفحة المعلم العامة.</td></tr>
+      <tr><td class="fr-id">FR-3.5</td><td>الدورات (Courses) تدعم نمطي تسعير: <code>total</code> (سعر إجمالي) أو <code>hourly</code> (بالساعة).</td></tr>
+      <tr><td class="fr-id">FR-3.6</td><td>الباقة/الدورة تُحفظ بالمنطقة الزمنية الخاصة بمنشئها وقت الإنشاء (<code>schedule_timezone</code>) لتحويل جداولها بدقة لاحقاً.</td></tr>
+    </table>
+  </section>
+
+  <section id="m4">
+    <h3>4.4 الحجز والتسجيل</h3>
+    <table>
+      <tr><th>#</th><th>المتطلب</th></tr>
+      <tr><td class="fr-id">FR-4.1</td><td>حجز فردي: الطالب يقترح تاريخاً ووقتاً → حالة <code>pending_teacher_confirmation</code> (بلا دفع) → المعلم يوافق (تُنشأ الجلسات وحالة <code>pending_payment</code>) أو يرفض (لا استرداد لأنه لم يُدفع أصلاً).</td></tr>
+      <tr><td class="fr-id">FR-4.2</td><td>حجز جماعي: الانضمام مباشر بلا موافقة معلم → حالة <code>pending_payment</code> فوراً.</td></tr>
+      <tr><td class="fr-id">FR-4.3</td><td>الحجز المعلَّق للدفع (<code>pending_payment</code>) محجوز مؤقتاً لمدة قابلة للضبط (افتراضياً 15 دقيقة) قبل انتهاء صلاحيته تلقائياً (<code>ExpireStaleBookingsJob</code> يعمل كل دقيقة).</td></tr>
+      <tr><td class="fr-id">FR-4.4</td><td>إن أغلق الطالب نافذة الدفع دون إكمال، يمكنه إعادة محاولة الدفع لاحقاً عبر <code>POST /bookings/{id}/checkout</code> أو <code>POST /enrollments/{id}/checkout</code> طالما الحجز لم تنتهِ صلاحيته بعد.</td></tr>
+      <tr><td class="fr-id">FR-4.5</td><td>الأدمن يمكنه إنشاء حجز/تسجيل يدوي مباشرة (بلا دفع إلكتروني، بسبب مذكور) — يُعامل حساباً مالياً منفصلاً (<code>is_manual</code>).</td></tr>
+      <tr><td class="fr-id">FR-4.6</td><td>عند تقديم طلب حجز فردي، تُحفظ المنطقة الزمنية الخاصة بالطالب لحظة الطلب (<code>requested_timezone</code>) لاستخدامها لاحقاً عند موافقة المعلم (نقطة زمنية مختلفة، طرف مختلف).</td></tr>
+    </table>
+  </section>
+
+  <section id="m5">
+    <h3>4.5 الدفع والفواتير</h3>
+    <table>
+      <tr><th>#</th><th>المتطلب</th></tr>
+      <tr><td class="fr-id">FR-5.1</td><td>الدفع الإلكتروني عبر Stripe Checkout حصراً. التأكيد الفعلي (نقل الحالة إلى <code>confirmed</code>) يحدث فقط عند استلام Webhook موقّع من Stripe على <code>POST /webhooks/stripe</code> — <u>وليس</u> عند عودة المستخدم لصفحة النجاح في المتصفح (يجب اختبار حالة إغلاق المتصفح بعد الدفع مباشرة قبل عودة الصفحة).</td></tr>
+      <tr><td class="fr-id">FR-5.2</td><td>أي خطأ من Stripe (مفتاح غير صالح، بطاقة مرفوضة، انقطاع اتصال) يجب أن يُعرض للمستخدم كرسالة عربية واضحة (502) — لا خطأ 500 فارغ.</td></tr>
+      <tr><td class="fr-id">FR-5.3</td><td>يمكن تنزيل فاتورة PDF فقط لحجز/تسجيل مدفوع فعلياً (ليس <code>pending_payment</code>) — طلب فاتورة لحجز غير مدفوع يُرفض بـ 422 برسالة واضحة، لا يُصنَّع ملف فارغ.</td></tr>
+      <tr><td class="fr-id">FR-5.4</td><td>الفاتورة (PDF) تحتوي: رقم مرجعي، تاريخ الإصدار، اسم الطالب وبريده، اسم المعلم، عنوان الباقة/الدورة، المادة، عدد الجلسات، طريقة الدفع، الحالة، والمبلغ الإجمالي — بشعار وألوان المنصة.</td></tr>
+      <tr><td class="fr-id">FR-5.5</td><td>الفاتورة يمكن لصاحب الحجز (الطالب)، المعلم صاحب الجلسة، أو الأدمن تنزيلها فقط — أي طرف آخر يُرفض بـ 403.</td></tr>
+    </table>
+  </section>
+
+  <section id="m6">
+    <h3>4.6 الجلسات وBigBlueButton (الفيديو المباشر)</h3>
+    <table>
+      <tr><th>#</th><th>المتطلب</th></tr>
+      <tr><td class="fr-id">FR-6.1</td><td>غرفة BBB تُنشأ تلقائياً فور تأكيد الدفع لكل جلسة — يحصل المعلم على رابط بصلاحيات مشرف (moderator، يمكنه مشاركة الشاشة/إدارة الحضور)، ويحصل كل طالب مسجَّل على رابط بصلاحيات حضور (attendee) فقط.</td></tr>
+      <tr><td class="fr-id">FR-6.2</td><td>الضغط على "انضمام" يُنفَّذ عبر <code>GET /class-sessions/{id}/join</code> التي تتحقق أولاً أن الغرفة تعمل فعلياً على خادم BBB — <u>ليس</u> بفتح رابط BBB الخام مباشرة (كان هذا يُظهر استجابة XML غير منسّقة عند الفشل).</td></tr>
+      <tr><td class="fr-id">FR-6.3</td><td>رسائل الخطأ المتوقعة عند محاولة الانضمام: "لم تبدأ هذه الجلسة بعد" (قبل الموعد)، "انتهت هذه الجلسة" (بعد الموعد + مدتها)، أو رسالة عامة لأي فشل آخر — دائماً 422 برسالة عربية، أبداً لا XML خام.</td></tr>
+      <tr><td class="fr-id">FR-6.4</td><td>لا يمكن الانضمام لجلسة لم يُدفع ثمنها بعد — رابط الانضمام يبقى <code>null</code> حتى تأكيد الدفع.</td></tr>
+      <tr><td class="fr-id">FR-6.5</td><td>يُرسَل تذكير بريدي تلقائي بالرابط للطالب والمعلم معاً قبل موعد الجلسة بمهلة قابلة للضبط (افتراضياً 120 دقيقة/ساعتان)، عبر مهمة مجدولة تعمل كل دقيقة.</td></tr>
+      <tr><td class="fr-id">FR-6.6</td><td>الوقت الظاهر في بريد التذكير يجب أن يكون بالمنطقة الزمنية الخاصة بالمستقبِل (كل طرف يرى وقته المحلي الصحيح، وليس UTC خام أو وقت الطرف الآخر).</td></tr>
+      <tr><td class="fr-id">FR-6.7</td><td>فشل إرسال التذكير لطرف واحد (مثلاً المعلم) لا يجب أن يمنع وصوله للطرف الآخر (الطالب).</td></tr>
+    </table>
+  </section>
+
+  <section id="m7">
+    <h3>4.7 الحضور والغياب</h3>
+    <table>
+      <tr><th>#</th><th>المتطلب</th></tr>
+      <tr><td class="fr-id">FR-7.1</td><td>غياب الطالب مع إشعار مسبق كافٍ (افتراضياً 6 ساعات) لا يُحتسب من رصيد جلساته؛ الغياب بلا إشعار أو بإشعار متأخر يُخصم.</td></tr>
+      <tr><td class="fr-id">FR-7.2</td><td>غياب المعلم يُعفي الطلاب تلقائياً وينشئ جلسة تعويضية (makeup session).</td></tr>
+      <tr><td class="fr-id">FR-7.3</td><td>عدد غيابات متكرر للمعلم (عتبتان قابلتان للضبط: تحذير عند 1، تعليق تلقائي للحساب عند 3) يُفعّل إجراءً تلقائياً.</td></tr>
+    </table>
+  </section>
+
+  <section id="m8">
+    <h3>4.8 تغيير المواعيد (Reschedule)</h3>
+    <table>
+      <tr><th>#</th><th>المتطلب</th></tr>
+      <tr><td class="fr-id">FR-8.1</td><td>كل طلب تغيير موعد يتطلب موافقة الأدمن دائماً — هذا قرار سياسة غير قابل للتعطيل حتى من الإعدادات.</td></tr>
+      <tr><td class="fr-id">FR-8.2</td><td>نافذة تغيير مرنة (افتراضياً 24 ساعة) لا يتطلب فيها ذكر سبب؛ خارجها السبب إلزامي.</td></tr>
+      <tr><td class="fr-id">FR-8.3</td><td>الموعد الجديد المقترح يجب أن يبعد عن لحظة الطلب بمهلة دنيا قابلة للضبط (افتراضياً ساعتان).</td></tr>
+      <tr><td class="fr-id">FR-8.4</td><td>عدد مرات تغيير الموعد لكل جلسة محدود (افتراضياً مرة واحدة).</td></tr>
+      <tr><td class="fr-id">FR-8.5</td><td>الطرف الآخر (غير الطالب صاحب الطلب) له مهلة محددة للرد على الاقتراح (افتراضياً 12 ساعة) قبل تصعيده تلقائياً.</td></tr>
+    </table>
+  </section>
+
+  <section id="m9">
+    <h3>4.9 التقييمات</h3>
+    <table>
+      <tr><th>#</th><th>المتطلب</th></tr>
+      <tr><td class="fr-id">FR-9.1</td><td>يمكن للطالب تقييم المعلم فقط بعد انتهاء الجلسة فعلياً، ضمن مهلة محددة (افتراضياً 7 أيام).</td></tr>
+      <tr><td class="fr-id">FR-9.2</td><td>التقييم قابل للتعديل خلال مهلة قصيرة بعد إرساله (افتراضياً 24 ساعة) ثم يُقفَل.</td></tr>
+      <tr><td class="fr-id">FR-9.3</td><td>يمكن للمعلم الرد على التقييم مرة واحدة (علني).</td></tr>
+      <tr><td class="fr-id">FR-9.4</td><td>الأدمن يمكنه إخفاء/إظهار تقييم (مخالف للسياسات)، والطالب يمكنه الإبلاغ عن تقييم غير لائق (من طرف آخر عليه).</td></tr>
+      <tr><td class="fr-id">FR-9.5</td><td>متوسط تقييم المعلم يُحسب من آخر عدد محدد من المراجعات المعتمدة فقط (افتراضياً 30) — ليس كل التاريخ.</td></tr>
+      <tr><td class="fr-id">FR-9.6</td><td><strong>حرج للثقة:</strong> بطاقة معلم بلا أي تقييم يجب ألا تُظهر نجوماً فارغة أو "0" — يُخفى حقل التقييم كاملاً حتى وجود بيانات حقيقية.</td></tr>
+    </table>
+  </section>
+
+  <section id="m10">
+    <h3>4.10 الشكاوى</h3>
+    <table>
+      <tr><th>#</th><th>المتطلب</th></tr>
+      <tr><td class="fr-id">FR-10.1</td><td>أي طرف (طالب/معلم) يمكنه تقديم شكوى مرتبطة بحجز/جلسة.</td></tr>
+      <tr><td class="fr-id">FR-10.2</td><td>الأدمن يحلّها أو يصعّدها؛ لكل شكوى مهلة رد قابلة للضبط (افتراضياً 24 ساعة SLA).</td></tr>
+    </table>
+  </section>
+
+  <section id="m11">
+    <h3>4.11 الإشعارات</h3>
+    <table>
+      <tr><th>#</th><th>المتطلب</th></tr>
+      <tr><td class="fr-id">FR-11.1</td><td>كل إشعار (بريد ترحيبي، تذكير جلسة، دعوة معلم، مراجعة توثيق...) يُسجَّل في سجل إشعارات داخلي (notification_logs) بحالة (queued/sent/failed) قابلة للتتبع.</td></tr>
+      <tr><td class="fr-id">FR-11.2</td><td>الإشعارات داخل التطبيق (جرس الإشعارات) تُعرض بعدد غير مقروء، ويمكن تعليم الكل كمقروء.</td></tr>
+      <tr><td class="fr-id">FR-11.3</td><td><strong>يتطلب تشغيل مستمر لـ queue worker على الخادم</strong> — بدونه تتوقف كل الإشعارات البريدية بصمت (تبقى في جدول الانتظار بلا إرسال). هذا شرط تشغيلي وليس مجرد ميزة اختيارية.</td></tr>
+    </table>
+  </section>
+
+  <section id="m12">
+    <h3>4.12 المفضلة والبحث</h3>
+    <table>
+      <tr><th>#</th><th>المتطلب</th></tr>
+      <tr><td class="fr-id">FR-12.1</td><td>الطالب يضيف/يزيل معلمين أو دورات من المفضلة.</td></tr>
+      <tr><td class="fr-id">FR-12.2</td><td>البحث العام يدعم فلترة بالمرحلة، الصف، المادة، اللغة، السعر، والتقييم — ونتائج البحث لا تُظهر إلا معلمين بحالة <code>verified</code>.</td></tr>
+    </table>
+  </section>
+
+  <section id="m13">
+    <h3>4.13 لوحة تحكم الأدمن</h3>
+    <table>
+      <tr><th>#</th><th>المتطلب</th></tr>
+      <tr><td class="fr-id">FR-13.1</td><td>إدارة الإعدادات العامة (القسم 5) — كل إعداد له نوع (نص/رقم صحيح/عشري/منطقي) يحدّد نوع حقل الإدخال في الواجهة، وبعضها غير قابل للتعديل (<code>isEditable=false</code>) كقرارات سياسة ثابتة.</td></tr>
+      <tr><td class="fr-id">FR-13.2</td><td>سجل تدقيق (Audit Log) يُسجّل كل إجراء إداري حساس (موافقة معلم، تعديل إعداد...) مع من قام به ومتى — قابل للفلترة حسب نوع الإجراء.</td></tr>
+      <tr><td class="fr-id">FR-13.3</td><td>استيراد جماعي للطلاب أو المعلمين من ملف Excel — يُرجع تقريراً بالصفوف الناجحة والفاشلة (مع سبب الفشل لكل صف) بدل إيقاف العملية بالكامل عند أول خطأ. عدد الصفوف الأقصى قابل للضبط (افتراضياً 500).</td></tr>
+      <tr><td class="fr-id">FR-13.4</td><td>إدارة المستحقات المالية للمعلمين (توليد → موافقة → تحديد كمدفوعة).</td></tr>
+    </table>
+  </section>
+
+  <section id="m14">
+    <h3>4.14 المنطقة الزمنية (Timezone)</h3>
+    <table>
+      <tr><th>#</th><th>المتطلب</th></tr>
+      <tr><td class="fr-id">FR-14.1</td><td>منطقة كل مستخدم تُكتشف تلقائياً من متصفحه عند كل دخول للتطبيق (ما لم يعطّل الاكتشاف التلقائي يدوياً).</td></tr>
+      <tr><td class="fr-id">FR-14.2</td><td>يمكن للمستخدم ضبط منطقته الزمنية يدوياً من صفحة الإعدادات — عندها يتوقف الاكتشاف التلقائي عن الكتابة فوق اختياره حتى يُعاد تفعيله صراحة.</td></tr>
+      <tr><td class="fr-id">FR-14.3</td><td><strong>حرج:</strong> حجز يقترحه طالب الساعة 15:00 بمنطقته يجب أن يظهر للمعلم بتوقيته المحلي الصحيح (وليس نفس الرقم 15:00 بتوقيت مختلف) — ينطبق على: طلب حجز فردي، حجز يدوي من الأدمن، جدول باقة جماعية، جدول دورة، وبريد تذكير الجلسة.</td></tr>
+    </table>
+  </section>
+
+</section>
+
+<section id="rules">
+  <h2>5. الإعدادات وقواعد العمل القابلة للضبط</h2>
+  <p>كل القيم أدناه إعدادات حقيقية قابلة للتعديل من لوحة الأدمن (ما لم يُذكر خلاف ذلك) — القيمة الافتراضية مذكورة، ويجب اختبار السلوك عند القيم الحدّية (0، القيمة القصوى، قيمة سالبة إن أمكن إدخالها).</p>
+
+  <h4>التسعير</h4>
+  <table>
+    <tr><th>المفتاح</th><th>الافتراضي</th><th>الوصف</th></tr>
+    <tr><td><code>default_platform_margin_percent</code></td><td>60%</td><td>نسبة هامش المنصة المقترحة عند اعتماد باقة جديدة</td></tr>
+    <tr><td><code>min_platform_margin_percent</code></td><td>10%</td><td>الحد الأدنى المسموح</td></tr>
+    <tr><td><code>max_platform_margin_percent</code></td><td>200%</td><td>الحد الأقصى المسموح</td></tr>
+    <tr><td><code>default_currency</code></td><td>USD</td><td>العملة الافتراضية (نصي)</td></tr>
+  </table>
+
+  <h4>الحجز والمواعيد</h4>
+  <table>
+    <tr><th>المفتاح</th><th>الافتراضي</th><th>الوصف</th></tr>
+    <tr><td><code>booking_payment_hold_minutes</code></td><td>15 دقيقة</td><td>مهلة الحجز المؤقت قبل الدفع</td></tr>
+    <tr><td><code>session_duration_minutes</code></td><td>60 دقيقة</td><td>مدة الجلسة الافتراضية — <strong>غير قابل للتعديل</strong> (<code>isEditable=false</code>)</td></tr>
+    <tr><td><code>reschedule_requires_admin</code></td><td>مفعّل</td><td>موافقة الأدمن الزامية دائماً — <strong>غير قابل للتعطيل</strong></td></tr>
+    <tr><td><code>reschedule_free_window_hours</code></td><td>24 ساعة</td><td>نافذة التغيير بلا سبب إلزامي</td></tr>
+    <tr><td><code>reschedule_min_hours_ahead</code></td><td>2 ساعة</td><td>أقل مهلة بين الطلب والموعد الجديد</td></tr>
+    <tr><td><code>reschedule_max_per_session</code></td><td>مرة واحدة</td><td>أقصى عدد تغييرات لكل جلسة</td></tr>
+    <tr><td><code>counterparty_response_hours</code></td><td>12 ساعة</td><td>مهلة رد الطرف الآخر على اقتراح التغيير</td></tr>
+  </table>
+
+  <h4>الحضور والتذكيرات</h4>
+  <table>
+    <tr><th>المفتاح</th><th>الافتراضي</th><th>الوصف</th></tr>
+    <tr><td><code>advance_notice_hours</code></td><td>6 ساعات</td><td>أقل مهلة إشعار مسبق بالغياب لإعفائه من الخصم</td></tr>
+    <tr><td><code>no_show_grace_minutes</code></td><td>15 دقيقة</td><td>مهلة التذكير قبل تسجيل غياب</td></tr>
+    <tr><td><code>no_show_final_minutes</code></td><td>30 دقيقة</td><td>المدة النهائية لتسجيل الغياب فعلياً</td></tr>
+    <tr><td><code>disconnect_grace_minutes</code></td><td>10 دقائق</td><td>مهلة العودة بعد انقطاع الاتصال</td></tr>
+    <tr><td><code>teacher_no_show_warning_threshold</code></td><td>1</td><td>عدد غيابات المعلم قبل تحذير تلقائي</td></tr>
+    <tr><td><code>teacher_no_show_suspend_threshold</code></td><td>3</td><td>عدد غيابات المعلم قبل تعليق الحساب تلقائياً</td></tr>
+    <tr><td><code>session_reminder_minutes_before</code></td><td>120 دقيقة</td><td>إرسال رابط الجلسة تلقائياً قبل موعدها بهذه المهلة</td></tr>
+  </table>
+
+  <h4>التقييمات</h4>
+  <table>
+    <tr><th>المفتاح</th><th>الافتراضي</th><th>الوصف</th></tr>
+    <tr><td><code>review_window_days</code></td><td>7 أيام</td><td>مهلة إرسال التقييم بعد الجلسة</td></tr>
+    <tr><td><code>review_edit_window_hours</code></td><td>24 ساعة</td><td>مهلة تعديل التقييم بعد إرساله</td></tr>
+    <tr><td><code>review_prompt_delay_minutes</code></td><td>15 دقيقة</td><td>مهلة إرسال طلب التقييم بعد انتهاء الجلسة</td></tr>
+    <tr><td><code>rating_window_reviews</code></td><td>30 مراجعة</td><td>عدد المراجعات الأحدث المعتمدة في حساب المتوسط</td></tr>
+  </table>
+
+  <h4>الباقات والصلاحية</h4>
+  <table>
+    <tr><th>المفتاح</th><th>الافتراضي</th><th>الوصف</th></tr>
+    <tr><td><code>package_expiry_grace_days</code></td><td>14 يوم</td><td>مهلة سماح بعد انتهاء صلاحية الباقة</td></tr>
+    <tr><td><code>package_expiry_warning_days</code></td><td>7 أيام</td><td>تنبيه قبل انتهاء الصلاحية</td></tr>
+    <tr><td><code>low_sessions_alert_threshold</code></td><td>2 جلسة</td><td>تنبيه عند تبقي عدد جلسات قليل</td></tr>
+  </table>
+
+  <h4>الحسابات</h4>
+  <table>
+    <tr><th>المفتاح</th><th>الافتراضي</th><th>الوصف</th></tr>
+    <tr><td><code>invitation_link_expiry_hours</code></td><td>48 ساعة</td><td>صلاحية رابط دعوة المعلم</td></tr>
+    <tr><td><code>student_import_max_rows</code></td><td>500 صف</td><td>أقصى عدد صفوف في استيراد الطلاب</td></tr>
+    <tr><td><code>teacher_import_max_rows</code></td><td>500 صف</td><td>أقصى عدد صفوف في استيراد المعلمين</td></tr>
+  </table>
+
+  <h4>خوارزمية الترتيب (وزن كل عامل من 100%)</h4>
+  <table>
+    <tr><th>المفتاح</th><th>الافتراضي</th><th>الوصف</th></tr>
+    <tr><td><code>ranking_weight_rating</code></td><td>30%</td><td>وزن التقييم</td></tr>
+    <tr><td><code>ranking_weight_completion</code></td><td>25%</td><td>وزن معدل الإتمام</td></tr>
+    <tr><td><code>ranking_weight_response</code></td><td>20%</td><td>وزن سرعة الرد</td></tr>
+    <tr><td><code>ranking_weight_profile</code></td><td>15%</td><td>وزن اكتمال الملف</td></tr>
+    <tr><td><code>ranking_weight_recency</code></td><td>10%</td><td>وزن حداثة المراجعات</td></tr>
+  </table>
+
+  <h4>مهل الاستجابة (SLA)</h4>
+  <table>
+    <tr><th>المفتاح</th><th>الافتراضي</th><th>الوصف</th></tr>
+    <tr><td><code>sla_document_review_hours</code></td><td>48 ساعة</td><td>مراجعة وثائق توثيق المعلم</td></tr>
+    <tr><td><code>sla_package_review_hours</code></td><td>24 ساعة</td><td>مراجعة الباقة</td></tr>
+    <tr><td><code>sla_reschedule_hours</code></td><td>12 ساعة</td><td>الرد على طلب تغيير موعد</td></tr>
+    <tr><td><code>sla_cancellation_hours</code></td><td>6 ساعات</td><td>الرد على طلب إلغاء</td></tr>
+    <tr><td><code>sla_complaint_hours</code></td><td>24 ساعة</td><td>الرد على شكوى</td></tr>
+    <tr><td><code>objection_window_hours</code></td><td>48 ساعة</td><td>مهلة اعتراض الطلاب على تغيير الجدول</td></tr>
+  </table>
+</section>
+
+<section id="nonfunc">
+  <h2>6. المتطلبات غير الوظيفية</h2>
+
+  <h3>6.1 الأمان</h3>
+  <ul>
+    <li>مصادقة عبر Bearer Token؛ لا جلسات (sessions) قائمة على cookies للـ API.</li>
+    <li>صلاحيات (Authorization Policies) مفروضة على مستوى كل نقطة API — تحقّق من محاولة الوصول لمورد لا يخص المستخدم (403) وليس فقط إخفاءه بالواجهة.</li>
+    <li>حدود معدل الطلبات (Rate Limiting): API عام 120 طلب/دقيقة للمستخدم المسجَّل، 30 طلب/دقيقة للزائر؛ دخول 5/دقيقة؛ تسجيل حساب 10/ساعة؛ رفع ملفات 15/دقيقة؛ تغيير كلمة مرور 5/ساعة.</li>
+    <li>روابط تنزيل الوثائق موقّعة زمنياً (signed URLs) — لا تعتمد على مصادقة الجلسة.</li>
+    <li>Webhook Stripe يُتحقَّق منه عبر توقيع <code>Stripe-Signature</code> فقط، ليس عبر نفس آلية مصادقة المستخدمين.</li>
+    <li>ترويسات أمان قياسية (CSP، X-Frame-Options، إلخ) على كل استجابة API.</li>
+  </ul>
+
+  <h3>6.2 الموثوقية والتعافي من الأخطاء</h3>
+  <ul>
+    <li>فشل خدمة خارجية (Stripe، BigBlueButton، SMTP) يجب ألا يُسقط الطلب الأساسي بخطأ 500 غير مفسَّر — دائماً رسالة عربية واضحة مع كود حالة مناسب.</li>
+    <li>فشل إرسال إشعار لمستلم واحد لا يمنع وصوله للآخرين في نفس الحدث.</li>
+    <li>يتطلب النظام queue worker دائم التشغيل (وليس تشغيلاً يدوياً متقطعاً) — بدونه تتراكم المهام (بريد، تذكيرات، إنشاء غرف BBB) بصمت دون تنفيذ.</li>
+  </ul>
+
+  <h3>6.3 التوطين (Localization)</h3>
+  <ul>
+    <li>الواجهة عربية بالكامل، اتجاه RTL من اليمين لليسار في كل صفحة/مكوّن — بلا أي انعكاس بصري خاطئ (padding/margin بالاتجاه الخاطئ).</li>
+    <li>كل رسائل الخطأ الراجعة من الـ API بالعربية.</li>
+    <li>رسائل البريد الإلكتروني (ترحيبي، دعوة، تذكير جلسة) بالإنجليزية الاحترافية بهوية بصرية موحّدة (شعار، ألوان المنصة).</li>
+  </ul>
+
+  <h3>6.4 التوافق والاستجابة (Responsive)</h3>
+  <ul>
+    <li>يجب اختبار كل الصفحات الرئيسية على: 375px (موبايل)، 768px (تابلت)، 1024px، 1440px (سطح مكتب).</li>
+    <li>لا محتوى مخفي خلف شريط تنقّل ثابت، ولا تمرير أفقي غير مقصود على الموبايل.</li>
+    <li>كل العناصر التفاعلية بمؤشر واضح عند التمرير (cursor: pointer) وحالة تركيز مرئية عند التنقل بلوحة المفاتيح.</li>
+  </ul>
+</section>
+
+<section id="critical">
+  <h2>7. سيناريوهات اختبار حرجة (يجب تغطيتها صراحة)</h2>
+  <p>هذه سيناريوهات محدَّدة اكتُشفت أهميتها أثناء بناء النظام — كل واحدة منها مثّلت خللاً فعلياً سابقاً ويجب التأكد من عدم عودته.</p>
+
+  <div class="callout critical">
+    <strong>1) بوابة الدفع — لا وصول قبل التأكيد الفعلي</strong>
+    <p>أنشئ حجزاً بحالة <code>pending_payment</code> ولا تُكمل الدفع. تحقق أن: زر "انضمام" غير موجود/معطَّل، لا رابط جلسة فعلي في استجابة الـ API، لا فاتورة قابلة للتنزيل (422)، ولا بريد تذكير جلسة يُرسَل لهذا الحجز مهما اقترب الموعد.</p>
+  </div>
+
+  <div class="callout critical">
+    <strong>2) التوقيت عبر مناطق زمنية مختلفة</strong>
+    <p>سجّل دخول بمتصفحين بمنطقتين مختلفتين (مثلاً وضع Timezone المتصفح على <code>Asia/Tokyo</code> و<code>Europe/London</code>) — قدّم حجزاً فردياً من الأول بالساعة 15:00، ووافق عليه من الثاني، وتأكد أن كل طرف يرى الوقت الصحيح بمنطقته في كل مكان: صفحة الحجز، التقويم، بريد التذكير.</p>
+  </div>
+
+  <div class="callout critical">
+    <strong>3) الانضمام لجلسة خارج وقتها</strong>
+    <p>اضغط "انضمام" على جلسة لم يحن وقتها بعد، ثم على جلسة انتهت فعلياً. يجب أن تظهر رسالة عربية واضحة ("لم تبدأ بعد" / "انتهت") في الحالتين — أبداً لا صفحة XML خام أو شاشة بيضاء.</p>
+  </div>
+
+  <div class="callout critical">
+    <strong>4) عدم إظهار إحصاءات صفرية أو وهمية</strong>
+    <p>معلم بلا أي تقييم: يجب ألا تظهر بطاقته نجوماً فارغة أو "0.0". معلم بلا سنوات خبرة مسجَّلة: شارة "سنوات الخبرة" يجب أن تختفي كلياً وليس أن تظهر "0 سنوات خبرة".</p>
+  </div>
+
+  <div class="callout critical">
+    <strong>5) صلاحيات رابط الجلسة (BBB)</strong>
+    <p>سجّل دخول كطالب في جلسة، وتأكد أنه لا يملك صلاحيات مشرف (لا يمكنه كتم/طرد آخرين أو مشاركة الشاشة كمقدّم رئيسي)، وأن المعلم يملك هذه الصلاحيات. تحقق أن استجابة <code>GET /class-sessions/{id}</code> لا تُرجع أبداً <code>join_url_teacher</code> لمستخدم بدور طالب.</p>
+  </div>
+
+  <div class="callout critical">
+    <strong>6) استيراد جماعي (Excel) بصفوف فاسدة</strong>
+    <p>ارفع ملف طلاب/معلمين يحوي صفوفاً صحيحة وصفوفاً بها أخطاء (بريد مكرر، حقل ناقص). يجب أن تُستورَد الصفوف الصحيحة وتُرفض الفاسدة فقط، مع تقرير واضح بسبب فشل كل صف — لا فشل العملية بالكامل من أول خطأ.</p>
+  </div>
+
+  <div class="callout critical">
+    <strong>7) إعادة محاولة الدفع</strong>
+    <p>ابدأ عملية دفع (حجز فردي أو تسجيل دورة) ثم أغلق نافذة Stripe دون إكمالها. تأكد أن الحجز يبقى قابلاً لإعادة محاولة الدفع (زر "إكمال الدفع" يعمل فعلياً) قبل انتهاء صلاحيته.</p>
+  </div>
+
+  <div class="callout warn">
+    <strong>8) إعدادات الأدمن — أنواع الحقول</strong>
+    <p>تحقق أن تعديل إعداد نصي (مثل العملة) يستخدم حقل نص، وإعداد منطقي (مثل "تغيير الموعد يتطلب موافقة الأدمن") يستخدم مفتاح تبديل وليس حقل رقم — وأن الإعدادات <code>isEditable=false</code> (مدة الجلسة، إلزامية موافقة الأدمن على تغيير الموعد) لا يمكن تعديلها فعلياً حتى لو أُرسل طلب مباشر للـ API.</p>
+  </div>
+
+  <div class="callout warn">
+    <strong>9) الاستجابة على الموبايل</strong>
+    <p>على قياس 375px: تحقق أن لا قسم (مثل فلاتر البحث) يظهر فوق المحتوى الرئيسي بترتيب غير منطقي، وأن كل الأزرار قابلة للنقر بسهولة (لا تراكب عناصر).</p>
+  </div>
+
+  <div class="callout warn">
+    <strong>10) سجل التدقيق (Audit Log)</strong>
+    <p>نفّذ إجراءً إدارياً حساساً (موافقة معلم، تعديل إعداد) وتأكد من ظهوره في سجل التدقيق مع اسم المنفِّذ والوقت الصحيح، وأن الفلترة حسب نوع الإجراء تعمل.</p>
+  </div>
+</section>
+
+<section id="matrix">
+  <h2>8. مصفوفة حالات الكيانات (لتغطية كل انتقال حالة)</h2>
+
+  <div class="two-col">
+    <div class="card">
+      <h4>حالة حساب المعلم</h4>
+      <p><code>created</code> → <code>invited</code> → <code>active_unverified</code> → <code>pending_verification</code> → <code>verified</code></p>
+      <p>فروع: <code>rejected</code>، <code>suspended</code> (من أي مرحلة لاحقة)</p>
+    </div>
+    <div class="card">
+      <h4>حالة الباقة / الدورة</h4>
+      <p><code>draft</code> → <code>pending_approval</code> → <code>active</code> ⇄ <code>full</code></p>
+      <p>فروع: <code>rejected</code>، <code>disabled</code>، <code>archived</code> — دورات أيضاً: <code>in_progress</code>، <code>completed</code></p>
+    </div>
+    <div class="card">
+      <h4>حالة الحجز (Booking)</h4>
+      <p><code>pending_teacher_confirmation</code> (فردي فقط) → <code>pending_payment</code> → <code>confirmed</code> → <code>active</code> → <code>completed</code></p>
+      <p>فروع: <code>cancelled</code>، <code>expired</code></p>
+    </div>
+    <div class="card">
+      <h4>حالة التسجيل بدورة (Enrollment)</h4>
+      <p><code>pending_payment</code> → <code>confirmed</code> → <code>in_progress</code> → <code>completed</code></p>
+      <p>فروع: <code>cancelled</code>، <code>withdrawn</code></p>
+    </div>
+    <div class="card">
+      <h4>حالة الجلسة (Class Session)</h4>
+      <p><code>scheduled</code> → <code>active</code> → <code>completed</code></p>
+      <p>فروع: <code>reschedule_pending</code>، <code>rescheduled</code>، <code>cancelled</code>، <code>suspended</code>، <code>no_show_student</code>، <code>no_show_teacher</code></p>
+    </div>
+    <div class="card">
+      <h4>حالة الدفعة (Payment)</h4>
+      <p><code>pending</code> → <code>processing</code> → <code>paid</code></p>
+      <p>فرع: <code>failed</code></p>
+    </div>
+    <div class="card">
+      <h4>حضور الطالب (Session Attendee)</h4>
+      <p><code>registered</code> → <code>present</code> / <code>absent</code> / <code>excused</code> / <code>partial</code></p>
+    </div>
+    <div class="card">
+      <h4>حالة المستحقات المالية (Payout)</h4>
+      <p><code>pending</code> → <code>approved</code> → <code>processing</code> → <code>paid</code></p>
+      <p>فرع: <code>on_hold</code></p>
+    </div>
+  </div>
+</section>
+
+<section id="api">
+  <h2>9. ملحق: قائمة كل نقاط الـ API</h2>
+  <p>كل النقاط بادئتها <code>/api</code>. المصادقة عبر <code>Authorization: Bearer &lt;token&gt;</code> ما لم يُذكر "بلا مصادقة".</p>
+
+  <h4>مصادقة وملف شخصي</h4>
+  <table>
+    <tr><td><span class="badge post">POST</span></td><td><code>/auth/register/student</code></td><td>بلا مصادقة</td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/auth/login</code></td><td>بلا مصادقة</td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/auth/logout</code></td><td></td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/auth/me</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/me/avatar</code></td><td></td></tr>
+    <tr><td><span class="badge put">PUT</span></td><td><code>/me/profile</code></td><td></td></tr>
+    <tr><td><span class="badge put">PUT</span></td><td><code>/me/timezone/sync</code></td><td></td></tr>
+    <tr><td><span class="badge put">PUT</span></td><td><code>/me/password</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/teachers/accept-invitation</code></td><td>بلا مصادقة</td></tr>
+  </table>
+
+  <h4>البحث العام والملفات العامة (بلا مصادقة)</h4>
+  <table>
+    <tr><td><span class="badge get">GET</span></td><td><code>/teachers/search</code></td><td></td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/teachers/{teacher}</code></td><td></td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/teachers/{teacher}/packages</code></td><td></td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/teachers/{teacher}/courses</code></td><td></td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/teachers/{teacher}/reviews</code></td><td></td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/meta/stats</code></td><td></td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/meta/filters</code></td><td></td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/taxonomy/{type}</code></td><td></td></tr>
+  </table>
+
+  <h4>المعلمون (إدارة)</h4>
+  <table>
+    <tr><td><span class="badge get">GET</span></td><td><code>/teachers</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/teachers</code></td><td>دعوة معلم</td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/teachers/create-account</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/teachers/import</code></td><td>استيراد Excel</td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/teachers/{teacher}/admin-detail</code></td><td></td></tr>
+    <tr><td><span class="badge put">PUT</span></td><td><code>/teachers/{teacher}</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/teachers/{teacher}/submit-for-verification</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/teachers/{teacher}/approve</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/teachers/{teacher}/reject</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/teachers/{teacher}/suspend</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/teachers/{teacher}/verification-documents</code></td><td></td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/verification-documents</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/verification-documents/{document}/approve</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/verification-documents/{document}/reject</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/verification-documents/{document}/download-url</code></td><td></td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/verification-documents/{document}/download</code></td><td>موقّع مؤقتاً، بلا مصادقة</td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/badges</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/teachers/{teacher}/badges</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/badge-awards/{badgeAward}/revoke</code></td><td></td></tr>
+  </table>
+
+  <h4>الباقات والدورات</h4>
+  <table>
+    <tr><td><span class="badge get">GET</span></td><td><code>/packages</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/packages</code></td><td></td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/packages/{package}</code></td><td></td></tr>
+    <tr><td><span class="badge put">PUT</span></td><td><code>/packages/{package}</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/packages/{package}/submit</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/packages/{package}/disable</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/packages/{package}/approve</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/packages/{package}/reject</code></td><td></td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/teachers/{teacher}/availability-slots</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/teachers/{teacher}/availability-slots</code></td><td></td></tr>
+    <tr><td><span class="badge delete">DELETE</span></td><td><code>/teachers/{teacher}/availability-slots/{slot}</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/teachers/{teacher}/blackouts</code></td><td></td></tr>
+    <tr><td><span class="badge delete">DELETE</span></td><td><code>/teachers/{teacher}/blackouts/{blackout}</code></td><td></td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/courses</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/courses</code></td><td></td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/courses/{course}</code></td><td></td></tr>
+    <tr><td><span class="badge put">PUT</span></td><td><code>/courses/{course}</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/courses/{course}/submit</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/courses/{course}/disable</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/courses/{course}/approve</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/courses/{course}/reject</code></td><td></td></tr>
+  </table>
+
+  <h4>الحجز والتسجيل والدفع</h4>
+  <table>
+    <tr><td><span class="badge get">GET</span></td><td><code>/bookings</code></td><td></td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/bookings/{booking}</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/packages/{package}/bookings/individual</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/packages/{package}/bookings/group</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/packages/{package}/bookings/manual</code></td><td>أدمن فقط</td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/bookings/{booking}/approve</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/bookings/{booking}/reject</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/bookings/{booking}/checkout</code></td><td></td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/bookings/{booking}/invoice</code></td><td>PDF</td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/enrollments</code></td><td></td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/enrollments/{enrollment}</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/courses/{course}/enrollments</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/courses/{course}/enrollments/manual</code></td><td>أدمن فقط</td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/enrollments/{enrollment}/checkout</code></td><td></td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/enrollments/{enrollment}/invoice</code></td><td>PDF</td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/webhooks/stripe</code></td><td>بلا مصادقة، توقيع Stripe</td></tr>
+  </table>
+
+  <h4>الجلسات والحضور وتغيير المواعيد</h4>
+  <table>
+    <tr><td><span class="badge get">GET</span></td><td><code>/class-sessions</code></td><td></td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/class-sessions/{session}</code></td><td></td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/class-sessions/{session}/join</code></td><td>تحقق BBB + رابط أو رسالة خطأ</td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/session-attendees/{attendee}/present</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/session-attendees/{attendee}/absent</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/class-sessions/{session}/no-show-teacher</code></td><td></td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/reschedule-requests</code></td><td></td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/reschedule-requests/{rescheduleRequest}</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/class-sessions/{session}/reschedule-requests</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/reschedule-requests/{rescheduleRequest}/approve</code></td><td>أدمن</td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/reschedule-requests/{rescheduleRequest}/reject</code></td><td>أدمن</td></tr>
+  </table>
+
+  <h4>التقييمات والشكاوى والمفضلة والإشعارات</h4>
+  <table>
+    <tr><td><span class="badge get">GET</span></td><td><code>/me/reviews</code></td><td></td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/reviews</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/class-sessions/{session}/reviews</code></td><td></td></tr>
+    <tr><td><span class="badge put">PUT</span></td><td><code>/reviews/{review}</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/reviews/{review}/respond</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/reviews/{review}/hide</code></td><td>أدمن</td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/reviews/{review}/unhide</code></td><td>أدمن</td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/reviews/{review}/report</code></td><td></td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/complaints</code></td><td></td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/complaints/{complaint}</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/complaints</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/complaints/{complaint}/resolve</code></td><td>أدمن</td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/complaints/{complaint}/escalate</code></td><td></td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/favorites</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/favorites/teachers/{teacher}</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/favorites/courses/{course}</code></td><td></td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/notifications</code></td><td></td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/notifications/unread-count</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/notifications/mark-all-read</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/notifications/{notification}/read</code></td><td></td></tr>
+  </table>
+
+  <h4>الطلاب والمستحقات المالية والإدارة</h4>
+  <table>
+    <tr><td><span class="badge post">POST</span></td><td><code>/students/import</code></td><td>استيراد Excel</td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/students/create-account</code></td><td></td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/students</code></td><td></td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/students/{student}</code></td><td></td></tr>
+    <tr><td><span class="badge put">PUT</span></td><td><code>/students/{student}</code></td><td></td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/payouts</code></td><td></td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/payouts/{payout}</code></td><td></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/teachers/{teacher}/payouts/generate</code></td><td>أدمن</td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/payouts/{payout}/approve</code></td><td>أدمن</td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/payouts/{payout}/mark-paid</code></td><td>أدمن</td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/dashboard/admin</code></td><td>أدمن</td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/admin/settings</code></td><td>أدمن</td></tr>
+    <tr><td><span class="badge put">PUT</span></td><td><code>/admin/settings/{key}</code></td><td>أدمن</td></tr>
+    <tr><td><span class="badge get">GET</span></td><td><code>/admin/audit-log</code></td><td>أدمن</td></tr>
+  </table>
+</section>
+
+<section id="glossary">
+  <h2>10. ملحق: قاموس المصطلحات</h2>
+  <table>
+    <tr><th>المصطلح</th><th>المعنى</th></tr>
+    <tr><td>Package (باقة)</td><td>عرض تعليمي من معلم — فردي (بموعد يُتفق عليه) أو جماعي (جدول ثابت).</td></tr>
+    <tr><td>Course (دورة)</td><td>برنامج تدريبي من مركز تدريب فقط، بجدول ومقاعد محدودة.</td></tr>
+    <tr><td>Booking (حجز)</td><td>ارتباط طالب بباقة — الكيان الذي يحمل حالة الدفع ويملك الجلسات.</td></tr>
+    <tr><td>Enrollment (تسجيل)</td><td>ارتباط طالب بدورة — مكافئ الحجز لكن للدورات.</td></tr>
+    <tr><td>Class Session (جلسة)</td><td>موعد فردي فعلي (تاريخ + وقت) ضمن حجز أو تسجيل، يحمل رابط BBB الخاص به.</td></tr>
+    <tr><td>BBB (BigBlueButton)</td><td>خادم الفيديو المباشر الذي تُستضاف عليه الجلسات.</td></tr>
+    <tr><td>Moderator / Attendee</td><td>صلاحيتا BBB: مشرف (المعلم — تحكم كامل) وحاضر (الطالب — مشاهدة/مشاركة محدودة).</td></tr>
+    <tr><td>Payout (مستحقات)</td><td>المبلغ المستحق للمعلم بعد خصم هامش المنصة، يُصرَف دورياً.</td></tr>
+    <tr><td>Reschedule Request</td><td>طلب تغيير موعد جلسة قائمة — يتطلب موافقة الأدمن دائماً.</td></tr>
+    <tr><td>Audit Log (سجل التدقيق)</td><td>سجل غير قابل للتعديل لكل إجراء إداري حساس، لأغراض المساءلة.</td></tr>
+    <tr><td>Settings (الإعدادات)</td><td>قيم عمل قابلة للضبط من لوحة الأدمن بدل كتابتها ثابتة في الكود.</td></tr>
+  </table>
+</section>
+
+<footer>
+  TAALAM — وثيقة متطلبات النظام · للاستخدام الداخلي لفريق ضمان الجودة
+</footer>
+
+</main>
+</div>
+</body>
+</html>

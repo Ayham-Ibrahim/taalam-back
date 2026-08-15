@@ -5,10 +5,13 @@ namespace App\Http\Controllers\Session;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\Session\ClassSessionResource;
 use App\Models\ClassSession;
+use App\Services\SessionService;
 use Illuminate\Http\Request;
 
 class ClassSessionController extends Controller
 {
+    public function __construct(private readonly SessionService $sessionService) {}
+
     private const EAGER_LOAD = [
         'teacher:id,user_id',
         'teacher.user:id,name,avatar_path',
@@ -54,5 +57,23 @@ class ClassSessionController extends Controller
         $session->load(self::EAGER_LOAD);
 
         return $this->success(new ClassSessionResource($session));
+    }
+
+    /**
+     * يتحقق أن غرفة BBB تعمل فعلاً قبل إرجاع رابط الانضمام — بدل فتح رابط
+     * BBB الخام مباشرة من الفرونت إند، الذي يُظهر استجابة XML غير منسّقة
+     * حين يفشل (الجلسة لم تبدأ بعد، انتهت، أو لم تُنشأ الغرفة أصلاً).
+     */
+    public function join(Request $request, ClassSession $session)
+    {
+        $this->authorize('view', $session);
+
+        $result = $this->sessionService->resolveJoinUrl($session, $request->user());
+
+        if (! $result['joinable']) {
+            return $this->error($result['message'], 422);
+        }
+
+        return $this->success(['url' => $result['url']]);
     }
 }

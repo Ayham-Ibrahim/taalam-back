@@ -59,6 +59,35 @@ class BigBlueButtonService
         ]);
     }
 
+    /**
+     * قبل فتح رابط الانضمام الخام (الذي يُرجع XML غير منسّق مباشرةً في
+     * المتصفح عند الفشل — اجتماع لم يُنشأ بعد على BBB، أو انتهى)، يجب
+     * التحقق أن الاجتماع فعلاً يعمل على خادم BBB. لا نستطيع "التقاط" فشل
+     * التنقّل المباشر لرابط join بعد فتحه — لذا التحقق يجب أن يحدث هنا أولاً.
+     */
+    public function isMeetingRunning(string $meetingId): bool
+    {
+        if (! $this->isConfigured()) {
+            return false;
+        }
+
+        try {
+            $response = Http::timeout(10)->get($this->signedUrl('isMeetingRunning', [
+                'meetingID' => $meetingId,
+            ]));
+
+            $xml = $response->ok() ? @simplexml_load_string($response->body()) : null;
+
+            return $xml !== false && $xml !== null
+                && (string) $xml->returncode === 'SUCCESS'
+                && (string) $xml->running === 'true';
+        } catch (Throwable $e) {
+            Log::warning('bbb.is_meeting_running_exception', ['meetingId' => $meetingId, 'message' => $e->getMessage()]);
+
+            return false;
+        }
+    }
+
     private function isConfigured(): bool
     {
         return filled(config('services.bbb.url')) && filled(config('services.bbb.secret'));

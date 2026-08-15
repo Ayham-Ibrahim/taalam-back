@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Booking;
 use App\Models\ClassSession;
 use App\Models\SessionAttendee;
+use App\Models\User;
 use App\Traits\LogsAuditEvents;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
@@ -50,6 +51,42 @@ class SessionService
         ]);
 
         return $session;
+    }
+
+    /**
+     * فتح رابط BBB الخام مباشرةً كان يُظهر XML غير منسّق مباشرة في المتصفح
+     * كلما لم يكن الاجتماع موجوداً فعلياً على BBB (السر غير مضبوط، لم تُنشأ
+     * الغرفة بعد، أو انتهت الجلسة) — لأن فتح رابط لا يمكن "التقاط" فشله بعد
+     * التنقّل. هذه الدالة تتحقق أولاً أن الاجتماع يعمل فعلاً على BBB وتُرجع
+     * رسالة عربية واضحة بدل ذلك حين لا يكون كذلك، بدل إعادة رابط BBB الخام.
+     *
+     * @return array{joinable: bool, url?: string, message?: string}
+     */
+    public function resolveJoinUrl(ClassSession $session, User $user): array
+    {
+        $isTeacher = $user->isAdmin() || $user->loadMissing('teacher')->teacher?->id === $session->teacher_id;
+        $joinUrl = $isTeacher ? $session->join_url_teacher : $session->join_url_student;
+
+        if (! $joinUrl || ! $session->bbb_meeting_id) {
+            return ['joinable' => false, 'message' => 'لم يتم إعداد رابط الجلسة بعد، يرجى المحاولة لاحقاً أو التواصل مع الدعم.'];
+        }
+
+        if ($this->bbb->isMeetingRunning($session->bbb_meeting_id)) {
+            return ['joinable' => true, 'url' => $joinUrl];
+        }
+
+        $now = now();
+        $endsAt = $session->scheduled_at->clone()->addMinutes($session->duration_min);
+
+        if ($now->lt($session->scheduled_at)) {
+            $message = 'لم تبدأ هذه الجلسة بعد، يرجى الانتظار حتى موعدها ثم إعادة المحاولة.';
+        } elseif ($now->gt($endsAt)) {
+            $message = 'انتهت هذه الجلسة ولم تعد متاحة للانضمام.';
+        } else {
+            $message = 'تعذّر الوصول إلى غرفة الجلسة حالياً، يرجى المحاولة خلال لحظات أو التواصل مع الدعم.';
+        }
+
+        return ['joinable' => false, 'message' => $message];
     }
 
     public function markPresent(SessionAttendee $attendee): SessionAttendee
