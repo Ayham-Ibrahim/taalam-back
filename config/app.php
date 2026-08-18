@@ -41,6 +41,12 @@ return [
 
     'debug' => (bool) env('APP_DEBUG', false),
 
+    'api_rate_limiting_enabled' => filter_var(
+        env('API_RATE_LIMITING_ENABLED', env('APP_ENV') === 'production'),
+        FILTER_VALIDATE_BOOL,
+        FILTER_NULL_ON_FAILURE,
+    ) ?? env('APP_ENV') === 'production',
+
     /*
     |--------------------------------------------------------------------------
     | Application URL

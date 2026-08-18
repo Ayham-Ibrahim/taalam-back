@@ -43,8 +43,10 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        Model::preventLazyLoading(! $this->app->isProduction());
-        Model::preventSilentlyDiscardingAttributes(! $this->app->isProduction());
+        $apiRateLimitingEnabled = $this->apiRateLimitingEnabled();
+
+        Model::preventLazyLoading(! $this->app->environment('production'));
+        Model::preventSilentlyDiscardingAttributes(! $this->app->environment('production'));
 
         foreach ([Curriculum::class, Stage::class, Subject::class, University::class, Major::class, CourseField::class, Language::class] as $model) {
             Gate::policy($model, TaxonomyPolicy::class);
@@ -58,7 +60,11 @@ class AppServiceProvider extends ServiceProvider
 
         // موثّق أعلى حداً من زائر مجهول (يُميَّز بـ IP) — يحمي نقاط الدخول العامة
         // (تسجيل الدخول، بحث السوق) من إساءة الاستخدام دون تقييد المستخدمين الفعليين.
-        RateLimiter::for('api', function (Request $request) {
+        RateLimiter::for('api', function (Request $request) use ($apiRateLimitingEnabled) {
+            if (! $apiRateLimitingEnabled) {
+                return Limit::none();
+            }
+
             return $request->user()
                 ? Limit::perMinute(120)->by('user:'.$request->user()->id)
                 : Limit::perMinute(30)->by('guest:'.$request->ip());
@@ -66,7 +72,11 @@ class AppServiceProvider extends ServiceProvider
 
         // 5 محاولات/دقيقة لكل (إيميل + IP) معاً — يمنع التخمين المتكرر بلا التأثير
         // على مستخدم شرعي ينسى كلمة المرور مرة أو اثنتين. راجع routes/api.php (login).
-        RateLimiter::for('login', function (Request $request) {
+        RateLimiter::for('login', function (Request $request) use ($apiRateLimitingEnabled) {
+            if (! $apiRateLimitingEnabled) {
+                return Limit::none();
+            }
+
             $key = Str::transliterate(Str::lower((string) $request->input('email'))).'|'.$request->ip();
 
             return Limit::perMinute(5)->by($key);
@@ -74,20 +84,32 @@ class AppServiceProvider extends ServiceProvider
 
         // تسجيل ذاتي — أندر من محاولات الدخول لكن هدفه مختلف: منع إنشاء حسابات
         // وهمية بالجملة (سبام) بدل التخمين. 10/ساعة لكل IP كافية لمستخدم حقيقي.
-        RateLimiter::for('register', function (Request $request) {
+        RateLimiter::for('register', function (Request $request) use ($apiRateLimitingEnabled) {
+            if (! $apiRateLimitingEnabled) {
+                return Limit::none();
+            }
+
             return Limit::perHour(10)->by('register:'.$request->ip());
         });
 
         // رفع ملفات (صورة شخصية، وثيقة توثيق) — عملية مكلفة (تخزين + تحقق أبعاد/نوع)
         // لكل مستخدم موثّق فقط (المسارات كلها خلف auth:sanctum أصلاً)؛ 15/دقيقة يكفي
         // أي استخدام شرعي (إعادة محاولة رفع بعد خطأ) ويمنع استنزاف مساحة التخزين.
-        RateLimiter::for('uploads', function (Request $request) {
+        RateLimiter::for('uploads', function (Request $request) use ($apiRateLimitingEnabled) {
+            if (! $apiRateLimitingEnabled) {
+                return Limit::none();
+            }
+
             return Limit::perMinute(15)->by('uploads:'.$request->user()?->id);
         });
 
         // تغيير كلمة المرور يتطلب كلمة المرور الحالية أصلاً، لكن هذا سطر دفاع إضافي
         // ضد تخمينها بالقوة الغاشمة عبر نداءات متكررة لنفس الحساب الموثّق.
-        RateLimiter::for('password-change', function (Request $request) {
+        RateLimiter::for('password-change', function (Request $request) use ($apiRateLimitingEnabled) {
+            if (! $apiRateLimitingEnabled) {
+                return Limit::none();
+            }
+
             return Limit::perHour(5)->by('password-change:'.$request->user()?->id);
         });
 
@@ -97,7 +119,12 @@ class AppServiceProvider extends ServiceProvider
         Password::defaults(function () {
             $rule = Password::min(8)->mixedCase()->numbers();
 
-            return $this->app->isProduction() ? $rule->uncompromised() : $rule;
+            return $this->app->environment('production') ? $rule->uncompromised() : $rule;
         });
+    }
+
+    private function apiRateLimitingEnabled(): bool
+    {
+        return (bool) config('app.api_rate_limiting_enabled', $this->app->environment('production'));
     }
 }
