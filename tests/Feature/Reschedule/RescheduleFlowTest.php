@@ -201,6 +201,25 @@ class RescheduleFlowTest extends TestCase
         $response->assertStatus(201);
     }
 
+    public function test_cannot_request_reschedule_for_an_ended_session_and_no_request_is_created(): void
+    {
+        [$teacher, $teacherToken] = $this->createVerifiedTeacher();
+        $session = $this->createSession($teacher, now()->subHour());
+
+        $response = $this->as($teacherToken)->postJson("/api/class-sessions/{$session->id}/reschedule-requests", [
+            'proposed_scheduled_at' => now()->addDay()->toDateTimeString(),
+            'reason' => 'محاولة بعد انتهاء الجلسة',
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJsonPath('errors.session.0', 'لا يمكن طلب تغيير موعد لجلسة منتهية أو ملغاة');
+
+        $this->assertDatabaseMissing('reschedule_requests', [
+            'class_session_id' => $session->id,
+            'requested_by' => $teacher->user_id,
+        ]);
+    }
+
     public function test_a_teacher_who_does_not_own_the_session_cannot_request_reschedule(): void
     {
         [$teacher] = $this->createVerifiedTeacher();
