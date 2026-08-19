@@ -158,6 +158,31 @@ class RescheduleFlowTest extends TestCase
         $second->assertStatus(422);
     }
 
+    public function test_admin_list_includes_filled_reschedule_fields_and_created_at(): void
+    {
+        [$teacher, $teacherToken] = $this->createVerifiedTeacher();
+        $session = $this->createSession($teacher, now()->addDays(5));
+        $proposedAt = now()->addDays(6);
+
+        $this->as($teacherToken)->postJson("/api/class-sessions/{$session->id}/reschedule-requests", [
+            'proposed_scheduled_at' => $proposedAt->toDateTimeString(),
+            'reason' => 'سبب',
+        ])->assertStatus(201);
+
+        [, $adminToken] = $this->createAdmin();
+
+        $response = $this->as($adminToken)->getJson('/api/reschedule-requests');
+
+        $response->assertStatus(200)
+            ->assertJsonPath('data.0.teacherName', $teacher->user()->value('name'))
+            ->assertJsonPath('data.0.studentName', $session->booking->student->user->name)
+            ->assertJsonPath('data.0.status', 'pending');
+
+        $this->assertSame($session->scheduled_at->toIso8601String(), $response->json('data.0.originalScheduledAt'));
+        $this->assertSame($proposedAt->toIso8601String(), $response->json('data.0.proposedScheduledAt'));
+        $this->assertNotNull($response->json('data.0.createdAt'));
+    }
+
     public function test_student_attending_the_session_can_request_reschedule(): void
     {
         [$teacher] = $this->createVerifiedTeacher();

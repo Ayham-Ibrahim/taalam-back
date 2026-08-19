@@ -23,6 +23,9 @@ class AdminTeacherResource extends JsonResource
             'phone' => $this->user?->phone,
             'type' => $this->teacher_type,
             'status' => $this->displayStatus(),
+            'rawStatus' => $this->status,
+            'canApprove' => $this->status === 'pending_verification',
+            'approvalBlockedReason' => $this->approvalBlockedReason(),
             'city' => $this->city,
             'address' => $this->address,
             'website' => $this->website,
@@ -48,6 +51,15 @@ class AdminTeacherResource extends JsonResource
         return match ($this->status) {
             'active_unverified', 'pending_verification' => 'pending',
             default => $this->status,
+        };
+    }
+
+    private function approvalBlockedReason(): ?string
+    {
+        return match ($this->status) {
+            'active_unverified' => 'لم يُكمل المعلم ملفه الشخصي أو يرسل طلب التوثيق بعد، لذلك لا يمكن اعتماده الآن.',
+            'rejected' => 'لا يمكن اعتماد الطلب المرفوض مباشرة. يجب أن يُحدّث المعلم ملفه ثم يعيد إرسال طلب التوثيق أولاً.',
+            default => null,
         };
     }
 }

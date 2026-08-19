@@ -74,6 +74,9 @@ class AdminTeacherDetailTest extends TestCase
         $response->assertJsonPath('data.teacher.id', $teacher->id);
         $response->assertJsonPath('data.teacher.name', $teacherUser->name);
         $response->assertJsonPath('data.teacher.status', 'pending');
+        $response->assertJsonPath('data.teacher.rawStatus', 'pending_verification');
+        $response->assertJsonPath('data.teacher.canApprove', true);
+        $response->assertJsonPath('data.teacher.approvalBlockedReason', null);
         $response->assertJsonPath('data.teacher.bio', 'معلم متمرس');
         $response->assertJsonPath('data.teacher.qualification', 'master');
         $response->assertJsonPath('data.teacher.experienceYears', '3_5');
@@ -105,6 +108,9 @@ class AdminTeacherDetailTest extends TestCase
 
         $response->assertStatus(200);
         $response->assertJsonPath('data.teacher.status', 'pending');
+        $response->assertJsonPath('data.teacher.rawStatus', 'active_unverified');
+        $response->assertJsonPath('data.teacher.canApprove', false);
+        $response->assertJsonPath('data.teacher.approvalBlockedReason', 'لم يُكمل المعلم ملفه الشخصي أو يرسل طلب التوثيق بعد، لذلك لا يمكن اعتماده الآن.');
     }
 
     public function test_student_cannot_view_a_teachers_admin_detail(): void
