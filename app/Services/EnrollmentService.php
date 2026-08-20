@@ -20,7 +20,10 @@ class EnrollmentService
 {
     use LogsAuditEvents;
 
-    public function __construct(private readonly SettingsService $settings) {}
+    public function __construct(
+        private readonly SettingsService $settings,
+        private readonly ScheduleConflictService $conflicts,
+    ) {}
 
     public function initiateEnrollment(Student $student, Course $course): Enrollment
     {
@@ -30,7 +33,12 @@ class EnrollmentService
         return DB::transaction(function () use ($student, $course) {
             $enrollment = $this->createEnrollmentRecord($student, $course);
 
+            // courseSessionsFor() تُنشئ جلسات الدورة (مرة واحدة، مملوكة للدورة لا
+            // للطالب) أو تُعيد الموجودة — الالتزام الفعلي بالطالب يحدث في حلقة
+            // SessionAttendee أدناه، فالفحص يسبقها مباشرة؛ أي تعارض يُلغي كامل
+            // المعاملة (rollback تلقائي) فلا يبقى تسجيل ولا سطر حضور جديد.
             $sessions = $this->courseSessionsFor($course);
+            $this->conflicts->assertNoConflict($student, $sessions->pluck('scheduled_at'), $course->session_duration_min);
 
             foreach ($sessions as $session) {
                 SessionAttendee::create([
@@ -63,6 +71,7 @@ class EnrollmentService
             ]);
 
             $sessions = $this->courseSessionsFor($course);
+            $this->conflicts->assertNoConflict($student, $sessions->pluck('scheduled_at'), $course->session_duration_min);
 
             foreach ($sessions as $session) {
                 SessionAttendee::create([

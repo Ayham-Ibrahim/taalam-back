@@ -23,7 +23,10 @@ class BookingService
 
     private const EXPIRED_PENDING_TEACHER_CONFIRMATION_REASON = 'انتهى وقت الجلسة المقترحة دون موافقة المعلم.';
 
-    public function __construct(private readonly SettingsService $settings) {}
+    public function __construct(
+        private readonly SettingsService $settings,
+        private readonly ScheduleConflictService $conflicts,
+    ) {}
 
     /**
      * فردي (خاص بمعلم مدرسي/جامعي): المعلم يحدد فقط الأيام المتاحة لهذه الباقة —
@@ -44,16 +47,20 @@ class BookingService
         $requestedDate = Carbon::parse($date);
         $this->assertDateMatchesPackageDays($package, $requestedDate);
 
-        $hasOpenRequest = Booking::where('student_id', $student->id)
-            ->where('package_id', $package->id)
-            ->whereIn('status', ['pending_teacher_confirmation', 'pending_payment', 'confirmed', 'active'])
-            ->exists();
+        $this->assertNoOpenBookingForPackage($student, $package);
 
-        if ($hasOpenRequest) {
-            throw ValidationException::withMessages([
-                'package' => ['لديك طلب أو حجز قائم بالفعل لهذه الباقة'],
-            ]);
-        }
+        // فحص مبكّر استشاري بأفضل تقدير متاح الآن (منطقة الطالب الحالية) —
+        // يمنع تقديم طلب تعارض واضح مسبقاً بدل تركه لخيبة أمل عند رفض المعلم
+        // له لاحقاً. الفحص الحاسم والملزم فعلياً يحدث عند الموافقة الفعلية
+        // (approveIndividualRequest) لأن الجلسات الحقيقية لا تُنشأ إلا حينها.
+        $anchorGuess = Carbon::parse($requestedDate->toDateString(), $this->studentTimezone($student))
+            ->setTimeFromTimeString($startTime)
+            ->setTimezone(config('app.timezone'));
+        $this->conflicts->assertNoConflict(
+            $student,
+            $this->weeklyOccurrences($anchorGuess, $package->sessions_count),
+            $this->defaultSessionDurationMinutes(),
+        );
 
         return $this->createBookingRecord($student, $package, [
             'status' => 'pending_teacher_confirmation',
@@ -99,6 +106,16 @@ class BookingService
             $anchor = Carbon::parse($this->dateString($booking->requested_date), $booking->requested_timezone ?? 'UTC')
                 ->setTimeFromTimeString((string) $booking->requested_start_time)
                 ->setTimezone(config('app.timezone'));
+
+            // الفحص الملزم فعلياً — الجلسات الحقيقية تُنشأ خلال ثوانٍ من هنا، فأي
+            // تعارض (بما فيه حجز آخر تسارع للموافقة عليه بين طلب هذا الطالب
+            // ولحظة موافقة المعلم) يجب أن يمنع إنشاءها نهائياً، لا فقط تحذيراً.
+            $this->conflicts->assertNoConflict(
+                $booking->student,
+                $this->weeklyOccurrences($anchor, $booking->package->sessions_count),
+                $this->defaultSessionDurationMinutes(),
+            );
+
             $sessions = $this->sessionsFromAnchor($booking->package, $booking, $anchor);
 
             foreach ($sessions as $session) {
@@ -232,10 +249,22 @@ class BookingService
             ]);
         }
 
+        // لم يكن هناك أي منع سابقاً لنفس الطالب من إنشاء أكثر من سطر حجز لنفس
+        // الباقة الجماعية (كل ضغطة "انضمام" تُنشئ Booking جديداً) — هذا لا يمنع
+        // طلاباً آخرين من الانضمام، فالفحص مقيَّد بـ student_id+package_id معاً.
+        $this->assertNoOpenBookingForPackage($student, $package);
+
         return DB::transaction(function () use ($student, $package) {
             $booking = $this->createBookingRecord($student, $package);
 
+            // sessionsFor() قد تكون هذه أول عملية انضمام (تُنشئ جلسات المجموعة
+            // فعلياً) أو انضماماً لاحقاً (تُعيد الموجودة) — إما حال، الجلسات نفسها
+            // مملوكة للباقة لا لهذا الطالب تحديداً، فإنشاؤها هنا غير خطير. الخطر
+            // الفعلي هو تسجيل الطالب حاضراً (registerAttendee) في وقت متعارض —
+            // لذا الفحص يسبق ذلك مباشرة، وأي تعارض يُلغي كامل المعاملة (rollback
+            // تلقائي عبر DB::transaction) فلا يبقى حجز ولا سطر حضور جديد.
             $sessions = $this->sessionsFor($package, $booking);
+            $this->conflicts->assertNoConflict($student, $sessions->pluck('scheduled_at'), $this->defaultSessionDurationMinutes());
 
             foreach ($sessions as $session) {
                 $this->registerAttendee($session, $student, booking: $booking);
@@ -264,6 +293,10 @@ class BookingService
             ]);
         }
 
+        // نفس القيد المفروض على الحجز الذاتي — الأدمن لا يُستثنى منه، فالمقصود
+        // منع الطالب من امتلاك أكثر من اشتراك قائم بنفس الباقة بصرف النظر عمّن ينشئه.
+        $this->assertNoOpenBookingForPackage($student, $package);
+
         return DB::transaction(function () use ($student, $package, $admin, $reason, $date, $startTime) {
             $booking = $this->createBookingRecord($student, $package, [
                 'is_manual' => true,
@@ -274,14 +307,26 @@ class BookingService
                 'hold_expires_at' => null,
             ]);
 
+            // الحجز اليدوي مؤكَّد فوراً بلا مرحلة موافقة وسيطة، فهو الفرصة
+            // الوحيدة لمنع التعارض هنا — لا فرق عن الحجز الذاتي من ناحية
+            // الالتزام الفعلي بالجلسة.
             if ($package->isIndividual()) {
                 // نفس منطقة الطالب المستهدَف — الأدمن يحجز نيابةً عنه فالوقت المقصود هو وقته المحلي هو، لا وقت الأدمن
                 $requestedDate = Carbon::parse($date, $this->studentTimezone($student));
                 $this->assertDateMatchesPackageDays($package, $requestedDate);
                 $anchor = $requestedDate->setTimeFromTimeString($startTime)->setTimezone(config('app.timezone'));
+
+                $this->conflicts->assertNoConflict(
+                    $student,
+                    $this->weeklyOccurrences($anchor, $package->sessions_count),
+                    $this->defaultSessionDurationMinutes(),
+                );
+
                 $sessions = $this->sessionsFromAnchor($package, $booking, $anchor);
             } else {
                 $sessions = $this->sessionsFor($package, $booking);
+
+                $this->conflicts->assertNoConflict($student, $sessions->pluck('scheduled_at'), $this->defaultSessionDurationMinutes());
             }
 
             foreach ($sessions as $session) {
@@ -335,9 +380,38 @@ class BookingService
         }
     }
 
+    /**
+     * "قائم لم ينتهِ" = طلب/حجز بحالة pending_teacher_confirmation أو
+     * pending_payment أو confirmed أو active — أي شيء لم يُلغَ/يُرفض/ينتهِ/يكتمل
+     * بعد. مُطبَّق على كل مسارات إنشاء الحجز (ذاتي فردي/جماعي ويدوي من الأدمن)
+     * بلا استثناء، فالقيد على الطالب لا على من يُنشئ الحجز نيابةً عنه.
+     */
+    private function assertNoOpenBookingForPackage(Student $student, Package $package): void
+    {
+        $hasOpenBooking = Booking::where('student_id', $student->id)
+            ->where('package_id', $package->id)
+            ->whereIn('status', ['pending_teacher_confirmation', 'pending_payment', 'confirmed', 'active'])
+            ->exists();
+
+        if ($hasOpenBooking) {
+            throw ValidationException::withMessages([
+                'package' => ['لا يمكن الاشتراك في هذه الباقة لأن لديك اشتراكًا قائمًا لم ينتهِ بعد.'],
+            ]);
+        }
+    }
+
     private function studentTimezone(Student $student): string
     {
         return $student->loadMissing('user')->user->timezone ?? 'UTC';
+    }
+
+    /**
+     * @return Collection<int, Carbon> $count لحظة بدء، أسبوعياً بدءاً من $anchor —
+     *                                  نفس تكرار sessionsFromAnchor بالضبط.
+     */
+    private function weeklyOccurrences(Carbon $anchor, int $count): Collection
+    {
+        return collect(range(0, $count - 1))->map(fn (int $i) => $anchor->copy()->addWeeks($i));
     }
 
     /**

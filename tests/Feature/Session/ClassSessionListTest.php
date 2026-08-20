@@ -110,6 +110,22 @@ class ClassSessionListTest extends TestCase
             ->assertJsonPath('data.0.id', $oldest->id);
     }
 
+    public function test_sort_asc_orders_sessions_from_nearest_to_farthest(): void
+    {
+        [$teacher, $token] = $this->createVerifiedTeacher();
+
+        [, $nearest] = $this->createBookingWithSession($teacher, now()->addDay());
+        [, $middle] = $this->createBookingWithSession($teacher, now()->addDays(2));
+        [, $farthest] = $this->createBookingWithSession($teacher, now()->addDays(3));
+
+        $response = $this->as($token)->getJson('/api/class-sessions?sort=asc');
+
+        $response->assertStatus(200)
+            ->assertJsonPath('data.0.id', $nearest->id)
+            ->assertJsonPath('data.1.id', $middle->id)
+            ->assertJsonPath('data.2.id', $farthest->id);
+    }
+
     public function test_teacher_can_filter_sessions_by_student_id(): void
     {
         [$teacher, $token] = $this->createVerifiedTeacher();

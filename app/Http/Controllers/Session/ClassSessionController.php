@@ -31,8 +31,14 @@ class ClassSessionController extends Controller
             ->when($request->filled('from'), fn ($q) => $q->where('scheduled_at', '>=', $request->date('from')))
             ->when($request->filled('to'), fn ($q) => $q->where('scheduled_at', '<=', $request->date('to')))
             ->with(self::eagerLoad())
-            ->orderByDesc('scheduled_at')
-            ->orderByDesc('id')
+            // الافتراضي desc (الأحدث تاريخاً أولاً) يبقى كما كان لأي طرف آخر يعتمد
+            // عليه ضمناً — sort=asc صريح (الأقرب موعداً أولاً) يطلبه استدعاء
+            // "جلساتي" في لوحة الطالب تحديداً.
+            ->when(
+                $request->string('sort', 'desc')->value() === 'asc',
+                fn ($q) => $q->orderBy('scheduled_at')->orderBy('id'),
+                fn ($q) => $q->orderByDesc('scheduled_at')->orderByDesc('id'),
+            )
             ->paginate($request->integer('per_page', 20));
 
         return $this->paginate($sessions->through(fn (ClassSession $session) => new ClassSessionResource($session)));
