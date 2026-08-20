@@ -18,7 +18,7 @@ class ClassSessionController extends Controller
 
         $sessions = ClassSession::query()
             ->visibleTo($request->user())
-            ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))
+            ->when($request->filled('status'), fn ($q) => $this->applyStatusFilter($q, $request->string('status')->value()))
             ->when(
                 $request->filled('package_id'),
                 fn ($q) => $q->whereHas('booking', fn ($b) => $b->where('package_id', $request->integer('package_id')))
@@ -51,6 +51,29 @@ class ClassSessionController extends Controller
         $session->load(self::eagerLoad());
 
         return $this->success(new ClassSessionResource($session));
+    }
+
+    /**
+     * الفرونت إند يعرض 4 خيارات تصفية بحالة مبسّطة (upcoming/attended/cancelled/
+     * reschedule_pending) تطابق حرفياً تجميع mapSessionStatus() في dashboard
+     * services/index.js — وليست القيم الخام لعمود status (scheduled/completed/
+     * cancelled/active/...). كان يُرسَل المفتاح المبسّط مباشرة كـ where('status', ...)
+     * حرفياً، فلا توجد أبداً جلسة بقيمة status='upcoming' أو 'attended' فعلياً في
+     * القاعدة — فيرجع الفلتر دائماً صفر نتائج لهما، وبصمت تام (بلا أي خطأ). هذه
+     * الدالة تترجم كل حالة مبسّطة لمجموعة القيم الخام المطابقة لها؛ أي قيمة أخرى
+     * غير هذه الأربع (مثال: status=completed مباشرة من مستهلك آخر للـ API) تُطابَق
+     * حرفياً كما كانت — لا تغيير في ذلك السلوك.
+     */
+    private function applyStatusFilter($query, string $status)
+    {
+        $bucket = match ($status) {
+            'upcoming' => ['scheduled', 'reschedule_pending', 'rescheduled', 'active', 'suspended'],
+            'attended' => ['completed'],
+            'cancelled' => ['cancelled', 'no_show_student', 'no_show_teacher'],
+            default => null,
+        };
+
+        return $bucket ? $query->whereIn('status', $bucket) : $query->where('status', $status);
     }
 
     private static function eagerLoad(): array

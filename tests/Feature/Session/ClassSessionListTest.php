@@ -88,6 +88,46 @@ class ClassSessionListTest extends TestCase
         $this->assertFalse($ids->contains($scheduled->id));
     }
 
+    /**
+     * الفرونت إند لا يرسل أبداً القيم الخام لعمود status (scheduled/completed/
+     * active/no_show_student...) في عناصر تصفية "الحالة" التي يعرضها للمستخدم —
+     * يرسل حرفياً upcoming/attended/cancelled (تجميع mapSessionStatus() في
+     * services/index.js). كان where('status', 'upcoming') لا يطابق أي سطر أبداً
+     * فيرجع صفر نتائج دائماً بصمت — هذا الاختبار يثبت أن كل حالة مجمَّعة تُترجم
+     * الآن لمجموعة القيم الخام الصحيحة المطابقة لها.
+     */
+    public function test_status_filter_translates_the_frontends_grouped_status_values_to_the_matching_raw_statuses(): void
+    {
+        [$teacher, $token] = $this->createVerifiedTeacher();
+
+        [, $scheduled] = $this->createBookingWithSession($teacher, now()->addDay());
+        [, $active] = $this->createBookingWithSession($teacher, now()->addDays(2));
+        $active->update(['status' => 'active']);
+        [, $completed] = $this->createBookingWithSession($teacher, now()->addDays(3));
+        $completed->update(['status' => 'completed']);
+        [, $cancelled] = $this->createBookingWithSession($teacher, now()->addDays(4));
+        $cancelled->update(['status' => 'cancelled']);
+        [, $noShow] = $this->createBookingWithSession($teacher, now()->addDays(5));
+        $noShow->update(['status' => 'no_show_student']);
+
+        $upcoming = $this->as($token)->getJson('/api/class-sessions?status=upcoming');
+        $upcomingIds = collect($upcoming->json('data'))->pluck('id');
+        $this->assertTrue($upcomingIds->contains($scheduled->id));
+        $this->assertTrue($upcomingIds->contains($active->id));
+        $this->assertFalse($upcomingIds->contains($completed->id));
+        $this->assertFalse($upcomingIds->contains($cancelled->id));
+
+        $attended = $this->as($token)->getJson('/api/class-sessions?status=attended');
+        $attendedIds = collect($attended->json('data'))->pluck('id');
+        $this->assertEquals([$completed->id], $attendedIds->all());
+
+        $cancelledFilter = $this->as($token)->getJson('/api/class-sessions?status=cancelled');
+        $cancelledIds = collect($cancelledFilter->json('data'))->pluck('id');
+        $this->assertTrue($cancelledIds->contains($cancelled->id));
+        $this->assertTrue($cancelledIds->contains($noShow->id));
+        $this->assertFalse($cancelledIds->contains($scheduled->id));
+    }
+
     public function test_index_orders_sessions_from_newest_to_oldest_and_paginates(): void
     {
         [$teacher, $token] = $this->createVerifiedTeacher();
