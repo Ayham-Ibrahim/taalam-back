@@ -326,6 +326,38 @@ class BookingFlowTest extends TestCase
         $approveAfterReject->assertStatus(422);
     }
 
+    public function test_teacher_cannot_approve_booking_request_after_requested_time_has_passed(): void
+    {
+        [$teacher, $teacherToken] = $this->createVerifiedTeacher();
+        $package = $this->createActiveIndividualPackage($teacher, teacherPrice: 100, margin: 60);
+        $student = $this->createStudent();
+        $studentToken = User::find($student->user_id)->createToken('t')->plainTextToken;
+
+        $today = Carbon::today();
+        $package->schedules()->create(['day_of_week' => $today->dayOfWeek]);
+
+        $request = $this->as($studentToken)->postJson("/api/packages/{$package->id}/bookings/individual", [
+            'date' => $today->toDateString(),
+            'start_time' => now()->subHour()->format('H:i'),
+        ]);
+        $request->assertStatus(201);
+
+        $bookingId = $request->json('data.id');
+
+        $approve = $this->as($teacherToken)->postJson("/api/bookings/{$bookingId}/approve");
+
+        $approve->assertStatus(422)
+            ->assertJsonPath('errors.status.0', 'انتهى وقت الجلسة المقترحة دون موافقة المعلم.');
+
+        $this->assertDatabaseHas('bookings', [
+            'id' => $bookingId,
+            'status' => 'expired',
+            'cancellation_reason' => 'انتهى وقت الجلسة المقترحة دون موافقة المعلم.',
+        ]);
+        $this->assertSame(0, DB::table('class_sessions')->where('booking_id', $bookingId)->count());
+        $this->assertSame(0, DB::table('payments')->where('booking_id', $bookingId)->count());
+    }
+
     public function test_teacher_can_filter_bookings_by_status_to_see_pending_requests(): void
     {
         [$teacher, $teacherToken] = $this->createVerifiedTeacher();

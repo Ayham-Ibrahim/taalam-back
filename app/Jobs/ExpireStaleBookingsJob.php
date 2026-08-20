@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\Booking;
 use App\Models\Enrollment;
+use App\Services\BookingService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -18,8 +19,10 @@ class ExpireStaleBookingsJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public function handle(): void
+    public function handle(BookingService $bookingService): void
     {
+        $bookingService->expireStalePendingTeacherConfirmations();
+
         Booking::where('status', 'pending_payment')
             ->whereNotNull('hold_expires_at')
             ->where('hold_expires_at', '<', now())

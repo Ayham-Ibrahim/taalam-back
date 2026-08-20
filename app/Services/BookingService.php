@@ -21,6 +21,8 @@ class BookingService
 {
     use LogsAuditEvents;
 
+    private const EXPIRED_PENDING_TEACHER_CONFIRMATION_REASON = 'انتهى وقت الجلسة المقترحة دون موافقة المعلم.';
+
     public function __construct(private readonly SettingsService $settings) {}
 
     /**
@@ -71,13 +73,20 @@ class BookingService
      */
     public function approveIndividualRequest(Booking $booking, User $teacher): Booking
     {
+        $booking->loadMissing(['package', 'student']);
+
+        if ($this->expirePendingTeacherConfirmationIfNeeded($booking)) {
+            throw ValidationException::withMessages([
+                'status' => [self::EXPIRED_PENDING_TEACHER_CONFIRMATION_REASON],
+            ]);
+        }
+
         if ($booking->status !== 'pending_teacher_confirmation') {
             throw ValidationException::withMessages([
                 'status' => ['هذا الطلب لم يعد بانتظار الموافقة'],
             ]);
         }
 
-        $booking->loadMissing(['package', 'student']);
         $this->assertPackageBookable($booking->package);
 
         return DB::transaction(function () use ($booking, $teacher) {
@@ -87,7 +96,7 @@ class BookingService
             // ملاحظة: requested_date مُحوَّل مسبقاً لكائن Carbon (date cast) — يجب تمرير
             // نص خام (toDateString) لا الكائن نفسه، وإلا Carbon::parse يتجاهل $tz تماماً
             // لأن الكائن يحمل منطقته الزمنية الخاصة أصلاً (UTC من الـ cast).
-            $anchor = Carbon::parse($booking->requested_date->toDateString(), $booking->requested_timezone ?? 'UTC')
+            $anchor = Carbon::parse($this->dateString($booking->requested_date), $booking->requested_timezone ?? 'UTC')
                 ->setTimeFromTimeString((string) $booking->requested_start_time)
                 ->setTimezone(config('app.timezone'));
             $sessions = $this->sessionsFromAnchor($booking->package, $booking, $anchor);
@@ -112,6 +121,12 @@ class BookingService
     /** المعلم يرفض طلب الحجز — لا جلسات أُنشئت ولا دفع تم، فلا شيء لاسترداده. */
     public function rejectIndividualRequest(Booking $booking, User $teacher, ?string $reason): Booking
     {
+        if ($this->expirePendingTeacherConfirmationIfNeeded($booking)) {
+            throw ValidationException::withMessages([
+                'status' => [self::EXPIRED_PENDING_TEACHER_CONFIRMATION_REASON],
+            ]);
+        }
+
         if ($booking->status !== 'pending_teacher_confirmation') {
             throw ValidationException::withMessages([
                 'status' => ['هذا الطلب لم يعد بانتظار الموافقة'],
@@ -127,6 +142,62 @@ class BookingService
         $this->audit('booking.request_rejected', $booking, [], [], $reason, $teacher->id);
 
         return $booking;
+    }
+
+    public function expireStalePendingTeacherConfirmations(): int
+    {
+        $updated = 0;
+
+        Booking::query()
+            ->where('status', 'pending_teacher_confirmation')
+            ->whereNotNull('requested_date')
+            ->whereNotNull('requested_start_time')
+            ->lazyById()
+            ->each(function (Booking $booking) use (&$updated): void {
+                if ($this->expirePendingTeacherConfirmationIfNeeded($booking)) {
+                    $updated++;
+                }
+            });
+
+        return $updated;
+    }
+
+    public function pendingTeacherConfirmationExpiredMessage(): string
+    {
+        return self::EXPIRED_PENDING_TEACHER_CONFIRMATION_REASON;
+    }
+
+    private function expirePendingTeacherConfirmationIfNeeded(Booking $booking): bool
+    {
+        if ($booking->status !== 'pending_teacher_confirmation') {
+            return false;
+        }
+
+        if (! $this->requestedSlotAt($booking)->lte(now())) {
+            return false;
+        }
+
+        $booking->update([
+            'status' => 'expired',
+            'cancelled_at' => now(),
+            'cancellation_reason' => self::EXPIRED_PENDING_TEACHER_CONFIRMATION_REASON,
+        ]);
+
+        $this->audit('booking.request_expired', $booking, ['status' => 'pending_teacher_confirmation'], ['status' => 'expired'], self::EXPIRED_PENDING_TEACHER_CONFIRMATION_REASON);
+
+        return true;
+    }
+
+    private function requestedSlotAt(Booking $booking): Carbon
+    {
+        return Carbon::parse($this->dateString($booking->requested_date), $booking->requested_timezone ?? 'UTC')
+            ->setTimeFromTimeString((string) $booking->requested_start_time)
+            ->setTimezone(config('app.timezone'));
+    }
+
+    private function dateString(mixed $value): string
+    {
+        return $value instanceof Carbon ? $value->toDateString() : (string) $value;
     }
 
     private function assertDateMatchesPackageDays(Package $package, Carbon $date): void
@@ -370,7 +441,7 @@ class BookingService
             // start_time أُدخِل بمنطقة المعلم وقت إنشاء الباقة (Package::schedule_timezone) — لا UTC
             // ساذجة. schedule->date كائن Carbon مُحوَّل مسبقاً (date cast) لا نص خام — toDateString()
             // ضروري هنا، وإلا Carbon::parse يتجاهل $tz تماماً (نفس ملاحظة approveIndividualRequest).
-            $scheduledAt = Carbon::parse($schedule->date->toDateString(), $package->schedule_timezone ?? 'UTC')
+            $scheduledAt = Carbon::parse($this->dateString($schedule->date), $package->schedule_timezone ?? 'UTC')
                 ->setTimeFromTimeString((string) $schedule->start_time)
                 ->setTimezone(config('app.timezone'));
 

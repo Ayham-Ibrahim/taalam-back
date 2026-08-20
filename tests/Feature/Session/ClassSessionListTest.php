@@ -5,6 +5,7 @@ namespace Tests\Feature\Session;
 use App\Models\Booking;
 use App\Models\ClassSession;
 use App\Models\Package;
+use App\Models\RescheduleRequest;
 use App\Models\SessionAttendee;
 use App\Models\Student;
 use App\Models\Subject;
@@ -87,6 +88,28 @@ class ClassSessionListTest extends TestCase
         $this->assertFalse($ids->contains($scheduled->id));
     }
 
+    public function test_index_orders_sessions_from_newest_to_oldest_and_paginates(): void
+    {
+        [$teacher, $token] = $this->createVerifiedTeacher();
+
+        [, $oldest] = $this->createBookingWithSession($teacher, now()->addDay());
+        [, $middle] = $this->createBookingWithSession($teacher, now()->addDays(2));
+        [, $newest] = $this->createBookingWithSession($teacher, now()->addDays(3));
+
+        $response = $this->as($token)->getJson('/api/class-sessions?per_page=2&page=1');
+
+        $response->assertStatus(200)
+            ->assertJsonPath('meta.per_page', 2)
+            ->assertJsonPath('meta.current_page', 1)
+            ->assertJsonPath('meta.total', 3)
+            ->assertJsonPath('data.0.id', $newest->id)
+            ->assertJsonPath('data.1.id', $middle->id);
+
+        $pageTwo = $this->as($token)->getJson('/api/class-sessions?per_page=2&page=2');
+        $pageTwo->assertStatus(200)
+            ->assertJsonPath('data.0.id', $oldest->id);
+    }
+
     public function test_teacher_can_filter_sessions_by_student_id(): void
     {
         [$teacher, $token] = $this->createVerifiedTeacher();
@@ -133,6 +156,34 @@ class ClassSessionListTest extends TestCase
         $response->assertStatus(200);
         $this->assertNull($response->json('data.join_url_teacher'));
         $this->assertNotNull($response->json('data.join_url_student'));
+    }
+
+    public function test_index_exposes_pending_reschedule_request_flag(): void
+    {
+        [$teacher, $token] = $this->createVerifiedTeacher();
+        [$booking, $session] = $this->createBookingWithSession($teacher, now()->addDay());
+        $this->attendeeFor($session, $booking);
+
+        RescheduleRequest::create([
+            'class_session_id' => $session->id,
+            'booking_id' => $booking->id,
+            'requested_by' => $teacher->user_id,
+            'requester_role' => 'teacher',
+            'current_scheduled_at' => $session->scheduled_at,
+            'proposed_scheduled_at' => now()->addDays(2),
+            'within_free_window' => false,
+            'hours_before_session' => 24,
+            'reason' => 'ظرف طارئ',
+            'status' => 'pending',
+            'sla_due_at' => now()->addHours(12),
+        ]);
+
+        $response = $this->as($token)->getJson('/api/class-sessions');
+
+        $response->assertStatus(200)
+            ->assertJsonPath('data.0.id', $session->id)
+            ->assertJsonPath('data.0.has_pending_reschedule_request', true)
+            ->assertJsonPath('data.0.pending_reschedule_request_status', 'pending');
     }
 
     /**

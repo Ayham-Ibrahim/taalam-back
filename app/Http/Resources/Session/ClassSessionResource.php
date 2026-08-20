@@ -18,6 +18,9 @@ class ClassSessionResource extends JsonResource
         $isTeacher = $isAdmin || $user?->loadMissing('teacher')->teacher?->id === $this->teacher_id;
         $isStudent = $isAdmin || ($user?->loadMissing('student')->student
             && $this->attendees->contains('student_id', $user->student->id));
+        $pendingRescheduleRequest = $this->relationLoaded('rescheduleRequests')
+            ? $this->rescheduleRequests->first()
+            : null;
 
         return [
             'id' => $this->id,
@@ -35,12 +38,16 @@ class ClassSessionResource extends JsonResource
             'is_makeup' => $this->is_makeup,
             'makeup_for_session_id' => $this->makeup_for_session_id,
             'recording_url' => $this->recording_url,
+            'has_pending_reschedule_request' => (bool) $pendingRescheduleRequest,
+            'pending_reschedule_request_status' => $pendingRescheduleRequest?->status,
+            'pending_reschedule_request_created_at' => $pendingRescheduleRequest?->created_at,
             'join_url_teacher' => $isTeacher ? $this->join_url_teacher : null,
             'join_url_student' => $isStudent ? $this->join_url_student : null,
             'teacher' => $this->whenLoaded('teacher'),
             'booking' => $this->whenLoaded('booking'),
             'course' => $this->whenLoaded('course'),
             'attendees' => $this->whenLoaded('attendees'),
+            'reschedule_requests' => $this->whenLoaded('rescheduleRequests'),
         ];
     }
 }

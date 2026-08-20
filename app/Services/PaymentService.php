@@ -44,8 +44,15 @@ class PaymentService
                 ],
             ]],
             'metadata' => ['booking_id' => $booking->id, 'payment_id' => $payment->id],
-            'success_url' => config('app.url').'/payments/success?session_id={CHECKOUT_SESSION_ID}',
-            'cancel_url' => config('app.url').'/payments/cancel',
+            'success_url' => $this->frontendPaymentUrl('/payments/success', [
+                'session_id' => '{CHECKOUT_SESSION_ID}',
+                'kind' => 'booking',
+                'target' => "booking-{$booking->id}",
+            ]),
+            'cancel_url' => $this->frontendPaymentUrl('/payments/cancel', [
+                'kind' => 'booking',
+                'target' => "booking-{$booking->id}",
+            ]),
         ]);
 
         $payment->update(['stripe_session_id' => $session->id]);
@@ -71,8 +78,15 @@ class PaymentService
                 ],
             ]],
             'metadata' => ['enrollment_id' => $enrollment->id, 'payment_id' => $payment->id],
-            'success_url' => config('app.url').'/payments/success?session_id={CHECKOUT_SESSION_ID}',
-            'cancel_url' => config('app.url').'/payments/cancel',
+            'success_url' => $this->frontendPaymentUrl('/payments/success', [
+                'session_id' => '{CHECKOUT_SESSION_ID}',
+                'kind' => 'enrollment',
+                'target' => "enrollment-{$enrollment->id}",
+            ]),
+            'cancel_url' => $this->frontendPaymentUrl('/payments/cancel', [
+                'kind' => 'enrollment',
+                'target' => "enrollment-{$enrollment->id}",
+            ]),
         ]);
 
         $payment->update(['stripe_session_id' => $session->id]);
@@ -119,5 +133,13 @@ class PaymentService
     private function stripe(): StripeClient
     {
         return new StripeClient((string) config('services.stripe.secret'));
+    }
+
+    private function frontendPaymentUrl(string $path, array $query = []): string
+    {
+        $baseUrl = rtrim((string) config('app.frontend_url', config('app.url')), '/');
+        $queryString = http_build_query($query);
+
+        return $baseUrl.$path.($queryString !== '' ? '?'.$queryString : '');
     }
 }

@@ -12,19 +12,6 @@ class ClassSessionController extends Controller
 {
     public function __construct(private readonly SessionService $sessionService) {}
 
-    private const EAGER_LOAD = [
-        'teacher:id,user_id',
-        'teacher.user:id,name,avatar_path',
-        'attendees:id,class_session_id,student_id,attendance',
-        'attendees.student:id,user_id',
-        'attendees.student.user:id,name',
-        'booking:id,package_id,student_id',
-        'booking.package:id,title,session_format,subject_id',
-        'booking.package.subject:id,name_ar',
-        'course:id,title,subject_id',
-        'course.subject:id,name_ar',
-    ];
-
     public function index(Request $request)
     {
         $this->authorize('viewAny', ClassSession::class);
@@ -43,8 +30,9 @@ class ClassSessionController extends Controller
             )
             ->when($request->filled('from'), fn ($q) => $q->where('scheduled_at', '>=', $request->date('from')))
             ->when($request->filled('to'), fn ($q) => $q->where('scheduled_at', '<=', $request->date('to')))
-            ->with(self::EAGER_LOAD)
-            ->orderBy('scheduled_at')
+            ->with(self::eagerLoad())
+            ->orderByDesc('scheduled_at')
+            ->orderByDesc('id')
             ->paginate($request->integer('per_page', 20));
 
         return $this->paginate($sessions->through(fn (ClassSession $session) => new ClassSessionResource($session)));
@@ -54,9 +42,28 @@ class ClassSessionController extends Controller
     {
         $this->authorize('view', $session);
 
-        $session->load(self::EAGER_LOAD);
+        $session->load(self::eagerLoad());
 
         return $this->success(new ClassSessionResource($session));
+    }
+
+    private static function eagerLoad(): array
+    {
+        return [
+            'teacher:id,user_id',
+            'teacher.user:id,name,avatar_path',
+            'attendees:id,class_session_id,student_id,attendance',
+            'attendees.student:id,user_id',
+            'attendees.student.user:id,name',
+            'rescheduleRequests' => fn ($q) => $q->select('id', 'class_session_id', 'requested_by', 'status', 'created_at')
+                ->where('status', 'pending')
+                ->latest(),
+            'booking:id,package_id,student_id',
+            'booking.package:id,title,session_format,subject_id',
+            'booking.package.subject:id,name_ar',
+            'course:id,title,subject_id',
+            'course.subject:id,name_ar',
+        ];
     }
 
     /**

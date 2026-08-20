@@ -26,6 +26,7 @@ class BookingController extends Controller
     public function index(Request $request)
     {
         $this->authorize('viewAny', Booking::class);
+        $this->bookingService->expireStalePendingTeacherConfirmations();
 
         $user = $request->user();
 
@@ -52,10 +53,15 @@ class BookingController extends Controller
     public function show(Request $request, Booking $booking)
     {
         $this->authorize('view', $booking);
+        $this->bookingService->expireStalePendingTeacherConfirmations();
+        $booking->refresh();
 
         return $this->success($booking->load([
             'attendedSessions',
             'attendedSessions.teacher.user:id,name,avatar_path',
+            'attendedSessions.rescheduleRequests' => fn ($q) => $q->select('id', 'class_session_id', 'requested_by', 'status', 'created_at')
+                ->where('status', 'pending')
+                ->latest(),
             'payments',
             'package:id,title,description,session_format,sessions_count',
             'package.subject:id,name_ar',
@@ -84,6 +90,8 @@ class BookingController extends Controller
     public function approveRequest(Request $request, Booking $booking)
     {
         $this->authorize('respondToRequest', $booking);
+        $this->bookingService->expireStalePendingTeacherConfirmations();
+        $booking->refresh();
 
         $booking = $this->bookingService->approveIndividualRequest($booking, $request->user());
 
@@ -93,6 +101,9 @@ class BookingController extends Controller
     /** المعلم يرفض طلب حجز فردي — لا شيء للاسترداد لأنه لم يُدفع بعد. */
     public function rejectRequest(RejectBookingRequest $request, Booking $booking)
     {
+        $this->bookingService->expireStalePendingTeacherConfirmations();
+        $booking->refresh();
+
         $booking = $this->bookingService->rejectIndividualRequest(
             $booking,
             $request->user(),
