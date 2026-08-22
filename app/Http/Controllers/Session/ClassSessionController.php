@@ -63,9 +63,20 @@ class ClassSessionController extends Controller
      * الدالة تترجم كل حالة مبسّطة لمجموعة القيم الخام المطابقة لها؛ أي قيمة أخرى
      * غير هذه الأربع (مثال: status=completed مباشرة من مستهلك آخر للـ API) تُطابَق
      * حرفياً كما كانت — لا تغيير في ذلك السلوك.
+     *
+     * reschedule_pending تحديداً ليست قيمة تُخزَّن فعلياً في class_sessions.status
+     * إطلاقاً (لا مكان في الكود يضبطها) رغم وجودها ضمن enum العمود — هي حالة
+     * مُشتقّة بالكامل من وجود RescheduleRequest بحالة pending مرتبط بالجلسة (نفس
+     * منطق hasPendingRescheduleRequest() في الفرونت إند)، فتُرجم لـ whereHas لا
+     * لقيمة عمود حرفية — وإلا تُرجع صفر نتائج دائماً بصمت مطابقةً لنفس عطل
+     * upcoming/attended قبل هذا الإصلاح.
      */
     private function applyStatusFilter($query, string $status)
     {
+        if ($status === 'reschedule_pending') {
+            return $query->whereHas('rescheduleRequests', fn ($q) => $q->where('status', 'pending'));
+        }
+
         $bucket = match ($status) {
             'upcoming' => ['scheduled', 'reschedule_pending', 'rescheduled', 'active', 'suspended'],
             'attended' => ['completed'],

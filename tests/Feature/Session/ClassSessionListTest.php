@@ -128,6 +128,43 @@ class ClassSessionListTest extends TestCase
         $this->assertFalse($cancelledIds->contains($scheduled->id));
     }
 
+    /**
+     * reschedule_pending ليست قيمة تُخزَّن فعلياً في class_sessions.status أبداً
+     * (لا مكان في الكود يضبطها) — هي حالة مُشتقّة بالكامل من وجود RescheduleRequest
+     * بحالة pending مرتبط بالجلسة. where('status','reschedule_pending') الحرفي
+     * كان يرجع صفر نتائج دائماً بصمت لهذا السبب بالضبط، مطابقاً لنفس عطل
+     * upcoming/attended الأصلي.
+     */
+    public function test_status_filter_reschedule_pending_matches_sessions_with_a_pending_reschedule_request(): void
+    {
+        [$teacher, $token] = $this->createVerifiedTeacher();
+
+        [$bookingWithRequest, $sessionWithRequest] = $this->createBookingWithSession($teacher, now()->addDay());
+        $this->attendeeFor($sessionWithRequest, $bookingWithRequest);
+        RescheduleRequest::create([
+            'class_session_id' => $sessionWithRequest->id,
+            'booking_id' => $bookingWithRequest->id,
+            'requested_by' => $teacher->user_id,
+            'requester_role' => 'teacher',
+            'current_scheduled_at' => $sessionWithRequest->scheduled_at,
+            'proposed_scheduled_at' => now()->addDays(2),
+            'within_free_window' => false,
+            'hours_before_session' => 24,
+            'reason' => 'ظرف طارئ',
+            'status' => 'pending',
+            'sla_due_at' => now()->addHours(12),
+        ]);
+
+        [, $plainSession] = $this->createBookingWithSession($teacher, now()->addDays(2));
+
+        $response = $this->as($token)->getJson('/api/class-sessions?status=reschedule_pending');
+
+        $response->assertStatus(200);
+        $ids = collect($response->json('data'))->pluck('id');
+        $this->assertEquals([$sessionWithRequest->id], $ids->all());
+        $this->assertFalse($ids->contains($plainSession->id));
+    }
+
     public function test_index_orders_sessions_from_newest_to_oldest_and_paginates(): void
     {
         [$teacher, $token] = $this->createVerifiedTeacher();

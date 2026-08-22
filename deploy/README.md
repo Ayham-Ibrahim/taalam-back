@@ -61,3 +61,44 @@ DB::table('failed_jobs')->latest('failed_at')->limit(5)->get(['uuid','payload','
 سطر `jobs في الانتظار` مرتفع (خصوصاً مع تراكمه مع الوقت) يؤكد غياب الـ worker.
 `failed_jobs` تُظهر أي إشعارات فشلت فعلياً أثناء الإرسال (سبب مختلف: بريد غير
 صالح، مشكلة اعتماد SMTP...) بدل أن تكون عالقة فقط.
+
+## 3. صلاحيات الملفات (`storage/` و`bootstrap/cache/`)
+
+Laravel يكتب فعلياً داخل هذين المجلدين وقت التشغيل (لا فقط وقت النشر) — إن لم
+يكن مستخدم خادم الويب (PHP-FPM/Apache، غالباً `www-data`) يملك صلاحية كتابة
+عليهما، تفشل عمليات صامتة أو بأخطاء 500 غامضة رغم أن الكود سليم تماماً:
+
+- `storage/logs` — كل سطر في `laravel.log`.
+- `storage/framework/{cache,sessions,views}` — كاش الإعدادات/الجلسات/Blade.
+- `storage/framework/testing` — تُنشأ تلقائياً أثناء `php artisan test` فقط، لا صلة لها بالتشغيل الفعلي.
+- `storage/app/public` — الملفات العامة (صور البروفايل...)، ويشير إليها `public/storage` (رابط رمزي أنشأه `php artisan storage:link`).
+- `storage/app/private` — الملفات الخاصة (مستندات التوثيق `verification_documents`) — غير مصل بها من الخارج مباشرة، لكن لا تزال تحتاج كتابة فعلية من التطبيق.
+- `storage/fonts` — **لا يُنشأ تلقائياً بالـ repo وحده** (خارج git)؛ يُنشئه dompdf عند أول استدعاء فقط إن كان `storage/` قابلاً للكتابة. إن لم يكن كذلك، **فشل تنزيل فاتورة PDF لأي حجز/تسجيل مدفوع بخطأ 500** رغم أن بيانات الحجز صحيحة تماماً (راجع `App\Services\InvoicePdfService`).
+- `bootstrap/cache/` — كاش `config:cache`/`route:cache`/`event:cache`.
+
+**الإعداد الموصى به (لا `chmod 777` إطلاقاً):**
+
+```bash
+cd /var/www/staging_back
+
+# amazon-linux/rhel: nginx أو apache — تحقق فعلياً بـ: ps aux | grep -E 'php-fpm|nginx|apache'
+WEB_USER=www-data
+
+# أضف مستخدم النشر الحالي لمجموعة مستخدم خادم الويب (مرة واحدة فقط)
+sudo usermod -aG "$WEB_USER" "$(whoami)"
+
+sudo chown -R "$(whoami)":"$WEB_USER" storage bootstrap/cache
+sudo chmod -R 775 storage bootstrap/cache
+
+# setgid على المجلدات كي تحافظ أي ملفات جديدة يُنشئها أي من الطرفين على نفس
+# ملكية المجموعة تلقائياً — بدونه ستحتاج إعادة هذا الضبط بعد كل نشر جديد
+sudo find storage bootstrap/cache -type d -exec chmod g+s {} \;
+```
+
+**للتحقق أن كل شيء يعمل فعلياً بعد الضبط:**
+
+```bash
+php artisan tinker --execute="echo is_writable(storage_path()) ? 'storage قابل للكتابة' : 'storage غير قابل للكتابة — أعد فحص الصلاحيات';"
+```
+
+ثم تأكد عمليًا بتنزيل فاتورة حقيقية لحجز/تسجيل مدفوع من الواجهة — هذا يغطي فعلياً `storage/fonts` و`storage/app/private` معاً دفعة واحدة.
