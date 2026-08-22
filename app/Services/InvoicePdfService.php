@@ -4,18 +4,25 @@ namespace App\Services;
 
 use App\Models\Booking;
 use App\Models\Enrollment;
-use Barryvdh\DomPDF\Facade\Pdf;
-use Barryvdh\DomPDF\PDF as PdfObject;
+use Mpdf\Mpdf;
+use Mpdf\Output\Destination;
 use RuntimeException;
 
 /**
  * يبني فاتورة PDF موحّدة لحجز باقة (Booking) أو تسجيل دورة (Enrollment) — لا
  * يوجد نموذج Invoice منفصل، كل ما تحتاجه الفاتورة موجود أصلاً على الحجز/التسجيل
  * وعملية الدفع الناجحة المرتبطة به.
+ *
+ * mPDF لا dompdf عمداً: dompdf يعكس ترتيب أحرف أي نص عربي حرفياً (خوارزمية
+ * BiDi الخاصة به خاطئة عملياً) بصرف النظر عن dir="rtl"/direction:rtl —
+ * "الطالب" تخرج "بلاطلا" فعلياً، أثبتُّ هذا مباشرة عبر اختبار معزول بـ dompdf
+ * وحده. mPDF يطبّق خوارزمية Unicode BiDi وتشكيل الحروف العربية (OTL) بشكل
+ * صحيح فعلياً عبر autoScriptToLang/autoLangToFont، وهذا سبب الاستبدال الوحيد —
+ * كل شيء آخر (القالب، البيانات، الواجهة) بقي كما هو تماماً.
  */
 class InvoicePdfService
 {
-    public function forBooking(Booking $booking): PdfObject
+    public function forBooking(Booking $booking): string
     {
         if ($booking->status === 'pending_payment') {
             throw new RuntimeException('لا توجد فاتورة لحجز لم يُدفع بعد');
@@ -39,7 +46,7 @@ class InvoicePdfService
         ]);
     }
 
-    public function forEnrollment(Enrollment $enrollment): PdfObject
+    public function forEnrollment(Enrollment $enrollment): string
     {
         if ($enrollment->status === 'pending_payment') {
             throw new RuntimeException('لا توجد فاتورة لتسجيل لم يُدفع بعد');
@@ -79,15 +86,27 @@ class InvoicePdfService
         };
     }
 
-    private function render(array $data): PdfObject
+    private function render(array $data): string
     {
         $data['logoDataUri'] = $this->logoDataUri();
 
-        return Pdf::loadView('invoices.pdf', $data)->setPaper('a4');
+        $mpdf = new Mpdf([
+            'format' => 'A4',
+            // يفحصان محتوى كل نص فعلياً (لا الإعداد الثابت) ويبدّلان الخط
+            // والتشكيل تلقائياً حسب السكربت الفعلي لكل جزء — ضروريان معاً هنا
+            // تحديداً لأن الفاتورة تخلط عربي (تسميات) بلاتيني (أسماء/تواريخ/
+            // Stripe/USD) في نفس السطر أحياناً.
+            'autoScriptToLang' => true,
+            'autoLangToFont' => true,
+        ]);
+        $mpdf->SetDirectionality('rtl');
+        $mpdf->WriteHTML(view('invoices.pdf', $data)->render());
+
+        return $mpdf->Output('', Destination::STRING_RETURN);
     }
 
     /**
-     * dompdf لا يصل بشكل موثوق لملفات عبر مسار نسبي/asset() حسب إعدادات
+     * محرك PDF لا يصل بشكل موثوق لملفات عبر مسار نسبي/asset() حسب إعدادات
      * chroot الخاصة به — تضمين الشعار كـ data URI يتجاوز ذلك تماماً.
      */
     private function logoDataUri(): string

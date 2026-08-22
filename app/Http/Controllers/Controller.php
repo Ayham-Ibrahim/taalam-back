@@ -86,4 +86,16 @@ abstract class Controller
             ],
         ], 200);
     }
+
+    /**
+     * تنزيل ملف PDF من محتواه الخام (مصدره الآن InvoicePdfService عبر mPDF —
+     * يُرجع سلسلة بايتات لا كائن PdfObject).
+     */
+    protected function pdfDownload(string $binary, string $filename)
+    {
+        return response($binary, 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="'.$filename.'"',
+        ]);
+    }
 }

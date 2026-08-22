@@ -152,7 +152,7 @@ class BookingController extends Controller
             return $this->error($e->getMessage(), 422);
         }
 
-        return $pdf->download("invoice-{$booking->reference}.pdf");
+        return $this->pdfDownload($pdf, "invoice-{$booking->reference}.pdf");
     }
 
     public function createManual(CreateManualBookingRequest $request, Package $package)

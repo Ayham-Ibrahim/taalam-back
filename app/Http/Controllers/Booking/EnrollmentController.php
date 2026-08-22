@@ -100,7 +100,7 @@ class EnrollmentController extends Controller
             return $this->error($e->getMessage(), 422);
         }
 
-        return $pdf->download("invoice-{$enrollment->reference}.pdf");
+        return $this->pdfDownload($pdf, "invoice-{$enrollment->reference}.pdf");
     }
 
     public function createManual(CreateManualEnrollmentRequest $request, Course $course)

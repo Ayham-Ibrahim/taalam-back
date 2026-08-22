@@ -4,9 +4,9 @@
     <meta charset="utf-8">
     <title>فاتورة {{ $reference }}</title>
     <style>
-        /* dompdf: خطوط النظام لا تدعم العربية بشكل موثوق — DejaVu Sans مضمّنة افتراضياً وتدعمها */
+        /* لا font-family محدَّد عمداً — mPDF (InvoicePdfService) يختار الخط المناسب
+           تلقائياً لكل جزء نص حسب سكربته الفعلي (عربي/لاتيني) بنفسه. */
         body {
-            font-family: 'DejaVu Sans', sans-serif;
             color: #1A1A2E;
             font-size: 13px;
             direction: rtl;
