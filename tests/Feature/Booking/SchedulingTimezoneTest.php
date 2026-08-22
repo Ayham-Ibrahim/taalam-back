@@ -14,6 +14,7 @@ use App\Services\EnrollmentService;
 use App\Services\PricingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
 /**
@@ -25,6 +26,56 @@ use Tests\TestCase;
 class SchedulingTimezoneTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+        parent::tearDown();
+    }
+
+    /**
+     * الأمر الجذري المحمي منه هنا تحديداً: قاعدة "after_or_equal:today" القديمة
+     * كانت تقارن تاريخ الموعد بتاريخ اليوم بتوقيت السيرفر (UTC) لا بتوقيت
+     * الطالب — فطالب في منطقة زمنية خلف UTC (نيويورك مثلاً) قرب منتصف ليل UTC
+     * يكون "يومه" المحلي لا يزال الأمس بينما "يوم" السيرفر تحوَّل فعلاً لتاريخ
+     * جديد، فيُرفض حجز موعد صالح تماماً بالخطأ بحجة أنه "في الماضي".
+     */
+    public function test_a_valid_same_day_slot_in_the_students_own_timezone_is_not_rejected_as_being_in_the_past(): void
+    {
+        // 00:30 بتوقيت UTC — لكن نيويورك (UTC-4) ما زالت على "أمس" محلياً.
+        Carbon::setTestNow(Carbon::parse('2026-08-22 00:30:00', 'UTC'));
+
+        [$teacher] = $this->createVerifiedTeacher();
+        $package = $this->createActiveIndividualPackage($teacher, teacherPrice: 100, margin: 60, sessionsCount: 1);
+        $student = $this->createStudent('America/New_York');
+
+        // 00:30 UTC = 20:30 بتوقيت نيويورك (UTC-4) في نفس اللحظة — 23:30 لا تزال
+        // لاحقة فعلياً في هذا "اليوم" المحلي نفسه.
+        $studentToday = Carbon::now('America/New_York');
+        $package->schedules()->create(['day_of_week' => $studentToday->dayOfWeek]);
+
+        $booking = app(BookingService::class)->requestIndividualBooking(
+            $student, $package, [['date' => $studentToday->toDateString(), 'start_time' => '23:30']],
+        );
+
+        $this->assertSame('pending_teacher_confirmation', $booking->status);
+    }
+
+    public function test_a_genuinely_past_slot_is_still_rejected(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        $package = $this->createActiveIndividualPackage($teacher, teacherPrice: 100, margin: 60, sessionsCount: 1);
+        $student = $this->createStudent('UTC');
+
+        $yesterday = Carbon::now()->subDay();
+        $package->schedules()->create(['day_of_week' => $yesterday->dayOfWeek]);
+
+        $this->expectException(ValidationException::class);
+
+        app(BookingService::class)->requestIndividualBooking(
+            $student, $package, [['date' => $yesterday->toDateString(), 'start_time' => '10:00']],
+        );
+    }
 
     public function test_individual_booking_converts_students_local_time_to_utc_correctly(): void
     {
@@ -38,7 +89,7 @@ class SchedulingTimezoneTest extends TestCase
         $package->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
 
         $requested = app(BookingService::class)->requestIndividualBooking(
-            $student, $package, $nextWednesday->toDateString(), '15:00',
+            $student, $package, $this->weeklySlots($nextWednesday, $package->sessions_count, '15:00'),
         );
 
         $this->assertSame('Asia/Tokyo', $requested->requested_timezone);
@@ -66,7 +117,7 @@ class SchedulingTimezoneTest extends TestCase
         $package->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
 
         $booking = app(BookingService::class)->createManualBooking(
-            $student, $package, $admin, 'تسوية شكوى', $nextWednesday->toDateString(), '15:00',
+            $student, $package, $admin, 'تسوية شكوى', $this->weeklySlots($nextWednesday, $package->sessions_count, '15:00'),
         );
 
         $session = $booking->sessions()->first();
@@ -110,6 +161,14 @@ class SchedulingTimezoneTest extends TestCase
         $session = $enrollment->course->sessions()->first();
 
         $this->assertSame('00:00:00', $session->scheduled_at->format('H:i:s'));
+    }
+
+    /** موعد مستقل لكل جلسة، أسبوعياً بدءاً من $anchor — لبناء slots بسرعة عندما لا يتعلق الاختبار سوى بأول موعد. */
+    private function weeklySlots(Carbon $anchor, int $count, string $time): array
+    {
+        return collect(range(0, $count - 1))
+            ->map(fn (int $i) => ['date' => $anchor->copy()->addWeeks($i)->toDateString(), 'start_time' => $time])
+            ->all();
     }
 
     /**

@@ -35,7 +35,7 @@ class BookingFlowTest extends TestCase
         $package->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
 
         $requested = app(BookingService::class)->requestIndividualBooking(
-            $student, $package, $nextWednesday->toDateString(), '10:00',
+            $student, $package, $this->weeklySlots($nextWednesday, 4),
         );
 
         // الطلب لا يُنشئ جلسات ولا دفعاً — بانتظار موافقة المعلم فقط
@@ -92,7 +92,7 @@ class BookingFlowTest extends TestCase
 
         // لا جدول محدد لهذه الباقة أصلاً → لا يوجد يوم يطابقه أي تاريخ
         try {
-            app(BookingService::class)->requestIndividualBooking($student, $package, Carbon::now()->addDay()->toDateString(), '10:00');
+            app(BookingService::class)->requestIndividualBooking($student, $package, $this->weeklySlots(Carbon::now()->addDay(), 4));
             $this->fail('يفترض أن تفشل العملية بسبب عدم وجود جدول للباقة');
         } catch (ValidationException) {
             // متوقع
@@ -116,7 +116,7 @@ class BookingFlowTest extends TestCase
         $package->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
 
         $requested = app(BookingService::class)->requestIndividualBooking(
-            $student, $package, $nextWednesday->toDateString(), '10:00',
+            $student, $package, $this->weeklySlots($nextWednesday, 4),
         );
         $booking = app(BookingService::class)->approveIndividualRequest($requested, $teacherUser);
 
@@ -198,8 +198,7 @@ class BookingFlowTest extends TestCase
             $package,
             $admin,
             'تعويض عن جلسة ملغاة — شكوى #C-1042',
-            $nextWednesday->toDateString(),
-            '10:00',
+            $this->weeklySlots($nextWednesday, 4),
         );
 
         $this->assertSame('confirmed', $booking->status);
@@ -233,8 +232,7 @@ class BookingFlowTest extends TestCase
         $forbidden = $this->as($teacherToken)->postJson("/api/packages/{$package->id}/bookings/manual", [
             'student_id' => $student->id,
             'reason' => 'محاولة غير مصرحة',
-            'date' => $nextWednesday->toDateString(),
-            'start_time' => '10:00',
+            'slots' => $this->weeklySlots($nextWednesday, 4),
         ]);
         $forbidden->assertStatus(403);
 
@@ -243,16 +241,14 @@ class BookingFlowTest extends TestCase
 
         $missingReason = $this->as($adminToken)->postJson("/api/packages/{$package->id}/bookings/manual", [
             'student_id' => $student->id,
-            'date' => $nextWednesday->toDateString(),
-            'start_time' => '10:00',
+            'slots' => $this->weeklySlots($nextWednesday, 4),
         ]);
         $missingReason->assertStatus(422)->assertJsonValidationErrors(['reason']);
 
         $ok = $this->as($adminToken)->postJson("/api/packages/{$package->id}/bookings/manual", [
             'student_id' => $student->id,
             'reason' => 'حجز يدوي صحيح',
-            'date' => $nextWednesday->toDateString(),
-            'start_time' => '10:00',
+            'slots' => $this->weeklySlots($nextWednesday, 4),
         ]);
         $ok->assertStatus(201)->assertJsonPath('data.status', 'confirmed');
     }
@@ -270,14 +266,12 @@ class BookingFlowTest extends TestCase
 
         // اليوم غير المتاح يُرفض
         $wrongDay = $this->as($studentToken)->postJson("/api/packages/{$package->id}/bookings/individual", [
-            'date' => $nextWednesday->copy()->addDay()->toDateString(),
-            'start_time' => '10:00',
+            'slots' => $this->weeklySlots($nextWednesday->copy()->addDay(), 4),
         ]);
         $wrongDay->assertStatus(422)->assertJsonValidationErrors(['requested_date']);
 
         $request = $this->as($studentToken)->postJson("/api/packages/{$package->id}/bookings/individual", [
-            'date' => $nextWednesday->toDateString(),
-            'start_time' => '10:00',
+            'slots' => $this->weeklySlots($nextWednesday, 4),
         ]);
         $request->assertStatus(201)->assertJsonPath('data.status', 'pending_teacher_confirmation');
         $bookingId = $request->json('data.id');
@@ -308,8 +302,7 @@ class BookingFlowTest extends TestCase
         $package->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
 
         $request = $this->as($studentToken)->postJson("/api/packages/{$package->id}/bookings/individual", [
-            'date' => $nextWednesday->toDateString(),
-            'start_time' => '10:00',
+            'slots' => $this->weeklySlots($nextWednesday, 4),
         ]);
         $bookingId = $request->json('data.id');
 
@@ -337,8 +330,9 @@ class BookingFlowTest extends TestCase
         $package->schedules()->create(['day_of_week' => $today->dayOfWeek]);
 
         $request = $this->as($studentToken)->postJson("/api/packages/{$package->id}/bookings/individual", [
-            'date' => $today->toDateString(),
-            'start_time' => now()->subHour()->format('H:i'),
+            // أقرب موعد (اليوم) هو الماضي بالفعل — لحظة انتهاء الطلب تُحسَب من
+            // أقرب جلسة، لا من كل الجلسات، فهذا وحده كافٍ لإبطال الطلب كاملاً
+            'slots' => $this->weeklySlots($today, 4, now()->subHour()->format('H:i')),
         ]);
         $request->assertStatus(201);
 
@@ -368,7 +362,7 @@ class BookingFlowTest extends TestCase
         $package->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
 
         $requested = app(BookingService::class)->requestIndividualBooking(
-            $student, $package, $nextWednesday->toDateString(), '10:00',
+            $student, $package, $this->weeklySlots($nextWednesday, 4),
         );
 
         $response = $this->as($teacherToken)->getJson('/api/bookings?status=pending_teacher_confirmation');
@@ -492,6 +486,14 @@ class BookingFlowTest extends TestCase
         $response->assertStatus(200);
         $ids = collect($response->json('data'))->pluck('id');
         $this->assertEquals([$bookingA->id], $ids->all());
+    }
+
+    /** موعد مستقل لكل جلسة، أسبوعياً بدءاً من $anchor — نفس التكرار الذي كان تلقائياً سابقاً، مبنياً الآن صراحةً كمصفوفة slots. */
+    private function weeklySlots(Carbon $anchor, int $count, string $time = '10:00'): array
+    {
+        return collect(range(0, $count - 1))
+            ->map(fn (int $i) => ['date' => $anchor->copy()->addWeeks($i)->toDateString(), 'start_time' => $time])
+            ->all();
     }
 
     /**

@@ -28,6 +28,8 @@ class RescheduleService
             ]);
         }
 
+        $this->assertSessionIsPaid($session, $requester, $requesterRole);
+
         $freeWindowHours = (int) $this->settings->get('reschedule_free_window_hours', 24);
         $hoursBeforeSession = max(0, now()->diffInHours($session->scheduled_at, false));
         $withinFreeWindow = $hoursBeforeSession < $freeWindowHours;
@@ -62,6 +64,50 @@ class RescheduleService
             'status' => 'pending',
             'sla_due_at' => now()->addHours((int) $this->settings->get('sla_reschedule_hours', 12)),
         ]);
+    }
+
+    /**
+     * الجلسات تُنشأ فور موافقة المعلم/انضمام الطالب بصرف النظر عن اكتمال
+     * الدفع (نفس منطق ScheduleConflictService) — فحجز/تسجيل بحالة
+     * pending_payment له جلسات حقيقية بالفعل على الجدول رغم أنه غير مؤهل
+     * لأي طلب تعديل عليها بعد؛ يبقى معلَّقاً حتى تُنشأ سلفاً أو يُلغى تلقائياً
+     * (hold_expires_at) لو فشل الدفع.
+     */
+    private function assertSessionIsPaid(ClassSession $session, User $requester, string $requesterRole): void
+    {
+        if ($this->resolvePaymentStatus($session, $requester, $requesterRole) === 'pending_payment') {
+            throw ValidationException::withMessages([
+                'session' => ['لا يمكن تغيير موعد جلسة غير مدفوعة.'],
+            ]);
+        }
+    }
+
+    /**
+     * للطالب: حجزه/تسجيله الخاص تحديداً عبر سطر حضوره — لا حجز الجلسة العام،
+     * فهذا الأخير يخص أول طالب انضمّ فقط في الباقات الجماعية (session.booking_id
+     * ثابت لصاحب أول انضمام)، بينما لكل طالب لاحق حجزه/تسجيله المستقل الخاص.
+     * للمعلم: حجز/تسجيل الجلسة نفسها (لا يوجد مفهوم دفع خاص بالمعلم).
+     */
+    private function resolvePaymentStatus(ClassSession $session, User $requester, string $requesterRole): ?string
+    {
+        if ($requesterRole === 'student') {
+            $studentId = $requester->loadMissing('student')->student?->id;
+            $attendee = $session->attendees()->where('student_id', $studentId)->first();
+
+            if ($attendee?->booking_id) {
+                return $attendee->booking?->status;
+            }
+
+            if ($attendee?->enrollment_id) {
+                return $attendee->enrollment?->status;
+            }
+        }
+
+        if ($session->booking_id) {
+            return $session->loadMissing('booking')->booking?->status;
+        }
+
+        return null;
     }
 
     public function approve(RescheduleRequest $rescheduleRequest, User $admin, ?Carbon $alternativeAt = null, ?string $notes = null): RescheduleRequest

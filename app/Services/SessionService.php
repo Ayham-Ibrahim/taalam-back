@@ -57,8 +57,14 @@ class SessionService
      * فتح رابط BBB الخام مباشرةً كان يُظهر XML غير منسّق مباشرة في المتصفح
      * كلما لم يكن الاجتماع موجوداً فعلياً على BBB (السر غير مضبوط، لم تُنشأ
      * الغرفة بعد، أو انتهت الجلسة) — لأن فتح رابط لا يمكن "التقاط" فشله بعد
-     * التنقّل. هذه الدالة تتحقق أولاً أن الاجتماع يعمل فعلاً على BBB وتُرجع
-     * رسالة عربية واضحة بدل ذلك حين لا يكون كذلك، بدل إعادة رابط BBB الخام.
+     * التنقّل. هذه الدالة تتحقق أولاً أن الغرفة موجودة فعلاً على BBB وتُرجع
+     * رسالة عربية واضحة بدل ذلك حين لا تكون كذلك، بدل إعادة رابط BBB الخام.
+     *
+     * ترتيب الفحوص مهم: نافذة وقت الجلسة (بدأت؟ انتهت؟) تُفحص أولاً وتحسم
+     * الأمر فوراً برسالة واضحة، وفقط ضمن النافذة الصحيحة يُفحص وجود الغرفة
+     * فعلياً على BBB (meetingExists لا isMeetingRunning — الثانية تُرجع false
+     * لأي اجتماع لم ينضم إليه أحد بعد حتى لو أُنشئ بنجاح تام، فتمنع أول
+     * انضمام لأي جلسة إلى الأبد؛ راجع توثيق BigBlueButtonService::meetingExists).
      *
      * @return array{joinable: bool, url?: string, message?: string}
      */
@@ -71,22 +77,22 @@ class SessionService
             return ['joinable' => false, 'message' => 'لم يتم إعداد رابط الجلسة بعد، يرجى المحاولة لاحقاً أو التواصل مع الدعم.'];
         }
 
-        if ($this->bbb->isMeetingRunning($session->bbb_meeting_id)) {
-            return ['joinable' => true, 'url' => $joinUrl];
-        }
-
         $now = now();
         $endsAt = $session->scheduled_at->clone()->addMinutes($session->duration_min);
 
         if ($now->lt($session->scheduled_at)) {
-            $message = 'لم تبدأ هذه الجلسة بعد، يرجى الانتظار حتى موعدها ثم إعادة المحاولة.';
-        } elseif ($now->gt($endsAt)) {
-            $message = 'انتهت هذه الجلسة ولم تعد متاحة للانضمام.';
-        } else {
-            $message = 'تعذّر الوصول إلى غرفة الجلسة حالياً، يرجى المحاولة خلال لحظات أو التواصل مع الدعم.';
+            return ['joinable' => false, 'message' => 'لم تبدأ هذه الجلسة بعد، يرجى الانتظار حتى موعدها ثم إعادة المحاولة.'];
         }
 
-        return ['joinable' => false, 'message' => $message];
+        if ($now->gt($endsAt)) {
+            return ['joinable' => false, 'message' => 'انتهت هذه الجلسة ولم تعد متاحة للانضمام.'];
+        }
+
+        if ($this->bbb->meetingExists($session->bbb_meeting_id)) {
+            return ['joinable' => true, 'url' => $joinUrl];
+        }
+
+        return ['joinable' => false, 'message' => 'تعذّر الوصول إلى غرفة الجلسة حالياً، يرجى المحاولة خلال لحظات أو التواصل مع الدعم.'];
     }
 
     public function markPresent(SessionAttendee $attendee): SessionAttendee

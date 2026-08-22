@@ -48,13 +48,12 @@ class ScheduleConflictTest extends TestCase
         $packageB->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
         $admin = User::factory()->admin()->create();
         app(BookingService::class)->createManualBooking(
-            $student, $packageB, $admin, 'حجز أول', $nextWednesday->toDateString(), '10:00',
+            $student, $packageB, $admin, 'حجز أول', [['date' => $nextWednesday->toDateString(), 'start_time' => '10:00']],
         );
 
         // محاولة حجز فردي ثانٍ (باقة مختلفة، معلم مختلف) بنفس اليوم والوقت تماماً
         $response = $this->as($studentToken)->postJson("/api/packages/{$packageA->id}/bookings/individual", [
-            'date' => $nextWednesday->toDateString(),
-            'start_time' => '10:00',
+            'slots' => [['date' => $nextWednesday->toDateString(), 'start_time' => '10:00']],
         ]);
 
         $response->assertStatus(422)
@@ -74,7 +73,7 @@ class ScheduleConflictTest extends TestCase
 
         // الطالب يقدّم طلب حجز فردي أولاً — لا تعارض بعد
         $requested = app(BookingService::class)->requestIndividualBooking(
-            $student, $packageA, $nextWednesday->toDateString(), '10:00',
+            $student, $packageA, [['date' => $nextWednesday->toDateString(), 'start_time' => '10:00']],
         );
         $this->assertSame('pending_teacher_confirmation', $requested->status);
 
@@ -84,7 +83,7 @@ class ScheduleConflictTest extends TestCase
         $packageB->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
         $admin = User::factory()->admin()->create();
         app(BookingService::class)->createManualBooking(
-            $student, $packageB, $admin, 'حجز متسارع', $nextWednesday->toDateString(), '10:00',
+            $student, $packageB, $admin, 'حجز متسارع', [['date' => $nextWednesday->toDateString(), 'start_time' => '10:00']],
         );
 
         // الآن معلم الطلب الأول يوافق — يجب أن تُرفَض رغم أن الطلب نفسه كان سليماً وقت تقديمه
@@ -122,7 +121,7 @@ class ScheduleConflictTest extends TestCase
         $individualPackage->schedules()->create(['day_of_week' => $sessionDate->dayOfWeek]);
         $admin = User::factory()->admin()->create();
         app(BookingService::class)->createManualBooking(
-            $student, $individualPackage, $admin, 'حجز سابق', $sessionDate->toDateString(), '14:00',
+            $student, $individualPackage, $admin, 'حجز سابق', [['date' => $sessionDate->toDateString(), 'start_time' => '14:00']],
         );
 
         $this->expectException(ValidationException::class);
@@ -151,7 +150,7 @@ class ScheduleConflictTest extends TestCase
         $packageA->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
 
         app(BookingService::class)->createManualBooking(
-            $student, $packageA, $admin, 'الحجز الأول', $nextWednesday->toDateString(), '16:00',
+            $student, $packageA, $admin, 'الحجز الأول', [['date' => $nextWednesday->toDateString(), 'start_time' => '16:00']],
         );
 
         [$teacherB] = $this->createVerifiedTeacher();
@@ -162,7 +161,7 @@ class ScheduleConflictTest extends TestCase
         $this->expectExceptionMessage(self::CONFLICT_MESSAGE);
 
         app(BookingService::class)->createManualBooking(
-            $student, $packageB, $admin, 'حجز متعارض', $nextWednesday->toDateString(), '16:00',
+            $student, $packageB, $admin, 'حجز متعارض', [['date' => $nextWednesday->toDateString(), 'start_time' => '16:00']],
         );
     }
 
@@ -181,7 +180,7 @@ class ScheduleConflictTest extends TestCase
         $package = $this->createActiveIndividualPackage($teacher, teacherPrice: 100, margin: 60, sessionsCount: 1);
         $package->schedules()->create(['day_of_week' => 1]);
         app(BookingService::class)->createManualBooking(
-            $student, $package, $admin, 'حجز سابق', $courseStart->toDateString(), '09:00',
+            $student, $package, $admin, 'حجز سابق', [['date' => $courseStart->toDateString(), 'start_time' => '09:00']],
         );
 
         $this->expectException(ValidationException::class);
@@ -200,7 +199,7 @@ class ScheduleConflictTest extends TestCase
         $nextWednesday = Carbon::now()->next(3);
         $packageA->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
         app(BookingService::class)->createManualBooking(
-            $student, $packageA, $admin, 'الحجز الأول', $nextWednesday->toDateString(), '09:00',
+            $student, $packageA, $admin, 'الحجز الأول', [['date' => $nextWednesday->toDateString(), 'start_time' => '09:00']],
         );
 
         [$teacherB] = $this->createVerifiedTeacher();
@@ -209,7 +208,7 @@ class ScheduleConflictTest extends TestCase
 
         // نفس اليوم، لكن بعد انتهاء الجلسة الأولى بساعتين — بلا أي تعارض
         $booking = app(BookingService::class)->createManualBooking(
-            $student, $packageB, $admin, 'حجز لاحق غير متعارض', $nextWednesday->toDateString(), '11:00',
+            $student, $packageB, $admin, 'حجز لاحق غير متعارض', [['date' => $nextWednesday->toDateString(), 'start_time' => '11:00']],
         );
 
         $this->assertSame('confirmed', $booking->status);

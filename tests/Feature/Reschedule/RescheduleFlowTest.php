@@ -220,6 +220,53 @@ class RescheduleFlowTest extends TestCase
         ]);
     }
 
+    public function test_cannot_request_reschedule_for_an_unpaid_session_and_no_request_is_created(): void
+    {
+        [$teacher, $teacherToken] = $this->createVerifiedTeacher();
+        $session = $this->createSession($teacher, now()->addDays(5), bookingStatus: 'pending_payment');
+
+        $response = $this->as($teacherToken)->postJson("/api/class-sessions/{$session->id}/reschedule-requests", [
+            'proposed_scheduled_at' => now()->addDays(6)->toDateTimeString(),
+            'reason' => 'محاولة قبل اكتمال الدفع',
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJsonPath('errors.session.0', 'لا يمكن تغيير موعد جلسة غير مدفوعة.');
+
+        $this->assertDatabaseMissing('reschedule_requests', ['class_session_id' => $session->id]);
+        $this->assertSame('scheduled', $session->fresh()->status);
+        $this->assertSame(
+            $session->scheduled_at->toDateTimeString(),
+            $session->fresh()->scheduled_at->toDateTimeString(),
+        );
+    }
+
+    public function test_a_student_whose_own_booking_is_unpaid_cannot_request_reschedule(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        $session = $this->createSession($teacher, now()->addDays(5), bookingStatus: 'pending_payment');
+
+        $studentUser = User::factory()->student()->create();
+        $student = Student::create(['user_id' => $studentUser->id, 'education_type' => 'school']);
+        SessionAttendee::create([
+            'class_session_id' => $session->id,
+            'student_id' => $student->id,
+            'booking_id' => $session->booking_id,
+            'attendance' => 'registered',
+        ]);
+        $studentToken = $studentUser->createToken('t')->plainTextToken;
+
+        $response = $this->as($studentToken)->postJson("/api/class-sessions/{$session->id}/reschedule-requests", [
+            'proposed_scheduled_at' => now()->addDays(6)->toDateTimeString(),
+            'reason' => 'سبب',
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJsonPath('errors.session.0', 'لا يمكن تغيير موعد جلسة غير مدفوعة.');
+
+        $this->assertDatabaseMissing('reschedule_requests', ['class_session_id' => $session->id]);
+    }
+
     public function test_a_teacher_who_does_not_own_the_session_cannot_request_reschedule(): void
     {
         [$teacher] = $this->createVerifiedTeacher();
@@ -274,7 +321,7 @@ class RescheduleFlowTest extends TestCase
         return [$admin, $admin->createToken('t')->plainTextToken];
     }
 
-    private function createSession(Teacher $teacher, Carbon $scheduledAt): ClassSession
+    private function createSession(Teacher $teacher, Carbon $scheduledAt, string $bookingStatus = 'confirmed'): ClassSession
     {
         $subject = Subject::create(['code' => 'rs-'.uniqid(), 'name_ar' => 'مادة']);
 
@@ -307,7 +354,7 @@ class RescheduleFlowTest extends TestCase
             'margin_percent_snapshot' => 60,
             'sessions_total' => 4,
             'sessions_remaining' => 4,
-            'status' => 'confirmed',
+            'status' => $bookingStatus,
         ]);
 
         return $booking->sessions()->create([

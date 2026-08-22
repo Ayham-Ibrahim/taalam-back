@@ -31,6 +31,15 @@ class TeacherSearchController extends Controller
             ->when($filters['curriculum_id'] ?? null, function ($q, $curriculumId) {
                 $q->whereHas('curricula', fn ($cq) => $cq->where('curricula.id', $curriculumId));
             })
+            ->when($filters['stage_id'] ?? null, function ($q, $stageId) {
+                $q->whereHas('subjects.stages', fn ($sq) => $sq->where('stages.id', $stageId));
+            })
+            ->when($filters['language_id'] ?? null, function ($q, $languageId) {
+                $q->whereHas('languages', fn ($lq) => $lq->where('languages.id', $languageId));
+            })
+            ->when($filters['min_price'] ?? null, function ($q, $minPrice) {
+                $q->whereHas('packages', fn ($pq) => $pq->where('status', 'active')->where('student_price', '>=', $minPrice));
+            })
             ->when($filters['max_price'] ?? null, function ($q, $maxPrice) {
                 $q->whereHas('packages', fn ($pq) => $pq->where('status', 'active')->where('student_price', '<=', $maxPrice));
             })

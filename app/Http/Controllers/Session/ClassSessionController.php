@@ -87,7 +87,7 @@ class ClassSessionController extends Controller
             'rescheduleRequests' => fn ($q) => $q->select('id', 'class_session_id', 'requested_by', 'status', 'created_at')
                 ->where('status', 'pending')
                 ->latest(),
-            'booking:id,package_id,student_id',
+            'booking:id,package_id,student_id,status',
             'booking.package:id,title,session_format,subject_id',
             'booking.package.subject:id,name_ar',
             'course:id,title,subject_id',

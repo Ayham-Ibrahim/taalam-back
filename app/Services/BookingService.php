@@ -30,11 +30,13 @@ class BookingService
 
     /**
      * فردي (خاص بمعلم مدرسي/جامعي): المعلم يحدد فقط الأيام المتاحة لهذه الباقة —
-     * بلا وقت. الطالب هنا يختار تاريخاً (ضمن تلك الأيام) ووقتاً حراً ويقدّم طلب
-     * حجز — لا جلسات ولا دفع بعد. الحجز يبقى pending_teacher_confirmation حتى
-     * يوافق المعلم صراحةً (approveIndividualRequest) أو يرفضه (rejectIndividualRequest).
+     * بلا وقت. الطالب يختار تاريخاً ووقتاً مستقلَّين لكل جلسة من جلسات الباقة
+     * (وليس تاريخاً واحداً يتكرر أسبوعياً على الكل تلقائياً) — $slots مصفوفة
+     * بعدد يساوي sessions_count بالضبط، كل عنصر ['date' => 'Y-m-d', 'start_time' => 'H:i'].
+     * لا جلسات ولا دفع بعد؛ الحجز يبقى pending_teacher_confirmation حتى يوافق
+     * المعلم صراحةً (approveIndividualRequest) أو يرفضه (rejectIndividualRequest).
      */
-    public function requestIndividualBooking(Student $student, Package $package, string $date, string $startTime): Booking
+    public function requestIndividualBooking(Student $student, Package $package, array $slots): Booking
     {
         $this->assertPackageBookable($package);
 
@@ -44,38 +46,43 @@ class BookingService
             ]);
         }
 
-        $requestedDate = Carbon::parse($date);
-        $this->assertDateMatchesPackageDays($package, $requestedDate);
+        $this->assertSlotsCountMatchesPackage($package, $slots);
+
+        foreach ($slots as $slot) {
+            $this->assertDateMatchesPackageDays($package, Carbon::parse($slot['date']));
+        }
 
         $this->assertNoOpenBookingForPackage($student, $package);
+
+        $timezone = $this->studentTimezone($student);
+        $durationMinutes = $this->defaultSessionDurationMinutes();
 
         // فحص مبكّر استشاري بأفضل تقدير متاح الآن (منطقة الطالب الحالية) —
         // يمنع تقديم طلب تعارض واضح مسبقاً بدل تركه لخيبة أمل عند رفض المعلم
         // له لاحقاً. الفحص الحاسم والملزم فعلياً يحدث عند الموافقة الفعلية
         // (approveIndividualRequest) لأن الجلسات الحقيقية لا تُنشأ إلا حينها.
-        $anchorGuess = Carbon::parse($requestedDate->toDateString(), $this->studentTimezone($student))
-            ->setTimeFromTimeString($startTime)
-            ->setTimezone(config('app.timezone'));
-        $this->conflicts->assertNoConflict(
-            $student,
-            $this->weeklyOccurrences($anchorGuess, $package->sessions_count),
-            $this->defaultSessionDurationMinutes(),
-        );
+        $anchors = $this->slotsToAnchors($slots, $timezone);
+        $this->assertSlotsNotInPast($anchors);
+        $this->assertSlotsDontOverlapEachOther($anchors, $durationMinutes);
+        $this->conflicts->assertNoConflict($student, $anchors, $durationMinutes);
 
         return $this->createBookingRecord($student, $package, [
             'status' => 'pending_teacher_confirmation',
-            'requested_date' => $requestedDate->toDateString(),
-            'requested_start_time' => $startTime,
+            // العمودان القديمان يبقيان مملوءين بأول جلسة فقط (توافقاً مع أي كود
+            // لم يُحدَّث بعد) — requested_slots هو مصدر الحقيقة الكامل والوحيد.
+            'requested_date' => $slots[0]['date'],
+            'requested_start_time' => $slots[0]['start_time'],
+            'requested_slots' => $slots,
             // تُحفَظ الآن كي نستطيع لاحقاً (عند موافقة المعلم) تحويل هذا الوقت الخام
             // بدقة إلى UTC حسب منطقة الطالب الفعلية وقت الطلب، لا افتراض UTC ساذج.
-            'requested_timezone' => $this->studentTimezone($student),
+            'requested_timezone' => $timezone,
             'hold_expires_at' => null,
         ]);
     }
 
     /**
-     * المعلم يوافق على طلب حجز فردي — عندها فقط تُنشأ الجلسات (من requested_date/
-     * requested_start_time) ويُنشأ الدفع المعلَّق. الطالب يكمل الدفع بعدها عبر
+     * المعلم يوافق على طلب حجز فردي — عندها فقط تُنشأ الجلسات (من requested_slots،
+     * موعد مستقل لكل جلسة) ويُنشأ الدفع المعلَّق. الطالب يكمل الدفع بعدها عبر
      * BookingController::checkout.
      */
     public function approveIndividualRequest(Booking $booking, User $teacher): Booking
@@ -97,26 +104,17 @@ class BookingService
         $this->assertPackageBookable($booking->package);
 
         return DB::transaction(function () use ($booking, $teacher) {
-            // requested_date/requested_start_time أُدخِلا كوقت حائط محلي لدى الطالب —
-            // parse($date, $tz) يفسّرهما كذلك، وsetTimezone() يحوّلهما فعلياً لتوقيت
-            // النظام (UTC) قبل التخزين، لا مجرد وسم رقمين خام بمنطقة مختلفة.
-            // ملاحظة: requested_date مُحوَّل مسبقاً لكائن Carbon (date cast) — يجب تمرير
-            // نص خام (toDateString) لا الكائن نفسه، وإلا Carbon::parse يتجاهل $tz تماماً
-            // لأن الكائن يحمل منطقته الزمنية الخاصة أصلاً (UTC من الـ cast).
-            $anchor = Carbon::parse($this->dateString($booking->requested_date), $booking->requested_timezone ?? 'UTC')
-                ->setTimeFromTimeString((string) $booking->requested_start_time)
-                ->setTimezone(config('app.timezone'));
+            // requested_slots أُدخِلت كوقت حائط محلي لدى الطالب — slotsToAnchors
+            // تفسّرها كذلك وتحوّلها فعلياً لتوقيت النظام (UTC) قبل إنشاء الجلسات.
+            $anchors = $this->slotsToAnchors($this->requestedSlots($booking), $booking->requested_timezone ?? 'UTC');
+            $durationMinutes = $this->defaultSessionDurationMinutes();
 
             // الفحص الملزم فعلياً — الجلسات الحقيقية تُنشأ خلال ثوانٍ من هنا، فأي
             // تعارض (بما فيه حجز آخر تسارع للموافقة عليه بين طلب هذا الطالب
             // ولحظة موافقة المعلم) يجب أن يمنع إنشاءها نهائياً، لا فقط تحذيراً.
-            $this->conflicts->assertNoConflict(
-                $booking->student,
-                $this->weeklyOccurrences($anchor, $booking->package->sessions_count),
-                $this->defaultSessionDurationMinutes(),
-            );
+            $this->conflicts->assertNoConflict($booking->student, $anchors, $durationMinutes);
 
-            $sessions = $this->sessionsFromAnchor($booking->package, $booking, $anchor);
+            $sessions = $this->sessionsFromSlots($booking->package, $booking, $anchors);
 
             foreach ($sessions as $session) {
                 $this->registerAttendee($session, $booking->student, booking: $booking);
@@ -205,16 +203,96 @@ class BookingService
         return true;
     }
 
+    /** أقرب جلسة مطلوبة زمنياً — إن انقضى وقتها دون موافقة المعلم يصبح الطلب كله باطلاً بصرف النظر عن باقي الجلسات. */
     private function requestedSlotAt(Booking $booking): Carbon
     {
-        return Carbon::parse($this->dateString($booking->requested_date), $booking->requested_timezone ?? 'UTC')
-            ->setTimeFromTimeString((string) $booking->requested_start_time)
-            ->setTimezone(config('app.timezone'));
+        return $this->slotsToAnchors($this->requestedSlots($booking), $booking->requested_timezone ?? 'UTC')->min();
+    }
+
+    /**
+     * requested_slots هو مصدر الحقيقة؛ الحجوزات المُنشأة قبل إضافة هذا العمود
+     * (أو أي مسار قديم لم يُحدَّث) تُعاد بناؤها من requested_date/requested_start_time
+     * كعنصر وحيد، فلا ينكسر شيء بأثر رجعي.
+     *
+     * @return array<int, array{date: string, start_time: string}>
+     */
+    private function requestedSlots(Booking $booking): array
+    {
+        if (! empty($booking->requested_slots)) {
+            return $booking->requested_slots;
+        }
+
+        return [[
+            'date' => $this->dateString($booking->requested_date),
+            'start_time' => (string) $booking->requested_start_time,
+        ]];
     }
 
     private function dateString(mixed $value): string
     {
         return $value instanceof Carbon ? $value->toDateString() : (string) $value;
+    }
+
+    /**
+     * @param  array<int, array{date: string, start_time: string}>  $slots
+     * @return Collection<int, Carbon> لحظات البداية بتوقيت النظام (UTC)، مرتَّبة زمنياً
+     */
+    private function slotsToAnchors(array $slots, string $timezone): Collection
+    {
+        return collect($slots)
+            ->map(fn (array $slot) => Carbon::parse($slot['date'], $timezone)
+                ->setTimeFromTimeString($slot['start_time'])
+                ->setTimezone(config('app.timezone')))
+            ->sort()
+            ->values();
+    }
+
+    private function assertSlotsCountMatchesPackage(Package $package, array $slots): void
+    {
+        if (count($slots) !== $package->sessions_count) {
+            throw ValidationException::withMessages([
+                'slots' => ["يجب اختيار موعد لكل جلسة من جلسات الباقة ({$package->sessions_count} جلسة بالضبط)."],
+            ]);
+        }
+    }
+
+    /**
+     * يمنع اختيار موعد قد مضى وقته فعلاً — بعد تحويله للحظة UTC كاملة حسب
+     * منطقة الطالب الزمنية الفعلية (slotsToAnchors)، لا بمقارنة نص التاريخ
+     * وحده بتاريخ اليوم بتوقيت السيرفر (كانت هذه هي القاعدة القديمة
+     * "after_or_equal:today" في الـ FormRequest، وكانت تخطئ لأي طالب في
+     * منطقة زمنية غير UTC: "اليوم" عندها قد يكون بالفعل "أمس" أو "غداً"
+     * بتوقيت UTC وقت الإرسال، فتُرفض بالخطأ مواعيد اليوم نفسه الصالحة تماماً).
+     */
+    private function assertSlotsNotInPast(Collection $anchors): void
+    {
+        if ($anchors->contains(fn (Carbon $anchor) => $anchor->lte(now()))) {
+            throw ValidationException::withMessages([
+                'slots' => ['لا يمكن اختيار موعد قد مضى وقته.'],
+            ]);
+        }
+    }
+
+    /** يمنع اختيار نفس الموعد (أو موعدين متقاطعين) لأكثر من جلسة ضمن نفس الطلب. */
+    private function assertSlotsDontOverlapEachOther(Collection $anchors, int $durationMinutes): void
+    {
+        $anchors->values()->each(function (Carbon $start, int $i) use ($anchors, $durationMinutes) {
+            $end = $start->copy()->addMinutes($durationMinutes);
+            $overlapsAnother = $anchors->some(function (Carbon $other, int $j) use ($i, $start, $end, $durationMinutes) {
+                if ($j === $i) {
+                    return false;
+                }
+                $otherEnd = $other->copy()->addMinutes($durationMinutes);
+
+                return $other->lt($end) && $start->lt($otherEnd);
+            });
+
+            if ($overlapsAnother) {
+                throw ValidationException::withMessages([
+                    'slots' => ['لا يمكن اختيار نفس الموعد لأكثر من جلسة واحدة.'],
+                ]);
+            }
+        });
     }
 
     private function assertDateMatchesPackageDays(Package $package, Carbon $date): void
@@ -280,24 +358,32 @@ class BookingService
      * حجز يدوي من الأدمن نيابةً عن طالب — بدون Stripe، ومؤكّد فوراً.
      * جماعية: تستخدم جدول الباقة الثابت مباشرة (لا موعد مخصّص يحدده الأدمن).
      * فردية: لا جدول زمني على مستوى الباقة إطلاقاً (أيام فقط) — الأدمن يجب أن
-     *   يمرر تاريخاً ووقتاً ضمن أيامها المتاحة، تماماً كطلب الطالب لكن مؤكَّد فوراً.
+     *   يمرر $slots (موعد مستقل لكل جلسة، بعدد يساوي sessions_count) ضمن أيامها
+     *   المتاحة، تماماً كطلب الطالب لكن مؤكَّد فوراً.
      * created_by_admin_id و manual_reason إلزاميان (مفروضان أيضاً عبر chk_bookings_manual).
      */
-    public function createManualBooking(Student $student, Package $package, User $admin, string $reason, ?string $date = null, ?string $startTime = null): Booking
+    public function createManualBooking(Student $student, Package $package, User $admin, string $reason, ?array $slots = null): Booking
     {
         $this->assertPackageBookable($package);
 
-        if ($package->isIndividual() && (! $date || ! $startTime)) {
+        if ($package->isIndividual() && ! $slots) {
             throw ValidationException::withMessages([
-                'date' => ['هذه باقة فردية — يجب تحديد تاريخ ووقت ضمن أيامها المتاحة'],
+                'slots' => ['هذه باقة فردية — يجب تحديد موعد لكل جلسة ضمن أيامها المتاحة'],
             ]);
+        }
+
+        if ($package->isIndividual()) {
+            $this->assertSlotsCountMatchesPackage($package, $slots);
+            foreach ($slots as $slot) {
+                $this->assertDateMatchesPackageDays($package, Carbon::parse($slot['date']));
+            }
         }
 
         // نفس القيد المفروض على الحجز الذاتي — الأدمن لا يُستثنى منه، فالمقصود
         // منع الطالب من امتلاك أكثر من اشتراك قائم بنفس الباقة بصرف النظر عمّن ينشئه.
         $this->assertNoOpenBookingForPackage($student, $package);
 
-        return DB::transaction(function () use ($student, $package, $admin, $reason, $date, $startTime) {
+        return DB::transaction(function () use ($student, $package, $admin, $reason, $slots) {
             $booking = $this->createBookingRecord($student, $package, [
                 'is_manual' => true,
                 'created_by_admin_id' => $admin->id,
@@ -312,17 +398,14 @@ class BookingService
             // الالتزام الفعلي بالجلسة.
             if ($package->isIndividual()) {
                 // نفس منطقة الطالب المستهدَف — الأدمن يحجز نيابةً عنه فالوقت المقصود هو وقته المحلي هو، لا وقت الأدمن
-                $requestedDate = Carbon::parse($date, $this->studentTimezone($student));
-                $this->assertDateMatchesPackageDays($package, $requestedDate);
-                $anchor = $requestedDate->setTimeFromTimeString($startTime)->setTimezone(config('app.timezone'));
+                $anchors = $this->slotsToAnchors($slots, $this->studentTimezone($student));
+                $durationMinutes = $this->defaultSessionDurationMinutes();
 
-                $this->conflicts->assertNoConflict(
-                    $student,
-                    $this->weeklyOccurrences($anchor, $package->sessions_count),
-                    $this->defaultSessionDurationMinutes(),
-                );
+                $this->assertSlotsNotInPast($anchors);
+                $this->assertSlotsDontOverlapEachOther($anchors, $durationMinutes);
+                $this->conflicts->assertNoConflict($student, $anchors, $durationMinutes);
 
-                $sessions = $this->sessionsFromAnchor($package, $booking, $anchor);
+                $sessions = $this->sessionsFromSlots($package, $booking, $anchors);
             } else {
                 $sessions = $this->sessionsFor($package, $booking);
 
@@ -406,15 +489,6 @@ class BookingService
     }
 
     /**
-     * @return Collection<int, Carbon> $count لحظة بدء، أسبوعياً بدءاً من $anchor —
-     *                                  نفس تكرار sessionsFromAnchor بالضبط.
-     */
-    private function weeklyOccurrences(Carbon $anchor, int $count): Collection
-    {
-        return collect(range(0, $count - 1))->map(fn (int $i) => $anchor->copy()->addWeeks($i));
-    }
-
-    /**
      * عمداً update() وليس increment() — increment() ينفّذ UPDATE مباشراً في قاعدة
      * البيانات متجاوزاً حدث saving، فلا يعمل PackageObserver (الإغلاق التلقائي عند full).
      */
@@ -489,7 +563,7 @@ class BookingService
      * أو تُنشئها لأول مرة. كل صف في package_schedules هو تاريخ جلسة فعلي اختاره
      * المعلم صراحةً من روزنامة (لا تكرار أسبوعي تلقائي) — PackageService يضمن
      * أن عدد الصفوف يساوي sessions_count بالضبط، فكل صف يصبح جلسة واحدة مرتّبة
-     * زمنياً. الفردية لا تملك جدولاً زمنياً على الإطلاق — انظر sessionsFromAnchor.
+     * زمنياً. الفردية لا تملك جدولاً زمنياً على الإطلاق — انظر sessionsFromSlots.
      */
     private function sessionsFor(Package $package, Booking $ownerBooking): Collection
     {
@@ -530,19 +604,18 @@ class BookingService
     }
 
     /**
-     * فردية فقط — الجلسات الـ sessions_count تُنشأ أسبوعياً بدءاً من نقطة زمنية
-     * واحدة (التاريخ/الوقت الذي وافق عليه المعلم من طلب الطالب، أو حدده الأدمن
-     * في الحجز اليدوي). لا يوجد صفوف جدول متعددة هنا كما في الجماعية.
+     * فردية فقط — جلسة واحدة لكل لحظة في $anchors (موعد مستقل اختاره الطالب/الأدمن
+     * لكل جلسة على حدة)، مرتَّبة زمنياً بحيث sequence_no يطابق ترتيب حدوثها الفعلي.
      */
-    private function sessionsFromAnchor(Package $package, Booking $ownerBooking, Carbon $anchor): Collection
+    private function sessionsFromSlots(Package $package, Booking $ownerBooking, Collection $anchors): Collection
     {
         $durationMinutes = $this->defaultSessionDurationMinutes();
 
-        return collect(range(0, $package->sessions_count - 1))->map(function (int $i) use ($ownerBooking, $package, $anchor, $durationMinutes) {
+        return $anchors->values()->map(function (Carbon $anchor, int $i) use ($ownerBooking, $package, $durationMinutes) {
             return $ownerBooking->sessions()->create([
                 'teacher_id' => $package->teacher_id,
                 'sequence_no' => $i + 1,
-                'scheduled_at' => $anchor->copy()->addWeeks($i),
+                'scheduled_at' => $anchor,
                 'duration_min' => $durationMinutes,
                 'status' => 'scheduled',
             ]);

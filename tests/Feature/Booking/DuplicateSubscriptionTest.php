@@ -40,13 +40,11 @@ class DuplicateSubscriptionTest extends TestCase
         $package->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
 
         $this->as($studentToken)->postJson("/api/packages/{$package->id}/bookings/individual", [
-            'date' => $nextWednesday->toDateString(),
-            'start_time' => '09:00',
+            'slots' => [['date' => $nextWednesday->toDateString(), 'start_time' => '09:00']],
         ])->assertStatus(201);
 
         $response = $this->as($studentToken)->postJson("/api/packages/{$package->id}/bookings/individual", [
-            'date' => $nextWednesday->toDateString(),
-            'start_time' => '20:00',
+            'slots' => [['date' => $nextWednesday->toDateString(), 'start_time' => '20:00']],
         ]);
 
         $response->assertStatus(422)
@@ -148,11 +146,12 @@ class DuplicateSubscriptionTest extends TestCase
         $nextWednesday = Carbon::now()->next(3);
         $package->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
 
-        $first = app(BookingService::class)->requestIndividualBooking($student, $package, $nextWednesday->toDateString(), '09:00');
+        $slot = [['date' => $nextWednesday->toDateString(), 'start_time' => '09:00']];
+        $first = app(BookingService::class)->requestIndividualBooking($student, $package, $slot);
         $first->update(['status' => 'cancelled', 'cancelled_at' => now()]);
 
         // بعد إلغاء الاشتراك السابق، يجب السماح بالاشتراك من جديد بنفس الباقة
-        $second = app(BookingService::class)->requestIndividualBooking($student, $package, $nextWednesday->toDateString(), '09:00');
+        $second = app(BookingService::class)->requestIndividualBooking($student, $package, $slot);
 
         $this->assertSame('pending_teacher_confirmation', $second->status);
         $this->assertSame(2, DB::table('bookings')->where('package_id', $package->id)->count());
@@ -168,7 +167,7 @@ class DuplicateSubscriptionTest extends TestCase
         $nextWednesday = Carbon::now()->next(3);
         $packageA->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
         app(BookingService::class)->createManualBooking(
-            $student, $packageA, $admin, 'حجز أول', $nextWednesday->toDateString(), '09:00',
+            $student, $packageA, $admin, 'حجز أول', [['date' => $nextWednesday->toDateString(), 'start_time' => '09:00']],
         );
 
         [$teacherB] = $this->createVerifiedTeacher();
@@ -176,7 +175,7 @@ class DuplicateSubscriptionTest extends TestCase
         $packageB->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
 
         $second = app(BookingService::class)->createManualBooking(
-            $student, $packageB, $admin, 'باقة مختلفة', $nextWednesday->toDateString(), '20:00',
+            $student, $packageB, $admin, 'باقة مختلفة', [['date' => $nextWednesday->toDateString(), 'start_time' => '20:00']],
         );
 
         $this->assertSame('confirmed', $second->status);

@@ -17,9 +17,13 @@ class CreateManualBookingRequest extends FormRequest
         return [
             'student_id' => ['required', 'integer', 'exists:students,id'],
             'reason' => ['required', 'string', 'max:500'],
-            // إلزاميان فقط للباقات الفردية — تُتحقق ضمنها في BookingService (لا جدول على مستوى الباقة الفردية)
-            'date' => ['nullable', 'date', 'after_or_equal:today'],
-            'start_time' => ['nullable', 'date_format:H:i'],
+            // إلزامي فقط للباقات الفردية (موعد مستقل لكل جلسة) — تُتحقق ضمنها
+            // في BookingService (لا جدول على مستوى الباقة الفردية أصلاً).
+            'slots' => ['nullable', 'array', 'min:1'],
+            // بلا "after_or_equal:today" لنفس سبب RequestIndividualBookingRequest —
+            // المقارنة الصحيحة تتم لاحقاً بتوقيت الطالب الفعلي (BookingService::assertSlotsNotInPast).
+            'slots.*.date' => ['required_with:slots', 'date'],
+            'slots.*.start_time' => ['required_with:slots', 'date_format:H:i'],
         ];
     }
 }

@@ -71,7 +71,7 @@ class BookingController extends Controller
         ]));
     }
 
-    /** الطالب يقدّم طلب حجز فردي (تاريخ+وقت) — بلا دفع بعد، بانتظار موافقة المعلم. */
+    /** الطالب يقدّم طلب حجز فردي — موعد مستقل لكل جلسة — بلا دفع بعد، بانتظار موافقة المعلم. */
     public function bookIndividual(RequestIndividualBookingRequest $request, Package $package)
     {
         $student = $request->user()->loadMissing('student')->student;
@@ -79,8 +79,7 @@ class BookingController extends Controller
         $booking = $this->bookingService->requestIndividualBooking(
             $student,
             $package,
-            $request->validated('date'),
-            $request->validated('start_time'),
+            $request->validated('slots'),
         );
 
         return $this->success($booking, 'تم إرسال طلب الحجز، بانتظار موافقة المعلم', 201);
@@ -165,8 +164,7 @@ class BookingController extends Controller
             $package,
             $request->user(),
             $request->validated('reason'),
-            $request->validated('date'),
-            $request->validated('start_time'),
+            $request->validated('slots'),
         );
 
         return $this->success($booking, 'تم إنشاء الحجز اليدوي بنجاح', 201);

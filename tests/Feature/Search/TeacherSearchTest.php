@@ -2,6 +2,9 @@
 
 namespace Tests\Feature\Search;
 
+use App\Models\Language;
+use App\Models\Package;
+use App\Models\Stage;
 use App\Models\Subject;
 use App\Models\Teacher;
 use App\Models\User;
@@ -60,6 +63,73 @@ class TeacherSearchTest extends TestCase
         $response->assertStatus(200);
         $this->assertCount(1, $response->json('data'));
         $this->assertSame($matching->id, $response->json('data.0.id'));
+    }
+
+    public function test_search_filters_by_stage(): void
+    {
+        $subject = Subject::create(['code' => 'ts-'.uniqid(), 'name_ar' => 'مادة']);
+        $stage = Stage::create(['code' => 'stg-'.uniqid(), 'name_ar' => 'مرحلة']);
+        $subject->stages()->attach($stage->id);
+
+        $matching = $this->createTeacher('school', 'verified', ranking: 10);
+        $matching->subjects()->attach($subject->id);
+
+        $this->createTeacher('school', 'verified', ranking: 20);
+
+        $response = $this->getJson("/api/teachers/search?stage_id={$stage->id}");
+
+        $response->assertStatus(200);
+        $this->assertCount(1, $response->json('data'));
+        $this->assertSame($matching->id, $response->json('data.0.id'));
+    }
+
+    public function test_search_filters_by_language(): void
+    {
+        $language = Language::create(['code' => substr(uniqid(), -6), 'name_ar' => 'لغة']);
+        $matching = $this->createTeacher('school', 'verified', ranking: 10);
+        $matching->languages()->attach($language->id);
+
+        $this->createTeacher('school', 'verified', ranking: 20);
+
+        $response = $this->getJson("/api/teachers/search?language_id={$language->id}");
+
+        $response->assertStatus(200);
+        $this->assertCount(1, $response->json('data'));
+        $this->assertSame($matching->id, $response->json('data.0.id'));
+    }
+
+    public function test_search_filters_by_price_range(): void
+    {
+        $subject = Subject::create(['code' => 'ts-'.uniqid(), 'name_ar' => 'مادة']);
+        $cheap = $this->createTeacher('school', 'verified', ranking: 10);
+        $this->createPackage($cheap, $subject, 100);
+
+        $expensive = $this->createTeacher('school', 'verified', ranking: 20);
+        $this->createPackage($expensive, $subject, 400);
+
+        $response = $this->getJson('/api/teachers/search?min_price=200&max_price=500');
+
+        $response->assertStatus(200);
+        $this->assertCount(1, $response->json('data'));
+        $this->assertSame($expensive->id, $response->json('data.0.id'));
+    }
+
+    private function createPackage(Teacher $teacher, Subject $subject, float $studentPrice): Package
+    {
+        return Package::create([
+            'teacher_id' => $teacher->id,
+            'title' => 'باقة',
+            'subject_id' => $subject->id,
+            'session_format' => 'individual',
+            'capacity' => 1,
+            'sessions_count' => 1,
+            'teacher_price' => $studentPrice * 0.6,
+            'platform_margin_percent' => 40,
+            'student_price' => $studentPrice,
+            'platform_revenue' => $studentPrice * 0.4,
+            'status' => 'active',
+            'approved_at' => now(),
+        ]);
     }
 
     private function createTeacher(string $type, string $status, float $ranking): Teacher

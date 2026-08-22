@@ -26,13 +26,13 @@ class SessionJoinTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_join_returns_the_real_url_when_the_bbb_meeting_is_actually_running(): void
+    public function test_join_returns_the_real_url_when_the_bbb_room_already_exists(): void
     {
         [$teacher, $teacherUser] = $this->createVerifiedTeacher();
         [$booking, $session, $studentUser] = $this->createBookingWithSession($teacher, now()->subMinutes(5));
 
         $this->mock(BigBlueButtonService::class, function ($mock) {
-            $mock->shouldReceive('isMeetingRunning')->once()->andReturn(true);
+            $mock->shouldReceive('meetingExists')->once()->andReturn(true);
         });
 
         $response = $this->as($studentUser->createToken('t')->plainTextToken)
@@ -42,14 +42,34 @@ class SessionJoinTest extends TestCase
         $response->assertJsonPath('data.url', $session->join_url_student);
     }
 
-    public function test_join_returns_a_clean_arabic_error_instead_of_raw_bbb_xml_when_the_meeting_is_not_running_yet(): void
+    /**
+     * التراجع الحرج الذي يحميه هذا الاختبار: BBB يُرجع isMeetingRunning=false
+     * لأي اجتماع لم ينضم إليه أحد بعد حتى لو أُنشئ بنجاح تام — فلو استُخدمت
+     * كبوّابة سماح بالانضمام (كما كان الحال سابقاً)، لن يستطيع أول شخص
+     * (طالب أو معلم) الانضمام إلى أي جلسة إطلاقاً رغم أنها مؤكدة ومدفوعة
+     * وحان موعدها فعلاً. الفحص الصحيح (meetingExists عبر getMeetingInfo)
+     * يُرجع true للغرفة الموجودة بصرف النظر عن انضمام أحد إليها من قبل.
+     */
+    public function test_the_first_person_to_join_a_session_is_not_blocked_just_because_nobody_has_joined_yet(): void
+    {
+        [$teacher, $teacherUser] = $this->createVerifiedTeacher();
+        [$booking, $session, $studentUser] = $this->createBookingWithSession($teacher, now()->subMinutes(5));
+
+        $this->mock(BigBlueButtonService::class, function ($mock) {
+            $mock->shouldReceive('meetingExists')->once()->andReturn(true);
+        });
+
+        $response = $this->as($studentUser->createToken('t')->plainTextToken)
+            ->getJson("/api/class-sessions/{$session->id}/join");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.url', $session->join_url_student);
+    }
+
+    public function test_join_returns_a_clean_arabic_error_instead_of_raw_bbb_xml_when_the_session_has_not_started_yet(): void
     {
         [$teacher, $teacherUser] = $this->createVerifiedTeacher();
         [$booking, $session, $studentUser] = $this->createBookingWithSession($teacher, now()->addHour());
-
-        $this->mock(BigBlueButtonService::class, function ($mock) {
-            $mock->shouldReceive('isMeetingRunning')->once()->andReturn(false);
-        });
 
         $response = $this->as($studentUser->createToken('t')->plainTextToken)
             ->getJson("/api/class-sessions/{$session->id}/join");
@@ -63,15 +83,27 @@ class SessionJoinTest extends TestCase
         [$teacher, $teacherUser] = $this->createVerifiedTeacher();
         [$booking, $session, $studentUser] = $this->createBookingWithSession($teacher, now()->subHours(3));
 
+        $response = $this->as($studentUser->createToken('t')->plainTextToken)
+            ->getJson("/api/class-sessions/{$session->id}/join");
+
+        $response->assertStatus(422);
+        $this->assertStringContainsString('انتهت', $response->json('message'));
+    }
+
+    public function test_join_reports_a_clean_error_when_the_room_does_not_actually_exist_on_bbb_within_the_valid_window(): void
+    {
+        [$teacher, $teacherUser] = $this->createVerifiedTeacher();
+        [$booking, $session, $studentUser] = $this->createBookingWithSession($teacher, now()->subMinutes(5));
+
         $this->mock(BigBlueButtonService::class, function ($mock) {
-            $mock->shouldReceive('isMeetingRunning')->once()->andReturn(false);
+            $mock->shouldReceive('meetingExists')->once()->andReturn(false);
         });
 
         $response = $this->as($studentUser->createToken('t')->plainTextToken)
             ->getJson("/api/class-sessions/{$session->id}/join");
 
         $response->assertStatus(422);
-        $this->assertStringContainsString('انتهت', $response->json('message'));
+        $this->assertStringContainsString('تعذّر الوصول', $response->json('message'));
     }
 
     public function test_the_teacher_gets_their_own_join_url_not_the_students(): void
@@ -80,7 +112,7 @@ class SessionJoinTest extends TestCase
         [$booking, $session] = $this->createBookingWithSession($teacher, now()->subMinutes(5));
 
         $this->mock(BigBlueButtonService::class, function ($mock) {
-            $mock->shouldReceive('isMeetingRunning')->once()->andReturn(true);
+            $mock->shouldReceive('meetingExists')->once()->andReturn(true);
         });
 
         $response = $this->as($teacherUser->createToken('t')->plainTextToken)
