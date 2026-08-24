@@ -4,16 +4,27 @@ namespace App\Http\Controllers\Teacher;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Teacher\ImportTeachersRequest;
-use App\Services\TeacherImportService;
+use App\Http\Resources\Admin\ImportBatchResource;
+use App\Jobs\ProcessTeacherImportJob;
+use App\Models\ImportBatch;
 
 class TeacherImportController extends Controller
 {
-    public function __construct(private readonly TeacherImportService $teacherImportService) {}
-
     public function store(ImportTeachersRequest $request)
     {
-        $result = $this->teacherImportService->import($request->file('file'), $request->user());
+        $file = $request->file('file');
+        $path = $file->store('imports/teachers', 'local');
 
-        return $this->success($result, 'اكتمل الاستيراد');
+        $batch = ImportBatch::create([
+            'type' => 'teacher',
+            'status' => 'queued',
+            'file_name' => $file->getClientOriginalName(),
+            'file_path' => $path,
+            'created_by' => $request->user()->id,
+        ]);
+
+        ProcessTeacherImportJob::dispatch($batch->id);
+
+        return $this->success(new ImportBatchResource($batch), 'تم استلام الملف، جارٍ معالجته في الخلفية', 202);
     }
 }

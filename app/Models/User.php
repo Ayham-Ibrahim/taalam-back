@@ -85,4 +85,15 @@ class User extends Authenticatable
     {
         return $this->role === 'student';
     }
+
+    /**
+     * تجاوز الإشعار الافتراضي (Illuminate\Auth\Notifications\ResetPassword) —
+     * ذاك يبني رابطاً لمسار ويب Blade باسم "password.reset" غير موجود إطلاقاً
+     * في تطبيق API خالص كهذا؛ App\Notifications\ResetPassword يشير مباشرة
+     * لصفحة الفرونت اند (config('app.frontend_url')).
+     */
+    public function sendPasswordResetNotification($token): void
+    {
+        $this->notify(new \App\Notifications\ResetPassword($token));
+    }
 }

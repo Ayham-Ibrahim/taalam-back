@@ -3,8 +3,10 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Auth\ForgotPasswordRequest;
 use App\Http\Requests\Auth\LoginRequest;
 use App\Http\Requests\Auth\RegisterStudentRequest;
+use App\Http\Requests\Auth\ResetPasswordRequest;
 use App\Http\Resources\UserResource;
 use App\Services\AuthService;
 use Illuminate\Http\Request;
@@ -31,6 +33,25 @@ class AuthController extends Controller
             'user' => new UserResource($result['user']),
             'token' => $result['token'],
         ], 'تم تسجيل الدخول بنجاح');
+    }
+
+    /** رسالة عامة واحدة دوماً بصرف النظر عن وجود الحساب فعلاً — يمنع اكتشاف البريد المسجَّل (user enumeration) */
+    public function forgotPassword(ForgotPasswordRequest $request)
+    {
+        $this->authService->sendPasswordResetLink($request->validated('email'));
+
+        return $this->success(null, 'إذا كان بريدك الإلكتروني مسجلاً لدينا، ستصلك رسالة تحتوي رابط إعادة تعيين كلمة المرور');
+    }
+
+    public function resetPassword(ResetPasswordRequest $request)
+    {
+        $this->authService->resetPassword(
+            $request->validated('email'),
+            $request->validated('token'),
+            $request->validated('password'),
+        );
+
+        return $this->success(null, 'تم إعادة تعيين كلمة المرور بنجاح');
     }
 
     public function logout(Request $request)

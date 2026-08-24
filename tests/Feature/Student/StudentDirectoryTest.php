@@ -34,6 +34,25 @@ class StudentDirectoryTest extends TestCase
         $this->assertFalse($names->contains('سالم أحمد'));
     }
 
+    public function test_admin_can_filter_students_by_education_type(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $adminToken = $admin->createToken('t')->plainTextToken;
+
+        $schoolUser = User::factory()->student()->create(['name' => 'طالب مدرسي']);
+        Student::create(['user_id' => $schoolUser->id, 'education_type' => 'school']);
+
+        $uniUser = User::factory()->student()->create(['name' => 'طالب جامعي']);
+        Student::create(['user_id' => $uniUser->id, 'education_type' => 'university']);
+
+        $response = $this->as($adminToken)->getJson('/api/students?education_type=university');
+
+        $response->assertStatus(200);
+        $names = collect($response->json('data'))->pluck('name');
+        $this->assertTrue($names->contains('طالب جامعي'));
+        $this->assertFalse($names->contains('طالب مدرسي'));
+    }
+
     public function test_non_admin_cannot_list_students(): void
     {
         $teacherUser = User::factory()->teacher()->create();

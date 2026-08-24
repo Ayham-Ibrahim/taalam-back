@@ -3,8 +3,8 @@
 namespace App\Services;
 
 use App\Imports\TeachersImport;
+use App\Models\ImportBatch;
 use App\Models\User;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -17,6 +17,9 @@ use Maatwebsite\Excel\Facades\Excel;
  * TeacherService::invite() نفسه المستخدَم في الدعوة الفردية (User + Teacher
  * بحالة "invited" + AccountInvitation + إشعار TeacherInvited + سجل تدقيق)،
  * بدل تكرار تلك الخطوات هنا.
+ *
+ * يعمل داخل ProcessTeacherImportJob (طابور) لا طلب HTTP مباشر — راجع تعليق
+ * StudentImportService لتفصيل السبب؛ $batch هو مصدر الحقيقة الوحيد للتقدّم.
  */
 class TeacherImportService
 {
@@ -25,19 +28,27 @@ class TeacherImportService
         private readonly TeacherService $teacherService,
     ) {}
 
-    public function import(UploadedFile $file, User $admin): array
+    public function processBatch(ImportBatch $batch): void
     {
-        $sheets = Excel::toCollection(new TeachersImport, $file);
+        $sheets = Excel::toCollection(new TeachersImport, $batch->file_path, 'local');
         $rows = $sheets->first() ?? collect();
 
         $maxRows = (int) $this->settings->get('teacher_import_max_rows', 500);
 
         if ($rows->count() > $maxRows) {
-            throw ValidationException::withMessages([
-                'file' => ["عدد الصفوف يتجاوز الحد الأقصى المسموح ({$maxRows} صف)"],
+            $batch->update([
+                'status' => 'failed',
+                'total_rows' => $rows->count(),
+                'failure_reason' => "عدد الصفوف ({$rows->count()}) يتجاوز الحد الأقصى المسموح ({$maxRows} صف)",
+                'completed_at' => now(),
             ]);
+
+            return;
         }
 
+        $batch->update(['status' => 'processing', 'total_rows' => $rows->count(), 'started_at' => now()]);
+
+        $admin = $batch->creator;
         $imported = 0;
         $errors = [];
 
@@ -54,13 +65,20 @@ class TeacherImportService
                     'errors' => $e->errors(),
                 ];
             }
+
+            if (($index + 1) % 25 === 0) {
+                $batch->update(['processed_rows' => $index + 1]);
+            }
         }
 
-        return [
-            'imported' => $imported,
-            'failed' => count($errors),
+        $batch->update([
+            'status' => 'completed',
+            'processed_rows' => $rows->count(),
+            'imported_count' => $imported,
+            'failed_count' => count($errors),
             'errors' => $errors,
-        ];
+            'completed_at' => now(),
+        ]);
     }
 
     private function validateRow(array $row): array

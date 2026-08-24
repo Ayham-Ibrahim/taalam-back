@@ -6,13 +6,13 @@ use App\Imports\StudentsImport;
 use App\Models\AccountInvitation;
 use App\Models\CourseField;
 use App\Models\Curriculum;
+use App\Models\ImportBatch;
 use App\Models\Major;
 use App\Models\Stage;
 use App\Models\Student;
 use App\Models\University;
 use App\Models\User;
 use App\Notifications\StudentImported;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
@@ -23,6 +23,11 @@ use Maatwebsite\Excel\Facades\Excel;
 /**
  * استيراد جماعي للطلاب من Excel/CSV. فشل صف واحد لا يوقف الدفعة — كل صف
  * مستقل بمعاملته الخاصة، والأخطاء تُجمَع وتُعاد للأدمن مع رقم الصف.
+ *
+ * يعمل الآن داخل ProcessStudentImportJob (طابور) لا طلب HTTP مباشر — ملفات
+ * بآلاف الصفوف كانت تتجاوز مهلة المتصفح رغم اكتمالها فعلياً في الخلفية.
+ * $batch (ImportBatch) هو مصدر الحقيقة الوحيد لتقدّم/نتيجة العملية الآن،
+ * يتابعه الأدمن عبر GET /import-batches بدل انتظار استجابة الطلب الأصلي.
  */
 class StudentImportService
 {
@@ -31,19 +36,27 @@ class StudentImportService
         private readonly NotificationService $notifications,
     ) {}
 
-    public function import(UploadedFile $file, User $admin): array
+    public function processBatch(ImportBatch $batch): void
     {
-        $sheets = Excel::toCollection(new StudentsImport, $file);
+        $sheets = Excel::toCollection(new StudentsImport, $batch->file_path, 'local');
         $rows = $sheets->first() ?? collect();
 
         $maxRows = (int) $this->settings->get('student_import_max_rows', 500);
 
         if ($rows->count() > $maxRows) {
-            throw ValidationException::withMessages([
-                'file' => ["عدد الصفوف يتجاوز الحد الأقصى المسموح ({$maxRows} صف)"],
+            $batch->update([
+                'status' => 'failed',
+                'total_rows' => $rows->count(),
+                'failure_reason' => "عدد الصفوف ({$rows->count()}) يتجاوز الحد الأقصى المسموح ({$maxRows} صف)",
+                'completed_at' => now(),
             ]);
+
+            return;
         }
 
+        $batch->update(['status' => 'processing', 'total_rows' => $rows->count(), 'started_at' => now()]);
+
+        $admin = $batch->creator;
         $imported = 0;
         $errors = [];
 
@@ -59,13 +72,22 @@ class StudentImportService
                     'errors' => $e->errors(),
                 ];
             }
+
+            // كل 25 صفاً لا كل صف — تحديث الصف الواحد على دفعة آلاف الصفوف
+            // يُبطئ الاستيراد فعلياً بلا فائدة تُذكَر لشريط تقدّم يُعرَض للأدمن.
+            if (($index + 1) % 25 === 0) {
+                $batch->update(['processed_rows' => $index + 1]);
+            }
         }
 
-        return [
-            'imported' => $imported,
-            'failed' => count($errors),
+        $batch->update([
+            'status' => 'completed',
+            'processed_rows' => $rows->count(),
+            'imported_count' => $imported,
+            'failed_count' => count($errors),
             'errors' => $errors,
-        ];
+            'completed_at' => now(),
+        ]);
     }
 
     private function importRow(array $row, User $admin): void
@@ -83,7 +105,9 @@ class StudentImportService
 
             Student::create([
                 'user_id' => $user->id,
-                'education_type' => $data['education_type'],
+                // اختياري بالكامل الآن — يبقى NULL حتى يُكمل الطالب ملفه بنفسه
+                // (نفس آلية حساب ينشئه الأدمن مباشرة)، راجع validateRow().
+                'education_type' => $data['education_type'] ?? null,
                 'curriculum_id' => $data['curriculum_id'] ?? null,
                 'stage_id' => $data['stage_id'] ?? null,
                 'grade' => $data['grade'] ?? null,
@@ -93,6 +117,8 @@ class StudentImportService
                 'course_field_id' => $data['course_field_id'] ?? null,
                 'level' => $data['level'] ?? null,
                 'birth_date' => $data['birth_date'] ?? null,
+                'city' => $data['city'] ?? null,
+                'country' => $data['country'] ?? null,
                 'guardian_name' => $data['guardian_name'] ?? null,
                 'guardian_phone' => $data['guardian_phone'] ?? null,
                 'imported' => true,
@@ -110,39 +136,53 @@ class StudentImportService
         });
     }
 
+    /**
+     * الاسم والإيميل فقط إلزاميان — أي صف يفتقدهما يُرفَض (ويُجمَع في errors[]
+     * دون إيقاف بقية الدفعة، راجع import()). كل شيء آخر (الهاتف، المدينة،
+     * البلد، التصنيف الأكاديمي...) اختياري بالكامل: يُستخدم إن وُجد وكان
+     * صحيحاً، ويُترَك فارغاً بهدوء غير ذلك — الملفات الحقيقية الواردة من
+     * جهات خارجية (قوائم شركاء) غالباً لا تحمل غير الاسم والإيميل والهاتف.
+     */
     private function validateRow(array $row): array
     {
         $normalized = [
-            'name' => $row['name'] ?? null,
-            'email' => $row['email'] ?? null,
-            'phone' => $row['phone'] ?? null,
-            'education_type' => $row['education_type'] ?? null,
-            'curriculum_code' => $row['curriculum_code'] ?? null,
-            'stage_code' => $row['stage_code'] ?? null,
-            'grade' => $row['grade'] ?? null,
-            'university_name' => $row['university_name'] ?? null,
-            'major_name' => $row['major_name'] ?? null,
-            'academic_level' => $row['academic_level'] ?? null,
-            'course_field_code' => $row['course_field_code'] ?? null,
-            'level' => $row['level'] ?? null,
-            'birth_date' => $row['birth_date'] ?? null,
-            'guardian_name' => $row['guardian_name'] ?? null,
-            'guardian_phone' => $row['guardian_phone'] ?? null,
+            'name' => $this->normalizeValue($row['name'] ?? null),
+            'email' => $this->normalizeValue($row['email'] ?? null),
+            // "phone1" هو اسم العمود الفعلي في ملفات استيراد شائعة (تصدير
+            // أنظمة CRM خارجية) — نقبله كبديل عن "phone" كي لا يتعطل الاستيراد
+            // بسبب تسمية عمود فقط.
+            'phone' => $this->normalizeValue($row['phone'] ?? $row['phone1'] ?? null),
+            'city' => $this->normalizeValue($row['city'] ?? null),
+            'country' => $this->normalizeValue($row['country'] ?? null),
+            'education_type' => $this->normalizeValue($row['education_type'] ?? null),
+            'curriculum_code' => $this->normalizeValue($row['curriculum_code'] ?? null),
+            'stage_code' => $this->normalizeValue($row['stage_code'] ?? null),
+            'grade' => $this->normalizeValue($row['grade'] ?? null),
+            'university_name' => $this->normalizeValue($row['university_name'] ?? null),
+            'major_name' => $this->normalizeValue($row['major_name'] ?? null),
+            'academic_level' => $this->normalizeValue($row['academic_level'] ?? null),
+            'course_field_code' => $this->normalizeValue($row['course_field_code'] ?? null),
+            'level' => $this->normalizeValue($row['level'] ?? null),
+            'birth_date' => $this->normalizeValue($row['birth_date'] ?? null),
+            'guardian_name' => $this->normalizeValue($row['guardian_name'] ?? null),
+            'guardian_phone' => $this->normalizeValue($row['guardian_phone'] ?? null),
         ];
 
         $validator = Validator::make($normalized, [
             'name' => ['required', 'string', 'max:150'],
             'email' => ['required', 'email', 'max:150', 'unique:users,email'],
             'phone' => ['nullable', 'string', 'max:25', 'unique:users,phone'],
-            'education_type' => ['required', Rule::in(['school', 'university', 'training'])],
-            'curriculum_code' => ['required_if:education_type,school'],
-            'stage_code' => ['required_if:education_type,school'],
+            'city' => ['nullable', 'string', 'max:100'],
+            'country' => ['nullable', 'string', 'max:100'],
+            'education_type' => ['nullable', Rule::in(['school', 'university', 'training'])],
+            'curriculum_code' => ['nullable', 'string'],
+            'stage_code' => ['nullable', 'string'],
             'grade' => ['nullable', 'integer', 'min:1', 'max:12'],
-            'university_name' => ['required_if:education_type,university'],
-            'major_name' => ['required_if:education_type,university'],
-            'academic_level' => ['nullable', 'required_if:education_type,university', Rule::in(['diploma', 'bachelor', 'master'])],
-            'course_field_code' => ['required_if:education_type,training'],
-            'level' => ['nullable', 'required_if:education_type,training', Rule::in(['beginner', 'intermediate', 'advanced'])],
+            'university_name' => ['nullable', 'string'],
+            'major_name' => ['nullable', 'string'],
+            'academic_level' => ['nullable', Rule::in(['diploma', 'bachelor', 'master'])],
+            'course_field_code' => ['nullable', 'string'],
+            'level' => ['nullable', Rule::in(['beginner', 'intermediate', 'advanced'])],
             'birth_date' => ['nullable', 'date'],
             'guardian_name' => ['nullable', 'string', 'max:150'],
             'guardian_phone' => ['nullable', 'string', 'max:25'],
@@ -175,6 +215,22 @@ class StudentImportService
         }
 
         return $data;
+    }
+
+    /**
+     * خلايا Excel الفارغة تصل غالباً كسلسلة فارغة "" لا null فعلي — تُعامَل
+     * هنا كـ null موحَّد، وإلا فإن قاعدة unique (البريد/الهاتف) قد ترفض ثاني
+     * صف بهاتف فارغ بحجة تكراره مع أول صف بهاتف فارغ أيضاً.
+     */
+    private function normalizeValue(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $trimmed = trim((string) $value);
+
+        return $trimmed === '' ? null : $trimmed;
     }
 
     private function resolveByCode(string $modelClass, string $code, string $field): int

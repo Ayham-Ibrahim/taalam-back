@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Admin\AdminDashboardController;
 use App\Http\Controllers\Admin\AuditLogController;
+use App\Http\Controllers\Admin\ImportBatchController;
 use App\Http\Controllers\Admin\SettingsController;
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\Booking\BookingController;
@@ -33,6 +34,8 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('auth')->group(function () {
     Route::middleware('throttle:register')->post('register/student', [AuthController::class, 'registerStudent']);
     Route::middleware('throttle:login')->post('login', [AuthController::class, 'login']);
+    Route::middleware('throttle:password-reset')->post('forgot-password', [AuthController::class, 'forgotPassword']);
+    Route::middleware('throttle:password-reset')->post('reset-password', [AuthController::class, 'resetPassword']);
 
     Route::middleware('auth:sanctum')->group(function () {
         Route::post('logout', [AuthController::class, 'logout']);
@@ -191,8 +194,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('students', [StudentController::class, 'index']);
     Route::get('students/{student}', [StudentController::class, 'show']);
     Route::put('students/{student}', [StudentController::class, 'update']);
+    Route::put('students/{student}/password', [StudentController::class, 'resetPassword']);
 
     Route::get('admin/settings', [SettingsController::class, 'index']);
     Route::put('admin/settings/{key}', [SettingsController::class, 'update']);
     Route::get('admin/audit-log', [AuditLogController::class, 'index']);
+
+    Route::get('import-batches', [ImportBatchController::class, 'index']);
+    Route::get('import-batches/{importBatch}', [ImportBatchController::class, 'show']);
 });

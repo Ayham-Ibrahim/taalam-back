@@ -21,6 +21,8 @@ class Student extends Model
         'course_field_id',
         'level',
         'birth_date',
+        'city',
+        'country',
         'guardian_name',
         'guardian_phone',
         'imported',

@@ -113,6 +113,18 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perHour(5)->by('password-change:'.$request->user()?->id);
         });
 
+        // نسيان/إعادة تعيين كلمة المرور — بلا مصادقة، عرضة لنفس مخاطر إغراق
+        // البريد بمحاولات متكررة مثل login تماماً؛ نفس النمط (5/دقيقة لكل إيميل+IP).
+        RateLimiter::for('password-reset', function (Request $request) use ($apiRateLimitingEnabled) {
+            if (! $apiRateLimitingEnabled) {
+                return Limit::none();
+            }
+
+            $key = Str::transliterate(Str::lower((string) $request->input('email'))).'|'.$request->ip();
+
+            return Limit::perMinute(5)->by($key);
+        });
+
         // حد أدنى موحّد لكل كلمات المرور في التطبيق (تسجيل ذاتي، حساب ينشئه الأدمن...):
         // 8 أحرف + حرف كبير وصغير + رقم دائماً، وفحص كلمات مرور مسرَّبة (uncompromised)
         // في الإنتاج فقط — يستدعي Have I Been Pwned عبر الشبكة، لا داعي له محلياً/بالاختبارات.

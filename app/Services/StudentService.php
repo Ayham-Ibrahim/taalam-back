@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Student;
 use App\Models\User;
 use App\Notifications\AccountCreatedByAdmin;
+use App\Notifications\PasswordResetByAdmin;
 use App\Traits\LogsAuditEvents;
 use Illuminate\Support\Facades\DB;
 
@@ -49,5 +50,24 @@ class StudentService
         $student->save();
 
         return $student->fresh();
+    }
+
+    /**
+     * الأدمن يضع كلمة مرور جديدة مباشرة (بلا حاجة لمعرفة القديمة) — يوازي
+     * AuthService::updatePassword من ناحية إبطال الجلسات القائمة (دفاع في
+     * العمق: كلمة مرور جديدة تُبطل كل دخول سابق فوراً)، ويُرسِلها للطالب
+     * بالبريد (PasswordResetByAdmin) تماماً كما تُرسَل عند إنشاء الحساب.
+     */
+    public function resetPasswordByAdmin(Student $student, string $newPassword, User $admin): void
+    {
+        $student->loadMissing('user');
+        $user = $student->user;
+
+        $user->update(['password' => $newPassword]);
+        $user->tokens()->delete();
+
+        $this->notifications->send($user, new PasswordResetByAdmin($newPassword), 'student.password_reset_by_admin');
+
+        $this->audit('student.password_reset_by_admin', $student, [], [], null, $admin->id);
     }
 }

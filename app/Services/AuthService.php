@@ -7,6 +7,7 @@ use App\Models\User;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -159,5 +160,46 @@ class AuthService
 
         // إبطال كل الجلسات الأخرى دفاعاً في العمق — الجلسة الحالية فقط تبقى صالحة
         $user->tokens()->where('id', '!=', $user->currentAccessToken()?->id)->delete();
+    }
+
+    /**
+     * لا نتحقق من وجود الحساب هنا ولا نُبلِّغ عن نتيجة الإرسال للمتحكم —
+     * الكونترولر يُرجع دوماً رسالة عامة واحدة بصرف النظر عن الحالة الفعلية،
+     * وإلا يصبح هذا المسار وسيلة لاكتشاف أي بريد إلكتروني مسجَّل لدينا فعلاً
+     * (user enumeration) لمجرد تجربته ومراقبة اختلاف الرسالة.
+     */
+    public function sendPasswordResetLink(string $email): void
+    {
+        Password::sendResetLink(['email' => $email]);
+    }
+
+    public function resetPassword(string $email, string $token, string $newPassword): void
+    {
+        $status = Password::reset(
+            ['email' => $email, 'password' => $newPassword, 'token' => $token],
+            function (User $user, string $password) {
+                $user->update(['password' => $password]);
+
+                // إبطال كل الجلسات القائمة — طلب إعادة تعيين كلمة المرور يعني
+                // غالباً أن الجلسات الحالية (إن وُجدت) لم تعد تُمثِّل صاحب الحساب بالضرورة.
+                $user->tokens()->delete();
+            }
+        );
+
+        if ($status !== Password::PASSWORD_RESET) {
+            throw ValidationException::withMessages([
+                'email' => [$this->passwordResetStatusMessage($status)],
+            ]);
+        }
+    }
+
+    /** لا نظام ترجمة (lang/) في هذا المشروع — كل رسالة عربية مباشرة كبقية الخدمات، لا __() */
+    private function passwordResetStatusMessage(string $status): string
+    {
+        return match ($status) {
+            Password::INVALID_USER => 'لا يوجد حساب مرتبط بهذا البريد الإلكتروني',
+            Password::RESET_THROTTLED => 'يرجى الانتظار قليلاً قبل إعادة المحاولة',
+            default => 'رابط إعادة تعيين كلمة المرور غير صالح أو منتهي الصلاحية',
+        };
     }
 }

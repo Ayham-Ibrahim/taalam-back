@@ -27,6 +27,12 @@ class StudentPolicy
         return $user->id === $student->user_id;
     }
 
+    /** الأدمن فقط يعيد تعيين كلمة مرور طالب مباشرة (بلا حاجة لكلمة المرور الحالية) */
+    public function resetPassword(User $user, Student $student): bool
+    {
+        return $user->isAdmin();
+    }
+
     /**
      * الأدمن يرى أي طالب، الطالب يرى نفسه، والمعلم يرى فقط طالباً له معه
      * حجز أو تسجيل فعلي — لا يرى ملفات طلاب لم يتعامل معهم إطلاقاً.

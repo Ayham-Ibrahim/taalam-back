@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Student;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Student\AdminResetStudentPasswordRequest;
 use App\Http\Requests\Student\CreateStudentAccountRequest;
 use App\Http\Requests\Student\UpdateStudentProfileRequest;
 use App\Http\Resources\Student\StudentIndexResource;
@@ -37,7 +38,7 @@ class StudentController extends Controller
         $this->authorize('viewAny', Student::class);
 
         $students = Student::query()
-            ->with('user:id,name,email,phone')
+            ->with('user:id,name,email,phone,avatar_path,is_active,created_at')
             ->when($request->filled('search'), function ($query) use ($request) {
                 $search = $request->string('search');
                 $query->whereHas('user', function ($userQuery) use ($search) {
@@ -45,6 +46,7 @@ class StudentController extends Controller
                         ->orWhere('email', 'like', "%{$search}%");
                 });
             })
+            ->when($request->filled('education_type'), fn ($q) => $q->where('education_type', $request->string('education_type')->value()))
             ->latest()
             ->paginate($request->integer('per_page', 20));
 
@@ -58,5 +60,13 @@ class StudentController extends Controller
         $student->load(['user:id,name,email,phone,avatar_path,whatsapp,gender', 'curriculum:id,name_ar', 'stage:id,name_ar', 'university:id,name_ar', 'major:id,name_ar', 'courseField:id,name_ar']);
 
         return $this->success(new StudentProfileResource($student));
+    }
+
+    /** الأدمن يعيد تعيين كلمة مرور طالب مباشرة — بلا حاجة لمعرفة القديمة، ترسَل الجديدة بالبريد */
+    public function resetPassword(AdminResetStudentPasswordRequest $request, Student $student)
+    {
+        $this->studentService->resetPasswordByAdmin($student, $request->validated('password'), $request->user());
+
+        return $this->success(null, 'تم تغيير كلمة مرور الطالب بنجاح، وأُرسلت له عبر البريد الإلكتروني');
     }
 }
