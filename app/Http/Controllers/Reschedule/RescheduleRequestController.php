@@ -24,12 +24,12 @@ class RescheduleRequestController extends Controller
 
         $requests = RescheduleRequest::query()
             ->with([
-                'requester:id,name',
-                'booking.student.user:id,name',
+                'requester:id,name,timezone',
+                'booking.student.user:id,name,timezone',
                 'session:id,teacher_id,booking_id',
                 'session.teacher.user:id,name',
                 'session.attendees:id,class_session_id,student_id',
-                'session.attendees.student.user:id,name',
+                'session.attendees.student.user:id,name,timezone',
             ])
             ->when(! $user->isAdmin(), fn ($q) => $q->where('requested_by', $user->id))
             ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))
@@ -100,6 +100,11 @@ class RescheduleRequestController extends Controller
             'id' => $rescheduleRequest->id,
             'teacherName' => $teacherName,
             'studentName' => $studentName,
+            // كل التواريخ أدناه تُعرَض للأدمن بتوقيت الطالب تحديداً في الواجهة —
+            // بصرف النظر عمّن أرسل الطلب فعلياً (طالب أو معلم)، لأن الجلسة تخص
+            // جدول الطالب هو أصلاً؛ هذا الحقل هو ما تعتمد عليه الواجهة لذلك
+            // بدل توقيت متصفح الأدمن نفسه (كان هذا الخطأ سابقاً).
+            'studentTimezone' => $this->resolveStudentTimezone($rescheduleRequest),
             'requesterRole' => $rescheduleRequest->requester_role,
             'status' => $rescheduleRequest->status,
             'reason' => $rescheduleRequest->reason,
@@ -133,6 +138,19 @@ class RescheduleRequestController extends Controller
         }
 
         return $rescheduleRequest->session?->attendees->first()?->student?->user?->name;
+    }
+
+    /** يوازي resolveStudentName تماماً في ترتيب الأولوية — لكن يُرجع المنطقة الزمنية لا الاسم */
+    private function resolveStudentTimezone(RescheduleRequest $rescheduleRequest): ?string
+    {
+        if ($rescheduleRequest->requester_role === 'student') {
+            return $rescheduleRequest->requester?->timezone
+                ?? $rescheduleRequest->booking?->student?->user?->timezone
+                ?? $rescheduleRequest->session?->attendees->first()?->student?->user?->timezone;
+        }
+
+        return $rescheduleRequest->booking?->student?->user?->timezone
+            ?? $rescheduleRequest->session?->attendees->first()?->student?->user?->timezone;
     }
 
     private function toIso(?Carbon $dateTime): ?string

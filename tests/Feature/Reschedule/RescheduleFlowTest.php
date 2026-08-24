@@ -183,6 +183,79 @@ class RescheduleFlowTest extends TestCase
         $this->assertNotNull($response->json('data.0.createdAt'));
     }
 
+    /**
+     * الأدمن كان يرى تواريخ طلب تغيير الموعد بتوقيت متصفحه المحلي هو (عبر
+     * formatDateTime الافتراضية في الواجهة، بلا أي منطقة زمنية صريحة) — لا
+     * علاقة له بجدول الطالب الفعلي. هنا نثبت أن الباك اند يُرجع الآن
+     * studentTimezone الصحيحة (منطقة الطالب هو تحديداً)، مختلفة عمداً عن
+     * منطقتي المعلم والأدمن كليهما، فلا يمكن أن يمر الاختبار بالصدفة.
+     */
+    public function test_admin_list_returns_the_students_own_timezone_not_the_admins_or_teachers(): void
+    {
+        $teacherUser = User::factory()->teacher()->create(['timezone' => 'Europe/London']);
+        $teacher = Teacher::create(['user_id' => $teacherUser->id, 'teacher_type' => 'school', 'status' => 'verified']);
+
+        $subject = Subject::create(['code' => 'rs-'.uniqid(), 'name_ar' => 'مادة']);
+        $package = Package::create([
+            'teacher_id' => $teacher->id,
+            'title' => 'باقة',
+            'subject_id' => $subject->id,
+            'session_format' => 'individual',
+            'capacity' => 1,
+            'sessions_count' => 4,
+            'teacher_price' => 100,
+            'platform_margin_percent' => 60,
+            'student_price' => 160,
+            'platform_revenue' => 60,
+            'status' => 'active',
+            'approved_at' => now(),
+        ]);
+
+        $studentUser = User::factory()->student()->create(['timezone' => 'Asia/Tokyo']);
+        $student = Student::create(['user_id' => $studentUser->id, 'education_type' => 'school']);
+
+        $booking = Booking::create([
+            'reference' => 'BK-'.strtoupper(uniqid()),
+            'student_id' => $student->id,
+            'teacher_id' => $teacher->id,
+            'package_id' => $package->id,
+            'amount_paid' => 160,
+            'teacher_amount' => 100,
+            'platform_amount' => 60,
+            'margin_percent_snapshot' => 60,
+            'sessions_total' => 4,
+            'sessions_remaining' => 4,
+            'status' => 'confirmed',
+        ]);
+
+        $session = $booking->sessions()->create([
+            'teacher_id' => $teacher->id,
+            'sequence_no' => 1,
+            'scheduled_at' => now()->addDays(5),
+            'duration_min' => 60,
+            'status' => 'scheduled',
+        ]);
+        SessionAttendee::create([
+            'class_session_id' => $session->id,
+            'student_id' => $student->id,
+            'booking_id' => $booking->id,
+            'attendance' => 'registered',
+        ]);
+
+        $studentToken = $studentUser->createToken('t')->plainTextToken;
+        $this->as($studentToken)->postJson("/api/class-sessions/{$session->id}/reschedule-requests", [
+            'proposed_scheduled_at' => now()->addDays(6)->toDateTimeString(),
+            'reason' => 'سبب',
+        ])->assertStatus(201);
+
+        $admin = User::factory()->admin()->create(['timezone' => 'UTC']);
+        $adminToken = $admin->createToken('t')->plainTextToken;
+
+        $response = $this->as($adminToken)->getJson('/api/reschedule-requests');
+
+        $response->assertStatus(200)->assertJsonPath('data.0.studentTimezone', 'Asia/Tokyo');
+    }
+
     public function test_student_attending_the_session_can_request_reschedule(): void
     {
         [$teacher] = $this->createVerifiedTeacher();
