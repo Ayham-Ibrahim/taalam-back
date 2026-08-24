@@ -107,6 +107,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('packages', [PackageController::class, 'index']);
     Route::post('packages', [PackageController::class, 'store']);
     Route::get('packages/{package}', [PackageController::class, 'show']);
+    Route::get('packages/{package}/busy-slots', [PackageController::class, 'busySlots']);
     Route::put('packages/{package}', [PackageController::class, 'update']);
     Route::post('packages/{package}/submit', [PackageController::class, 'submit']);
     Route::post('packages/{package}/disable', [PackageController::class, 'disable']);

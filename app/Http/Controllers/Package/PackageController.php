@@ -10,12 +10,14 @@ use App\Http\Requests\Package\UpdatePackageRequest;
 use App\Http\Resources\Package\AdminPackageResource;
 use App\Http\Resources\Package\StudentPackageResource;
 use App\Http\Resources\Package\TeacherPackageResource;
+use App\Models\ClassSession;
 use App\Models\Package;
 use App\Models\Teacher;
 use App\Models\User;
 use App\Services\PackageApprovalService;
 use App\Services\PackageService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 
 class PackageController extends Controller
 {
@@ -85,6 +87,43 @@ class PackageController extends Controller
         $package->load(['curricula', 'stages', 'schedules', 'teacher:id,user_id,teacher_type', 'teacher.user:id,name', 'subject:id,name_ar']);
 
         return $this->success($this->resourceFor($package, $request->user()));
+    }
+
+    /**
+     * الأوقات المشغولة فعلاً على جدول معلم هذه الباقة ليوم معيّن — تغذّي عرض
+     * "غير متاح" في واجهة الحجز قبل الإرسال، وليست الفحص الملزم (ذاك يبقى في
+     * BookingService::conflicts وقت الحجز/الموافقة الفعلي، وقد يتغير الوضع
+     * بين لحظة عرض هذا الـ endpoint ولحظة الإرسال الفعلية بسباق واقعي).
+     *
+     * $date يوم بتقويم الطالب هو (لا خادم UTC ساذج) — نحسب حدود ذلك اليوم
+     * بمنطقته الزمنية الفعلية ثم نحوّلها لتوقيت النظام قبل الاستعلام، وإلا
+     * تُفلَت جلسة تقع فعلياً ضمن هذا اليوم عند الطالب لكنها تعبر حدود اليوم
+     * بتوقيت UTC (نفس ملاحظة BookingService::slotsToAnchors تماماً).
+     */
+    public function busySlots(Request $request, Package $package)
+    {
+        // عمداً بلا PackagePolicy::view (تلك تقصر الرؤية على المعلم المالك/الأدمن
+        // فقط، بينما هذه المعلومة يحتاجها أي طالب يستكشف الحجز — نفس منطق
+        // indexForTeacher العام: أي مستخدم موثَّق قد يحجز هذه الباقة يحتاج معرفة
+        // متى معلمها مشغول فعلاً، بصرف النظر عن ملكيته لها).
+        abort_unless($package->status === 'active', 404);
+
+        $date = $request->string('date')->value();
+        abort_if(! $date, 422, 'التاريخ مطلوب');
+
+        $timezone = $request->user()->timezone ?? 'UTC';
+        $dayStart = Carbon::parse($date, $timezone)->startOfDay()->setTimezone(config('app.timezone'));
+        $dayEnd = $dayStart->copy()->addDay();
+
+        $sessions = ClassSession::where('teacher_id', $package->teacher_id)
+            ->whereIn('status', ['scheduled', 'active'])
+            ->whereBetween('scheduled_at', [$dayStart, $dayEnd])
+            ->get(['scheduled_at', 'duration_min']);
+
+        return $this->success($sessions->map(fn (ClassSession $session) => [
+            'start' => $session->scheduled_at->toIso8601String(),
+            'end' => $session->scheduled_at->copy()->addMinutes($session->duration_min)->toIso8601String(),
+        ])->values());
     }
 
     public function update(UpdatePackageRequest $request, Package $package)

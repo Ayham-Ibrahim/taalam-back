@@ -8,9 +8,12 @@ use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
 
 /**
- * يمنع أي طالب من امتلاك جلستين متداخلتين زمنياً في نفس اللحظة، بصرف النظر
- * عن مصدرهما (باقة فردية/جماعية أو دورة، حجز ذاتي أو يدوي من الأدمن) — لا
- * وجود لهذا التحقق سابقاً في أي مسار حجز/تسجيل.
+ * يمنع أي طالب من امتلاك جلستين متداخلتين زمنياً في نفس اللحظة، وبالمثل يمنع
+ * أي معلم من امتلاك جلستين متداخلتين (ولو مع طالبين مختلفين تماماً) — بصرف
+ * النظر عن مصدرهما (باقة فردية/جماعية أو دورة، حجز ذاتي أو يدوي من الأدمن).
+ * الفحص الثاني (المعلم) كان غائباً تماماً سابقاً: التحقق كان مقيَّداً بجلسات
+ * الطالب نفسه فقط، فطالبان مختلفان يحجزان نفس المعلم في نفس اللحظة تماماً
+ * كان يمر بلا أي منع — يزدحم جدول المعلم بجلستين متطابقتي التوقيت.
  *
  * "قائمة فعلاً" هنا تعني جلسة بحالة scheduled/active — أي جلسة تخص حجزاً أو
  * تسجيلاً بحالة pending_payment أو confirmed أو active على حد سواء، لأن
@@ -24,14 +27,22 @@ class ScheduleConflictService
 
     /**
      * @param  iterable<Carbon>  $candidateStarts  لحظات بداية الجلسات المقترحة (بتوقيت UTC/توقيت النظام)
+     * @param  array<int, int>  $excludeSessionIds  جلسات جماعية/دورة قائمة بالفعل والطالب على وشك
+     *   الانضمام إليها كحاضر إضافي فيها (لا تُنشأ له جلسة جديدة) — هذه ليست "جلسة أخرى" تتعارض مع
+     *   نفسها، فتُستبعَد من فحص تعارض المعلم صراحة، وإلا يُرفض كل انضمام ثانٍ فما فوق لأي مجموعة/دورة
+     *   بحجة "تعارض" مع الجلسة ذاتها التي أنشأها أول طالب انضمّ إليها.
      *
-     * @throws ValidationException عند تقاطع أي لحظة مقترحة مع جلسة قائمة فعلاً للطالب نفسه
+     * @throws ValidationException عند تقاطع أي لحظة مقترحة مع جلسة قائمة فعلاً إما للطالب نفسه أو للمعلم نفسه (مع أي طالب آخر)
      */
-    public function assertNoConflict(Student $student, iterable $candidateStarts, int $candidateDurationMinutes): void
+    public function assertNoConflict(Student $student, int $teacherId, iterable $candidateStarts, int $candidateDurationMinutes, array $excludeSessionIds = []): void
     {
         $existingSessions = ClassSession::query()
-            ->whereHas('attendees', fn ($q) => $q->where('student_id', $student->id))
+            ->where(function ($query) use ($student, $teacherId) {
+                $query->whereHas('attendees', fn ($q) => $q->where('student_id', $student->id))
+                    ->orWhere('teacher_id', $teacherId);
+            })
             ->whereIn('status', self::LIVE_STATUSES)
+            ->when($excludeSessionIds, fn ($q) => $q->whereNotIn('id', $excludeSessionIds))
             ->get(['id', 'scheduled_at', 'duration_min']);
 
         if ($existingSessions->isEmpty()) {

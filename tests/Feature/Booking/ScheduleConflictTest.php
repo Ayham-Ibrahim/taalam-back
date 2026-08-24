@@ -189,6 +189,69 @@ class ScheduleConflictTest extends TestCase
         app(EnrollmentService::class)->initiateEnrollment($student, $course);
     }
 
+    /**
+     * الفجوة الفعلية التي أُصلحت هنا: التحقق كان مقيَّداً بجلسات الطالب نفسه
+     * فقط — طالبان مختلفان تماماً يحجزان نفس المعلم في نفس اللحظة تماماً
+     * كانا يمرّان بلا أي منع، فيُزدحَم جدول المعلم بجلستين متطابقتي التوقيت.
+     */
+    public function test_a_different_student_cannot_book_the_same_teacher_at_an_overlapping_time_via_api(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        $packageA = $this->createActiveIndividualPackage($teacher, teacherPrice: 100, margin: 60, sessionsCount: 1);
+        $packageB = $this->createActiveIndividualPackage($teacher, teacherPrice: 100, margin: 60, sessionsCount: 1);
+
+        $nextWednesday = Carbon::now()->next(3);
+        $packageA->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
+        $packageB->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
+
+        $studentA = $this->createStudent();
+        $admin = User::factory()->admin()->create();
+        app(BookingService::class)->createManualBooking(
+            $studentA, $packageA, $admin, 'حجز الطالب الأول', [['date' => $nextWednesday->toDateString(), 'start_time' => '12:00']],
+        );
+
+        // طالب مختلف تماماً — لا جلسة سابقة له هو شخصياً — يحاول حجز نفس
+        // المعلم في نفس اللحظة تماماً عبر باقة مختلفة.
+        $studentB = $this->createStudent();
+        $studentBToken = User::find($studentB->user_id)->createToken('t')->plainTextToken;
+
+        $response = $this->as($studentBToken)->postJson("/api/packages/{$packageB->id}/bookings/individual", [
+            'slots' => [['date' => $nextWednesday->toDateString(), 'start_time' => '12:00']],
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJsonPath('errors.schedule.0', self::CONFLICT_MESSAGE);
+
+        $this->assertSame(0, DB::table('bookings')->where('package_id', $packageB->id)->count());
+        $this->assertSame(1, DB::table('class_sessions')->where('teacher_id', $teacher->id)->count());
+    }
+
+    public function test_admin_cannot_manually_book_the_same_teacher_for_two_different_students_at_an_overlapping_time(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        $packageA = $this->createActiveIndividualPackage($teacher, teacherPrice: 100, margin: 60, sessionsCount: 1);
+        $packageB = $this->createActiveIndividualPackage($teacher, teacherPrice: 100, margin: 60, sessionsCount: 1);
+        $admin = User::factory()->admin()->create();
+
+        $nextWednesday = Carbon::now()->next(3);
+        $packageA->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
+        $packageB->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
+
+        $studentA = $this->createStudent();
+        app(BookingService::class)->createManualBooking(
+            $studentA, $packageA, $admin, 'حجز أول', [['date' => $nextWednesday->toDateString(), 'start_time' => '15:00']],
+        );
+
+        $studentB = $this->createStudent();
+
+        $this->expectException(ValidationException::class);
+        $this->expectExceptionMessage(self::CONFLICT_MESSAGE);
+
+        app(BookingService::class)->createManualBooking(
+            $studentB, $packageB, $admin, 'حجز ثانٍ متعارض مع نفس المعلم', [['date' => $nextWednesday->toDateString(), 'start_time' => '15:00']],
+        );
+    }
+
     public function test_booking_a_genuinely_different_time_still_succeeds(): void
     {
         [$teacherA] = $this->createVerifiedTeacher();

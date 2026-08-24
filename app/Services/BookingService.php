@@ -64,7 +64,7 @@ class BookingService
         $anchors = $this->slotsToAnchors($slots, $timezone);
         $this->assertSlotsNotInPast($anchors);
         $this->assertSlotsDontOverlapEachOther($anchors, $durationMinutes);
-        $this->conflicts->assertNoConflict($student, $anchors, $durationMinutes);
+        $this->conflicts->assertNoConflict($student, $package->teacher_id, $anchors, $durationMinutes);
 
         return $this->createBookingRecord($student, $package, [
             'status' => 'pending_teacher_confirmation',
@@ -112,7 +112,7 @@ class BookingService
             // الفحص الملزم فعلياً — الجلسات الحقيقية تُنشأ خلال ثوانٍ من هنا، فأي
             // تعارض (بما فيه حجز آخر تسارع للموافقة عليه بين طلب هذا الطالب
             // ولحظة موافقة المعلم) يجب أن يمنع إنشاءها نهائياً، لا فقط تحذيراً.
-            $this->conflicts->assertNoConflict($booking->student, $anchors, $durationMinutes);
+            $this->conflicts->assertNoConflict($booking->student, $booking->package->teacher_id, $anchors, $durationMinutes);
 
             $sessions = $this->sessionsFromSlots($booking->package, $booking, $anchors);
 
@@ -342,7 +342,9 @@ class BookingService
             // لذا الفحص يسبق ذلك مباشرة، وأي تعارض يُلغي كامل المعاملة (rollback
             // تلقائي عبر DB::transaction) فلا يبقى حجز ولا سطر حضور جديد.
             $sessions = $this->sessionsFor($package, $booking);
-            $this->conflicts->assertNoConflict($student, $sessions->pluck('scheduled_at'), $this->defaultSessionDurationMinutes());
+            // $sessions قد تكون موجودة مسبقاً (انضمام ثانٍ فما فوق لنفس المجموعة) —
+            // استبعادها من فحص تعارض المعلم، وإلا تُرفَض بحجة "تعارضها" مع نفسها.
+            $this->conflicts->assertNoConflict($student, $package->teacher_id, $sessions->pluck('scheduled_at'), $this->defaultSessionDurationMinutes(), $sessions->pluck('id')->all());
 
             foreach ($sessions as $session) {
                 $this->registerAttendee($session, $student, booking: $booking);
@@ -403,13 +405,13 @@ class BookingService
 
                 $this->assertSlotsNotInPast($anchors);
                 $this->assertSlotsDontOverlapEachOther($anchors, $durationMinutes);
-                $this->conflicts->assertNoConflict($student, $anchors, $durationMinutes);
+                $this->conflicts->assertNoConflict($student, $package->teacher_id, $anchors, $durationMinutes);
 
                 $sessions = $this->sessionsFromSlots($package, $booking, $anchors);
             } else {
                 $sessions = $this->sessionsFor($package, $booking);
 
-                $this->conflicts->assertNoConflict($student, $sessions->pluck('scheduled_at'), $this->defaultSessionDurationMinutes());
+                $this->conflicts->assertNoConflict($student, $package->teacher_id, $sessions->pluck('scheduled_at'), $this->defaultSessionDurationMinutes(), $sessions->pluck('id')->all());
             }
 
             foreach ($sessions as $session) {

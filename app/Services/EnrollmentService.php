@@ -38,7 +38,9 @@ class EnrollmentService
             // SessionAttendee أدناه، فالفحص يسبقها مباشرة؛ أي تعارض يُلغي كامل
             // المعاملة (rollback تلقائي) فلا يبقى تسجيل ولا سطر حضور جديد.
             $sessions = $this->courseSessionsFor($course);
-            $this->conflicts->assertNoConflict($student, $sessions->pluck('scheduled_at'), $course->session_duration_min);
+            // $sessions قد تكون موجودة مسبقاً (تسجيل ثانٍ فما فوق لنفس الدورة) —
+            // استبعادها من فحص تعارض المعلم، وإلا تُرفَض بحجة "تعارضها" مع نفسها.
+            $this->conflicts->assertNoConflict($student, $course->teacher_id, $sessions->pluck('scheduled_at'), $course->session_duration_min, $sessions->pluck('id')->all());
 
             foreach ($sessions as $session) {
                 SessionAttendee::create([
@@ -71,7 +73,9 @@ class EnrollmentService
             ]);
 
             $sessions = $this->courseSessionsFor($course);
-            $this->conflicts->assertNoConflict($student, $sessions->pluck('scheduled_at'), $course->session_duration_min);
+            // $sessions قد تكون موجودة مسبقاً (تسجيل ثانٍ فما فوق لنفس الدورة) —
+            // استبعادها من فحص تعارض المعلم، وإلا تُرفَض بحجة "تعارضها" مع نفسها.
+            $this->conflicts->assertNoConflict($student, $course->teacher_id, $sessions->pluck('scheduled_at'), $course->session_duration_min, $sessions->pluck('id')->all());
 
             foreach ($sessions as $session) {
                 SessionAttendee::create([
