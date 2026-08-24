@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\ClassSession;
+use App\Models\SessionAttendee;
 use App\Models\Student;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
@@ -43,7 +44,7 @@ class ScheduleConflictService
             })
             ->whereIn('status', self::LIVE_STATUSES)
             ->when($excludeSessionIds, fn ($q) => $q->whereNotIn('id', $excludeSessionIds))
-            ->get(['id', 'scheduled_at', 'duration_min']);
+            ->get(['id', 'teacher_id', 'scheduled_at', 'duration_min']);
 
         if ($existingSessions->isEmpty()) {
             return;
@@ -63,9 +64,43 @@ class ScheduleConflictService
 
             if ($conflict) {
                 throw ValidationException::withMessages([
-                    'schedule' => ['لا يمكن الحجز في هذا الوقت لوجود جلسة أخرى متعارضة.'],
+                    'schedule' => [$this->conflictMessage($conflict, $teacherId, $student->id)],
                 ]);
             }
         }
+    }
+
+    /**
+     * رسالة عامة غامضة ("جلسة أخرى متعارضة") كانت تصل للمعلم وقت الموافقة
+     * بلا أي تفصيل يشرح له ماذا بالضبط تعارض ولماذا — لا يعرف إن كانت المشكلة
+     * في جدوله هو، أم في جدول الطالب، ولا متى بالضبط. نُحدِّد صراحة الطرف
+     * المتعارض (المعلم نفسه مع طالب مختلف، أم الطالب نفسه مع جلسة أخرى)
+     * والتوقيت الفعلي — بتوقيت المعلم صاحب الجلسة المتعارضة تحديداً، لا UTC
+     * الخام ولا توقيت من يستدعي هذه الدالة.
+     */
+    private function conflictMessage(ClassSession $conflict, int $teacherId, int $studentId): string
+    {
+        $conflict->loadMissing('teacher.user:id,timezone');
+        $timezone = $conflict->teacher?->user?->timezone ?? config('app.timezone');
+        $when = $conflict->scheduled_at->copy()->setTimezone($timezone)->format('Y-m-d H:i');
+
+        $isSameTeacher = (int) $conflict->teacher_id === $teacherId;
+        $isSameStudent = SessionAttendee::where('class_session_id', $conflict->id)
+            ->where('student_id', $studentId)
+            ->exists();
+
+        // صياغة محايدة (بضمير الغائب لا المخاطَب) عمداً — هذه الدالة تُستدعى من
+        // مسارات مختلفة تماماً (طلب ذاتي من الطالب، موافقة المعلم، حجز يدوي من
+        // الأدمن)، فمن يظهر له الخطأ يختلف في كل مرة؛ رسالة بصيغة "لديك" كانت
+        // ستُضلِّل طالباً يرسل طلباً جديداً بحجة أنه "يقبل" حجزاً.
+        if ($isSameTeacher && $isSameStudent) {
+            return "لا يمكن الحجز — يوجد بالفعل حجز آخر بين هذا المعلم وهذا الطالب في نفس هذا التوقيت ({$when}).";
+        }
+
+        if ($isSameTeacher) {
+            return "لا يمكن الحجز في هذا الوقت — يوجد لدى المعلم جلسة أخرى مؤكدة في نفس هذا التوقيت ({$when}) مع طالب مختلف.";
+        }
+
+        return "لا يمكن الحجز في هذا الوقت لأن لدى الطالب جلسة أخرى مؤكدة في نفس هذا التوقيت ({$when}).";
     }
 }

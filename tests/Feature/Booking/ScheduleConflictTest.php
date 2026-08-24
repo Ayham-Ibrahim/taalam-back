@@ -23,14 +23,24 @@ use Tests\TestCase;
  * أخرى له بالفعل (مؤكَّدة أو قيد الدفع) — بلا أي تحقق أو رسالة، فيُنشأ الحجز
  * بنجاح رغم التعارض الكامل. هذا الملف يثبت أن كل مسارات إنشاء الجلسات
  * (حجز فردي ذاتي/يدوي، انضمام جماعي، تسجيل دورة) ترفض الآن أي تعارض صراحة،
- * برسالة "لا يمكن الحجز في هذا الوقت لوجود جلسة أخرى متعارضة."، وبلا أي أثر
- * في قاعدة البيانات (لا حجز جديد ولا جلسة جديدة) عند الرفض.
+ * برسالة محدَّدة تشرح الطرف المتعارض (الطالب أم المعلم) والتوقيت الفعلي —
+ * لا نصاً عاماً غامضاً — وبلا أي أثر في قاعدة البيانات عند الرفض.
  */
 class ScheduleConflictTest extends TestCase
 {
     use RefreshDatabase;
 
-    private const CONFLICT_MESSAGE = 'لا يمكن الحجز في هذا الوقت لوجود جلسة أخرى متعارضة.';
+    /** التعارض بين الجلسة المطلوبة وجلسة أخرى قائمة لنفس الطالب عند معلم مختلف تماماً */
+    private function studentConflictMessage(Carbon $when): string
+    {
+        return 'لا يمكن الحجز في هذا الوقت لأن لدى الطالب جلسة أخرى مؤكدة في نفس هذا التوقيت ('.$when->format('Y-m-d H:i').').';
+    }
+
+    /** التعارض في جدول المعلم نفسه — جلسة أخرى له مع طالب مختلف تماماً في نفس اللحظة */
+    private function teacherConflictMessage(Carbon $when): string
+    {
+        return 'لا يمكن الحجز في هذا الوقت — يوجد لدى المعلم جلسة أخرى مؤكدة في نفس هذا التوقيت ('.$when->format('Y-m-d H:i').') مع طالب مختلف.';
+    }
 
     public function test_requesting_an_individual_booking_is_rejected_via_api_when_it_overlaps_an_existing_confirmed_session(): void
     {
@@ -57,7 +67,7 @@ class ScheduleConflictTest extends TestCase
         ]);
 
         $response->assertStatus(422)
-            ->assertJsonPath('errors.schedule.0', self::CONFLICT_MESSAGE);
+            ->assertJsonPath('errors.schedule.0', $this->studentConflictMessage(Carbon::parse($nextWednesday->toDateString())->setTime(10, 0)));
 
         $this->assertSame(0, DB::table('bookings')->where('package_id', $packageA->id)->count());
     }
@@ -93,7 +103,10 @@ class ScheduleConflictTest extends TestCase
             app(BookingService::class)->approveIndividualRequest($requested, $teacherAUser);
             $this->fail('كان يجب رفض الموافقة بسبب التعارض');
         } catch (ValidationException $e) {
-            $this->assertSame(self::CONFLICT_MESSAGE, $e->errors()['schedule'][0]);
+            $this->assertSame(
+                $this->studentConflictMessage(Carbon::parse($nextWednesday->toDateString())->setTime(10, 0)),
+                $e->errors()['schedule'][0],
+            );
         }
 
         $requested->refresh();
@@ -129,7 +142,10 @@ class ScheduleConflictTest extends TestCase
         try {
             app(BookingService::class)->joinGroupPackage($student, $groupPackage);
         } catch (ValidationException $e) {
-            $this->assertSame(self::CONFLICT_MESSAGE, $e->errors()['schedule'][0]);
+            $this->assertSame(
+                $this->studentConflictMessage(Carbon::parse($sessionDate->toDateString())->setTime(14, 0)),
+                $e->errors()['schedule'][0],
+            );
             // لا حجز جديد لهذه الباقة، ولا الطالب أصبح حاضراً على جلساتها
             $this->assertSame(0, DB::table('bookings')->where('package_id', $groupPackage->id)->count());
             $this->assertSame(0, DB::table('session_attendees')->where('student_id', $student->id)
@@ -158,7 +174,7 @@ class ScheduleConflictTest extends TestCase
         $packageB->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
 
         $this->expectException(ValidationException::class);
-        $this->expectExceptionMessage(self::CONFLICT_MESSAGE);
+        $this->expectExceptionMessage($this->studentConflictMessage(Carbon::parse($nextWednesday->toDateString())->setTime(16, 0)));
 
         app(BookingService::class)->createManualBooking(
             $student, $packageB, $admin, 'حجز متعارض', [['date' => $nextWednesday->toDateString(), 'start_time' => '16:00']],
@@ -184,7 +200,7 @@ class ScheduleConflictTest extends TestCase
         );
 
         $this->expectException(ValidationException::class);
-        $this->expectExceptionMessage(self::CONFLICT_MESSAGE);
+        $this->expectExceptionMessage($this->studentConflictMessage(Carbon::parse($courseStart->toDateString())->setTime(9, 0)));
 
         app(EnrollmentService::class)->initiateEnrollment($student, $course);
     }
@@ -220,7 +236,7 @@ class ScheduleConflictTest extends TestCase
         ]);
 
         $response->assertStatus(422)
-            ->assertJsonPath('errors.schedule.0', self::CONFLICT_MESSAGE);
+            ->assertJsonPath('errors.schedule.0', $this->teacherConflictMessage(Carbon::parse($nextWednesday->toDateString())->setTime(12, 0)));
 
         $this->assertSame(0, DB::table('bookings')->where('package_id', $packageB->id)->count());
         $this->assertSame(1, DB::table('class_sessions')->where('teacher_id', $teacher->id)->count());
@@ -245,7 +261,7 @@ class ScheduleConflictTest extends TestCase
         $studentB = $this->createStudent();
 
         $this->expectException(ValidationException::class);
-        $this->expectExceptionMessage(self::CONFLICT_MESSAGE);
+        $this->expectExceptionMessage($this->teacherConflictMessage(Carbon::parse($nextWednesday->toDateString())->setTime(15, 0)));
 
         app(BookingService::class)->createManualBooking(
             $studentB, $packageB, $admin, 'حجز ثانٍ متعارض مع نفس المعلم', [['date' => $nextWednesday->toDateString(), 'start_time' => '15:00']],
