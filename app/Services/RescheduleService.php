@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\ClassSession;
 use App\Models\RescheduleRequest;
 use App\Models\User;
+use App\Notifications\RescheduleRequestReviewed;
 use App\Traits\LogsAuditEvents;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
@@ -18,13 +19,26 @@ class RescheduleService
 {
     use LogsAuditEvents;
 
-    public function __construct(private readonly SettingsService $settings) {}
+    public function __construct(
+        private readonly SettingsService $settings,
+        private readonly NotificationService $notifications,
+    ) {}
 
     public function request(ClassSession $session, User $requester, string $requesterRole, Carbon $proposedAt, ?string $reason = null): RescheduleRequest
     {
         if (in_array($session->status, ['completed', 'cancelled', 'no_show_student', 'no_show_teacher'], true)) {
             throw ValidationException::withMessages([
                 'session' => ['لا يمكن طلب تغيير موعد لجلسة منتهية أو ملغاة'],
+            ]);
+        }
+
+        // موعد جلسة الباقة الجماعية مشترك بين عدة طلاب دفعوا عليه معاً — تغييره
+        // بطلب طالب أو معلم واحد يكسر جدول بقية الطلاب بلا أي تنسيق بينهم، ولا
+        // مسار موافقة جماعي لذلك حالياً. القرار المعماري: تغيير الموعد متاح فقط
+        // لجلسات الباقات الفردية.
+        if ($session->loadMissing('booking.package')->booking?->package?->session_format === 'group') {
+            throw ValidationException::withMessages([
+                'session' => ['طلبات تغيير الموعد متاحة فقط لجلسات الباقات الفردية'],
             ]);
         }
 
@@ -142,6 +156,16 @@ class RescheduleService
             'new_scheduled_at' => $newTime->toDateTimeString(),
         ], $notes, $admin->id);
 
+        // صاحب الطلب (requester) — طالب أو معلم، أيهما أرسله فعلياً — هو من
+        // ينتظر القرار، بصرف النظر عمّن أنشأ الجلسة أصلاً.
+        if ($requester = $rescheduleRequest->loadMissing('requester')->requester) {
+            $this->notifications->send(
+                $requester,
+                new RescheduleRequestReviewed($rescheduleRequest->status, $newTime),
+                'reschedule.approved',
+            );
+        }
+
         return $rescheduleRequest->fresh();
     }
 
@@ -161,6 +185,14 @@ class RescheduleService
         ]);
 
         $this->audit('reschedule.rejected', $rescheduleRequest, [], ['status' => 'rejected'], $reason, $admin->id);
+
+        if ($requester = $rescheduleRequest->loadMissing('requester')->requester) {
+            $this->notifications->send(
+                $requester,
+                new RescheduleRequestReviewed('rejected', reason: $reason),
+                'reschedule.rejected',
+            );
+        }
 
         return $rescheduleRequest->fresh();
     }

@@ -10,8 +10,10 @@ use App\Models\Student;
 use App\Models\Subject;
 use App\Models\Teacher;
 use App\Models\User;
+use App\Notifications\RescheduleRequestReviewed;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Notification;
 use Tests\TestCase;
 
 class RescheduleFlowTest extends TestCase
@@ -55,11 +57,14 @@ class RescheduleFlowTest extends TestCase
 
     public function test_admin_approval_updates_session_time_and_marks_approved(): void
     {
+        Notification::fake();
+
         [$teacher, $teacherToken] = $this->createVerifiedTeacher();
         $session = $this->createSession($teacher, now()->addDays(5));
+        $proposedAt = now()->addDays(6);
 
         $create = $this->as($teacherToken)->postJson("/api/class-sessions/{$session->id}/reschedule-requests", [
-            'proposed_scheduled_at' => now()->addDays(6)->toDateTimeString(),
+            'proposed_scheduled_at' => $proposedAt->toDateTimeString(),
             'reason' => 'سبب',
         ]);
         $requestId = $create->json('data.id');
@@ -75,10 +80,21 @@ class RescheduleFlowTest extends TestCase
         ]);
         $this->assertNotNull($session->fresh()->original_scheduled_at);
         $this->assertDatabaseHas('audit_logs', ['action' => 'reschedule.approved']);
+
+        // المعلم هو من أرسل الطلب (requester) هنا — هو من يجب أن يُبلَّغ بالقرار،
+        // لا الطالب صاحب الجلسة الذي لم يطلب شيئاً في هذا السيناريو.
+        Notification::assertSentTo(
+            $teacher->user,
+            RescheduleRequestReviewed::class,
+            fn ($notification) => $notification->toArray($teacher->user)['status'] === 'approved'
+                && $notification->toArray($teacher->user)['newScheduledAt'] === $proposedAt->toIso8601String(),
+        );
     }
 
     public function test_admin_can_approve_with_alternative_time(): void
     {
+        Notification::fake();
+
         [$teacher, $teacherToken] = $this->createVerifiedTeacher();
         $session = $this->createSession($teacher, now()->addDays(5));
 
@@ -100,10 +116,19 @@ class RescheduleFlowTest extends TestCase
             Carbon::parse($alternative)->toDateTimeString(),
             $session->fresh()->scheduled_at->toDateTimeString(),
         );
+
+        Notification::assertSentTo(
+            $teacher->user,
+            RescheduleRequestReviewed::class,
+            fn ($notification) => $notification->toArray($teacher->user)['status'] === 'approved_with_alternative'
+                && $notification->toArray($teacher->user)['newScheduledAt'] === Carbon::parse($alternative)->toIso8601String(),
+        );
     }
 
     public function test_admin_reject_requires_reason_and_is_audit_logged(): void
     {
+        Notification::fake();
+
         [$teacher, $teacherToken] = $this->createVerifiedTeacher();
         $session = $this->createSession($teacher, now()->addDays(5));
 
@@ -123,6 +148,15 @@ class RescheduleFlowTest extends TestCase
         ]);
         $reject->assertStatus(200)->assertJsonPath('data.status', 'rejected');
         $this->assertDatabaseHas('audit_logs', ['action' => 'reschedule.rejected']);
+
+        // كان القرار سابقاً يُحفظ في القاعدة بلا أي تبليغ لصاحب الطلب — لا بريد
+        // ولا إشعار على لوحة التحكم — فلا يعلم أبداً أن طلبه رُفض.
+        Notification::assertSentTo(
+            $teacher->user,
+            RescheduleRequestReviewed::class,
+            fn ($notification) => $notification->toArray($teacher->user)['status'] === 'rejected'
+                && $notification->toArray($teacher->user)['reason'] === 'لا يوجد موعد بديل متاح',
+        );
     }
 
     public function test_non_admin_cannot_approve_or_reject(): void
@@ -314,6 +348,27 @@ class RescheduleFlowTest extends TestCase
         );
     }
 
+    /**
+     * موعد جلسة الباقة الجماعية مشترك بين عدة طلاب دفعوا عليه معاً — تغييره
+     * لأجل طرف واحد يكسر جدول البقية بلا أي تنسيق بينهم، فطلبات تغيير الموعد
+     * تبقى متاحة فقط لجلسات الباقات الفردية.
+     */
+    public function test_cannot_request_reschedule_for_a_group_package_session_and_no_request_is_created(): void
+    {
+        [$teacher, $teacherToken] = $this->createVerifiedTeacher();
+        $session = $this->createSession($teacher, now()->addDays(5), sessionFormat: 'group');
+
+        $response = $this->as($teacherToken)->postJson("/api/class-sessions/{$session->id}/reschedule-requests", [
+            'proposed_scheduled_at' => now()->addDays(6)->toDateTimeString(),
+            'reason' => 'محاولة على جلسة باقة جماعية',
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJsonPath('errors.session.0', 'طلبات تغيير الموعد متاحة فقط لجلسات الباقات الفردية');
+
+        $this->assertDatabaseMissing('reschedule_requests', ['class_session_id' => $session->id]);
+    }
+
     public function test_a_student_whose_own_booking_is_unpaid_cannot_request_reschedule(): void
     {
         [$teacher] = $this->createVerifiedTeacher();
@@ -394,7 +449,7 @@ class RescheduleFlowTest extends TestCase
         return [$admin, $admin->createToken('t')->plainTextToken];
     }
 
-    private function createSession(Teacher $teacher, Carbon $scheduledAt, string $bookingStatus = 'confirmed'): ClassSession
+    private function createSession(Teacher $teacher, Carbon $scheduledAt, string $bookingStatus = 'confirmed', string $sessionFormat = 'individual'): ClassSession
     {
         $subject = Subject::create(['code' => 'rs-'.uniqid(), 'name_ar' => 'مادة']);
 
@@ -402,8 +457,8 @@ class RescheduleFlowTest extends TestCase
             'teacher_id' => $teacher->id,
             'title' => 'باقة',
             'subject_id' => $subject->id,
-            'session_format' => 'individual',
-            'capacity' => 1,
+            'session_format' => $sessionFormat,
+            'capacity' => $sessionFormat === 'group' ? 5 : 1,
             'sessions_count' => 4,
             'teacher_price' => 100,
             'platform_margin_percent' => 60,
