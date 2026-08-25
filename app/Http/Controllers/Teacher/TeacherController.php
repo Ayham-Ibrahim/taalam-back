@@ -29,12 +29,30 @@ class TeacherController extends Controller
 
         $teachers = Teacher::query()
             ->with('user:id,name,email,phone')
-            ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))
+            ->when($request->filled('status'), fn ($q) => $this->applyStatusFilter($q, $request->string('status')->value()))
             ->when($request->filled('teacher_type'), fn ($q) => $q->where('teacher_type', $request->string('teacher_type')))
             ->latest()
             ->paginate($request->integer('per_page', 20));
 
         return $this->paginate($teachers->through(fn (Teacher $teacher) => new AdminTeacherResource($teacher)));
+    }
+
+    /**
+     * الفرونت إند يعرض 4 حالات مبسّطة فقط (pending/verified/rejected/suspended)
+     * تطابق AdminTeacherResource::displayStatus() تماماً — وليست القيم الخام
+     * الخمس لعمود teachers.status. كان يُرسَل المفتاح المبسّط مباشرة كـ
+     * where('status', ...) حرفياً، فلا يوجد أبداً صف بقيمة status='pending'
+     * فعلياً في القاعدة (الخام هو active_unverified أو pending_verification) —
+     * فيرجع فلتر "بانتظار المراجعة" صفر نتائج دائماً وبصمت تام (بلا أي خطأ).
+     * نفس عطل ClassSessionController::applyStatusFilter السابق، بنفس الحل هنا.
+     */
+    private function applyStatusFilter($query, string $status)
+    {
+        if ($status === 'pending') {
+            return $query->whereIn('status', ['active_unverified', 'pending_verification']);
+        }
+
+        return $query->where('status', $status);
     }
 
     public function store(InviteTeacherRequest $request)

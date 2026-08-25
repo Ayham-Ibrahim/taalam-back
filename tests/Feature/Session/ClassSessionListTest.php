@@ -4,6 +4,8 @@ namespace Tests\Feature\Session;
 
 use App\Models\Booking;
 use App\Models\ClassSession;
+use App\Models\Course;
+use App\Models\CourseField;
 use App\Models\Package;
 use App\Models\RescheduleRequest;
 use App\Models\SessionAttendee;
@@ -165,6 +167,46 @@ class ClassSessionListTest extends TestCase
         $this->assertFalse($ids->contains($plainSession->id));
     }
 
+    /**
+     * الفرونت إند يعرض تبويب فئة مبسّط (all/individual/group/training) يطابق
+     * sessionCategory() في dashboard services/index.js — لا يوجد عمود category
+     * خام في class_sessions أصلاً. كانت هذه الفئة تُصفّى بالكامل على الفرونت
+     * إند بعد ترقيم صفحة من السيرفر بالفعل (كل الفئات مجتمعة)، فتظهر صفحة فارغة
+     * تماماً من الفئة المختارة مع عدّاد/ترقيم لإجمالي كل الفئات — هذا الاختبار
+     * يثبت أن الفلترة أصبحت فعلية على السيرفر لكل فئة على حدة.
+     */
+    public function test_category_filter_matches_individual_group_and_training_sessions_separately(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        // إنشاء دورة (course) يتطلب معلماً من نوع training_center تحديداً (قيد
+        // على مستوى القاعدة) — بخلاف الحجز/الباقة اللذين لا يفرضان نوعاً بعينه.
+        [$center] = $this->createVerifiedTeacher('training_center');
+        $admin = User::factory()->admin()->create();
+        $adminToken = $admin->createToken('t')->plainTextToken;
+
+        [, $individual] = $this->createBookingWithSession($teacher, now()->addDay(), 'individual');
+        [, $group] = $this->createBookingWithSession($teacher, now()->addDays(2), 'group');
+        $training = $this->createTrainingSession($center, now()->addDays(3));
+
+        $individualResponse = $this->as($adminToken)->getJson('/api/class-sessions?category=individual');
+        $individualIds = collect($individualResponse->json('data'))->pluck('id');
+        $this->assertEquals([$individual->id], $individualIds->all());
+
+        $groupResponse = $this->as($adminToken)->getJson('/api/class-sessions?category=group');
+        $groupIds = collect($groupResponse->json('data'))->pluck('id');
+        $this->assertEquals([$group->id], $groupIds->all());
+
+        $trainingResponse = $this->as($adminToken)->getJson('/api/class-sessions?category=training');
+        $trainingIds = collect($trainingResponse->json('data'))->pluck('id');
+        $this->assertEquals([$training->id], $trainingIds->all());
+
+        $allResponse = $this->as($adminToken)->getJson('/api/class-sessions?category=all');
+        $allIds = collect($allResponse->json('data'))->pluck('id');
+        $this->assertTrue($allIds->contains($individual->id));
+        $this->assertTrue($allIds->contains($group->id));
+        $this->assertTrue($allIds->contains($training->id));
+    }
+
     public function test_index_orders_sessions_from_newest_to_oldest_and_paginates(): void
     {
         [$teacher, $token] = $this->createVerifiedTeacher();
@@ -282,10 +324,10 @@ class ClassSessionListTest extends TestCase
     /**
      * @return array{0: Teacher, 1: string}
      */
-    private function createVerifiedTeacher(): array
+    private function createVerifiedTeacher(string $teacherType = 'school'): array
     {
         $teacherUser = User::factory()->teacher()->create();
-        $teacher = Teacher::create(['user_id' => $teacherUser->id, 'teacher_type' => 'school', 'status' => 'verified']);
+        $teacher = Teacher::create(['user_id' => $teacherUser->id, 'teacher_type' => $teacherType, 'status' => 'verified']);
         $token = $teacherUser->createToken('t')->plainTextToken;
 
         return [$teacher, $token];
@@ -294,7 +336,7 @@ class ClassSessionListTest extends TestCase
     /**
      * @return array{0: Booking, 1: ClassSession}
      */
-    private function createBookingWithSession(Teacher $teacher, Carbon $scheduledAt): array
+    private function createBookingWithSession(Teacher $teacher, Carbon $scheduledAt, string $sessionFormat = 'individual'): array
     {
         $subject = Subject::create(['code' => 'cs-'.uniqid(), 'name_ar' => 'مادة']);
 
@@ -302,8 +344,8 @@ class ClassSessionListTest extends TestCase
             'teacher_id' => $teacher->id,
             'title' => 'باقة',
             'subject_id' => $subject->id,
-            'session_format' => 'individual',
-            'capacity' => 1,
+            'session_format' => $sessionFormat,
+            'capacity' => $sessionFormat === 'group' ? 5 : 1,
             'sessions_count' => 4,
             'teacher_price' => 100,
             'platform_margin_percent' => 60,
@@ -348,6 +390,40 @@ class ClassSessionListTest extends TestCase
             'student_id' => $booking->student_id,
             'booking_id' => $booking->id,
             'attendance' => 'registered',
+        ]);
+    }
+
+    private function createTrainingSession(Teacher $teacher, Carbon $scheduledAt): ClassSession
+    {
+        $field = CourseField::create(['code' => 'field-'.uniqid(), 'name_ar' => 'مجال']);
+
+        $course = Course::create([
+            'teacher_id' => $teacher->id,
+            'title' => 'دورة',
+            'course_field_id' => $field->id,
+            'start_date' => $scheduledAt->toDateString(),
+            'end_date' => $scheduledAt->copy()->addDays(6)->toDateString(),
+            'total_sessions' => 1,
+            'max_seats' => 20,
+            'provider_price' => 100,
+            'platform_margin_percent' => 50,
+            'student_price' => 150,
+            'platform_revenue' => 50,
+            'status' => 'active',
+            'approved_at' => now(),
+            'requires_laptop' => false,
+            'materials_included' => true,
+            'has_practical_exercises' => true,
+            'sessions_recorded' => false,
+        ]);
+
+        return ClassSession::create([
+            'course_id' => $course->id,
+            'teacher_id' => $teacher->id,
+            'sequence_no' => 1,
+            'scheduled_at' => $scheduledAt,
+            'duration_min' => 60,
+            'status' => 'scheduled',
         ]);
     }
 }

@@ -19,6 +19,7 @@ class ClassSessionController extends Controller
         $sessions = ClassSession::query()
             ->visibleTo($request->user())
             ->when($request->filled('status'), fn ($q) => $this->applyStatusFilter($q, $request->string('status')->value()))
+            ->when($request->filled('category'), fn ($q) => $this->applyCategoryFilter($q, $request->string('category')->value()))
             ->when(
                 $request->filled('package_id'),
                 fn ($q) => $q->whereHas('booking', fn ($b) => $b->where('package_id', $request->integer('package_id')))
@@ -85,6 +86,30 @@ class ClassSessionController extends Controller
         };
 
         return $bucket ? $query->whereIn('status', $bucket) : $query->where('status', $status);
+    }
+
+    /**
+     * الفرونت إند يعرض تبويب فئة مبسّط (all/individual/group/training) يطابق
+     * sessionCategory() في dashboard services/index.js حرفياً — لا يوجد عمود
+     * category خام في class_sessions أصلاً؛ الفئة مُشتقّة من course_id (تدريب)
+     * أو session_format باقة الحجز (فردي/جماعي). كانت هذه الفئة تُصفّى بالكامل
+     * على الفرونت إند بعد أن يُرجِع السيرفر صفحة مُرقَّمة سلفاً من كل الفئات
+     * مجتمعة — فتصبح صفحة بعينها فارغة تماماً من الفئة المختارة (مثال: "جماعي")
+     * بينما يبقى شريط الترقيم وعدّاد الإجمالي ظاهرَين بقيمة إجمالي كل الفئات
+     * (61 جلسة مثلاً)، موحيَين بوجود بيانات لا علاقة لها بالفئة المختارة فعلاً.
+     */
+    private function applyCategoryFilter($query, string $category)
+    {
+        if ($category === 'all') {
+            return $query;
+        }
+
+        if ($category === 'training') {
+            return $query->whereNotNull('course_id');
+        }
+
+        return $query->whereNull('course_id')
+            ->whereHas('booking.package', fn ($q) => $q->where('session_format', $category));
     }
 
     private static function eagerLoad(): array
