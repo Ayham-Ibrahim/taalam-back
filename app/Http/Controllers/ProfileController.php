@@ -8,6 +8,7 @@ use App\Http\Requests\Profile\UpdatePasswordRequest;
 use App\Http\Requests\Profile\UploadAvatarRequest;
 use App\Http\Resources\UserResource;
 use App\Services\AuthService;
+use Illuminate\Http\Request;
 
 /** إجراءات المستخدم الحالي على حسابه الخاص، بصرف النظر عن الدور */
 class ProfileController extends Controller
@@ -19,6 +20,13 @@ class ProfileController extends Controller
         $user = $this->authService->updateAvatar($request->user(), $request->file('avatar'));
 
         return $this->success(new UserResource($user), 'تم تحديث الصورة الشخصية بنجاح');
+    }
+
+    public function deleteAvatar(Request $request)
+    {
+        $user = $this->authService->deleteAvatar($request->user());
+
+        return $this->success(new UserResource($user), 'تم حذف الصورة الشخصية بنجاح');
     }
 
     public function updateProfile(UpdateMyProfileRequest $request)

@@ -111,6 +111,22 @@ class AuthService
         return $user;
     }
 
+    /**
+     * يحذف الصورة الحالية فقط (إن وُجدت) ويعيد المستخدم للصورة الافتراضية —
+     * الأحرف الأولى من الاسم في الواجهة (نفس مبدأ فيسبوك)، لا حاجة لتخزين أي
+     * "صورة افتراضية" فعلية هنا. عملية آمنة التكرار: بلا أي أثر إن لم تكن هناك
+     * صورة أصلاً.
+     */
+    public function deleteAvatar(User $user): User
+    {
+        if ($user->avatar_path) {
+            Storage::disk('public')->delete(Str::after($user->avatar_path, '/storage/'));
+            $user->update(['avatar_path' => null]);
+        }
+
+        return $user;
+    }
+
     /** بيانات الحساب الأساسية فقط (اسم/هاتف/واتساب/جنس) — بصرف النظر عن الدور */
     public function updateProfile(User $user, array $data): User
     {

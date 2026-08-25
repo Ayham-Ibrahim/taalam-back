@@ -64,6 +64,38 @@ class AvatarUploadTest extends TestCase
         Storage::disk('public')->assertMissing($firstPath);
     }
 
+    /** حذف الصورة يعيد الحساب للصورة الافتراضية (أحرف الاسم الأولى في الواجهة) ويمسح الملف الفعلي من القرص */
+    public function test_user_can_delete_their_avatar(): void
+    {
+        Storage::fake('public');
+
+        $user = User::factory()->student()->create();
+        $token = $user->createToken('t')->plainTextToken;
+
+        $upload = $this->as($token)->post('/api/me/avatar', [
+            'avatar' => UploadedFile::fake()->image('avatar.jpg', 500, 500),
+        ]);
+        $path = str_replace(Storage::disk('public')->url(''), '', $upload->json('data.avatar_path'));
+        Storage::disk('public')->assertExists($path);
+
+        $response = $this->as($token)->deleteJson('/api/me/avatar');
+
+        $response->assertStatus(200)->assertJsonPath('data.avatar_path', null);
+        $this->assertNull($user->fresh()->avatar_path);
+        Storage::disk('public')->assertMissing($path);
+    }
+
+    /** عملية آمنة التكرار — لا خطأ إن لم تكن هناك صورة أصلاً */
+    public function test_deleting_avatar_when_none_exists_is_a_no_op(): void
+    {
+        $user = User::factory()->student()->create();
+        $token = $user->createToken('t')->plainTextToken;
+
+        $response = $this->as($token)->deleteJson('/api/me/avatar');
+
+        $response->assertStatus(200)->assertJsonPath('data.avatar_path', null);
+    }
+
     /** 15 رفعة/دقيقة لكل مستخدم (throttle:uploads) — يمنع استنزاف مساحة التخزين */
     public function test_avatar_uploads_are_rate_limited(): void
     {

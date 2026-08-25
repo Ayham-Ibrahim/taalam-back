@@ -44,6 +44,7 @@ Route::prefix('auth')->group(function () {
 });
 
 Route::middleware(['auth:sanctum', 'throttle:uploads'])->post('me/avatar', [ProfileController::class, 'uploadAvatar']);
+Route::middleware('auth:sanctum')->delete('me/avatar', [ProfileController::class, 'deleteAvatar']);
 Route::middleware('auth:sanctum')->put('me/profile', [ProfileController::class, 'updateProfile']);
 Route::middleware('auth:sanctum')->put('me/timezone/sync', [ProfileController::class, 'syncTimezone']);
 Route::middleware(['auth:sanctum', 'throttle:password-change'])->put('me/password', [ProfileController::class, 'updatePassword']);

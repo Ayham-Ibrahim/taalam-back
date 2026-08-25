@@ -17,7 +17,7 @@ class UpdateTeacherProfileRequest extends FormRequest
         $isTrainingCenter = $this->route('teacher')?->isTrainingCenter();
 
         return [
-            'bio' => ['nullable', 'string', 'max:2000'],
+            'bio' => ['nullable', 'string', 'max:1000'],
             'qualification' => ['nullable', Rule::in(['bachelor', 'master', 'phd', 'professional_cert', 'diploma'])],
             'experience_years' => ['nullable', Rule::in(['under_1', '1_3', '3_5', 'over_5'])],
             'age_groups' => ['nullable', 'array', 'max:20'],
