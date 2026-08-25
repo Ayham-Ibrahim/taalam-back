@@ -48,17 +48,11 @@ class FileStorage
                     $allowedExtensions = ['mp3', 'wav', 'ogg', 'aac'];
                     break;
 
+                // وثائق التوثيق (هوية/شهادات/خبرة...) — صورة أو PDF فقط عمداً؛ لا
+                // Office ولا أي نوع آخر (RULE: يُرفَض HTML/فيديو/سكربت كوثيقة توثيق).
                 case 'docs':
-                    $allowedMimeTypes = [
-                        'application/pdf',
-                        'application/msword',
-                        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                        'application/vnd.ms-excel',
-                        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                        'application/vnd.ms-powerpoint',
-                        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-                    ];
-                    $allowedExtensions = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'];
+                    $allowedMimeTypes = ['application/pdf', 'image/jpeg', 'image/png'];
+                    $allowedExtensions = ['pdf', 'jpeg', 'jpg', 'png'];
                     break;
 
                 default:
@@ -101,6 +95,12 @@ class FileStorage
             // Storage::disk($disk) صراحةً لا Storage::url() المختصرة — تلك تحل القرص الافتراضي
             // (local، بلا إعداد url) وليس القرص الفعلي الذي خُزِّن عليه الملف.
             return $disk === 'public' ? Storage::disk($disk)->url($path) : $path;
+        } catch (HttpResponseException $e) {
+            // throwValidationError أعلاه (نوع/امتداد غير مسموح، اسم ملف غير آمن...)
+            // يطرح هذا الاستثناء نفسه من داخل try — يجب أن يمر كما هو بلا تغيير،
+            // وإلا فرسالة الرفض المحدَّدة تُستبدَل دوماً بالرسالة العامة أدناه فتضيع
+            // على المستخدم معرفة السبب الفعلي للرفض.
+            throw $e;
         } catch (Exception $e) {
             self::throwValidationError('file', 'حدث خطأ أثناء معالجة الملف');
         }

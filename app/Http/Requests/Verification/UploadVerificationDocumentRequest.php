@@ -17,7 +17,11 @@ class UploadVerificationDocumentRequest extends FormRequest
     {
         return [
             'type' => ['required', Rule::in(['identity', 'academic', 'experience', 'professional', 'security', 'commercial'])],
-            'file' => ['required', 'file', 'max:10240'],
+            // صورة أو PDF فقط، 5 ميغابايت كحد أقصى — يمنع رفع HTML/فيديوهات/سكربتات
+            // كوثائق توثيق. الفحص الفعلي الحاسم يبقى في FileStorage::storeFile()
+            // (يفحص المحتوى الفعلي لا الامتداد المُدَّعى فقط)؛ هذا الفحص هنا يرفض
+            // الطلب مبكراً برسالة واضحة بدل الوصول لطبقة التخزين أصلاً.
+            'file' => ['required', 'file', 'mimes:jpeg,jpg,png,pdf', 'max:5120'],
         ];
     }
 }
