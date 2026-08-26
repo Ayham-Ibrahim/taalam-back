@@ -58,4 +58,9 @@ class TeacherPolicy
     {
         return $user->isAdmin();
     }
+
+    public function reactivate(User $user): bool
+    {
+        return $user->isAdmin();
+    }
 }

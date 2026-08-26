@@ -169,4 +169,13 @@ class TeacherController extends Controller
 
         return $this->success($teacher, 'تم تعليق حساب المعلم');
     }
+
+    public function reactivate(Request $request, Teacher $teacher)
+    {
+        $this->authorize('reactivate', $teacher);
+
+        $teacher = $this->teacherService->reactivate($teacher, $request->user());
+
+        return $this->success($teacher, 'تمت إعادة تفعيل حساب المعلم بنجاح');
+    }
 }

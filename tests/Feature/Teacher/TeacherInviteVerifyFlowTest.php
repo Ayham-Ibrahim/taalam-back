@@ -158,6 +158,51 @@ class TeacherInviteVerifyFlowTest extends TestCase
         $this->assertDatabaseHas('audit_logs', ['action' => 'teacher.suspended']);
     }
 
+    /**
+     * كان زر "إعادة تفعيل" في الفرونت إند يستدعي endpoint التوثيق (approve)
+     * خطأً — يشترط status='pending_verification' حصراً، فيُرفض دائماً لمعلم
+     * suspended فعلياً برسالة "يمكن التوثيق فقط من حالة قيد المراجعة"، فلا
+     * يمكن أبداً إعادة تفعيل معلم مُعلَّق سابقاً كان موثَّقاً. reactivate الآن
+     * مسار مستقل يتحقق من status='suspended' تحديداً ويعيده إلى verified.
+     */
+    public function test_admin_can_reactivate_a_suspended_teacher(): void
+    {
+        [$teacher, , $adminToken] = $this->createTeacherReadyForReview();
+
+        $this->as($adminToken)->postJson("/api/teachers/{$teacher->id}/approve")->assertStatus(200);
+        $this->as($adminToken)->postJson("/api/teachers/{$teacher->id}/suspend", ['reason' => 'شكوى متكررة'])->assertStatus(200);
+
+        $reactivate = $this->as($adminToken)->postJson("/api/teachers/{$teacher->id}/reactivate");
+
+        $reactivate->assertStatus(200)->assertJsonPath('data.status', 'verified');
+        $this->assertDatabaseHas('teachers', ['id' => $teacher->id, 'status' => 'verified']);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'teacher.reactivated']);
+    }
+
+    public function test_reactivate_rejects_a_teacher_who_is_not_currently_suspended(): void
+    {
+        [$teacher, , $adminToken] = $this->createTeacherReadyForReview();
+
+        $this->as($adminToken)->postJson("/api/teachers/{$teacher->id}/approve")->assertStatus(200);
+
+        $reactivate = $this->as($adminToken)->postJson("/api/teachers/{$teacher->id}/reactivate");
+
+        $reactivate->assertStatus(422);
+        $this->assertDatabaseHas('teachers', ['id' => $teacher->id, 'status' => 'verified']);
+    }
+
+    public function test_non_admin_cannot_reactivate_a_teacher(): void
+    {
+        [$teacher, $teacherToken, $adminToken] = $this->createTeacherReadyForReview();
+
+        $this->as($adminToken)->postJson("/api/teachers/{$teacher->id}/approve")->assertStatus(200);
+        $this->as($adminToken)->postJson("/api/teachers/{$teacher->id}/suspend", ['reason' => 'شكوى متكررة'])->assertStatus(200);
+
+        $response = $this->as($teacherToken)->postJson("/api/teachers/{$teacher->id}/reactivate");
+
+        $response->assertStatus(403);
+    }
+
     public function test_teacher_cannot_invite_another_teacher(): void
     {
         [, $teacherToken] = $this->createTeacherReadyForReview();

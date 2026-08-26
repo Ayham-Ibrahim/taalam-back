@@ -233,6 +233,29 @@ class TeacherService
     }
 
     /**
+     * التعليق يُطبَّق فقط على معلم موثَّق مسبقاً (status='verified' حصراً) —
+     * فإعادة التفعيل تعيده لتلك الحالة تحديداً، لا عبر approve() التي تشترط
+     * status='pending_verification' (خطأ سابق: الفرونت إند كان يستدعي approve()
+     * كإجراء "إعادة تفعيل" فيُرفض دائماً لمعلم suspended فعلياً).
+     */
+    public function reactivate(Teacher $teacher, User $admin): Teacher
+    {
+        if ($teacher->status !== 'suspended') {
+            throw ValidationException::withMessages([
+                'status' => ['يمكن إعادة التفعيل فقط لحساب موقوف'],
+            ]);
+        }
+
+        $old = $teacher->only(['status']);
+
+        $teacher->update(['status' => 'verified']);
+
+        $this->audit('teacher.reactivated', $teacher, $old, ['status' => 'verified']);
+
+        return $teacher;
+    }
+
+    /**
      * إحصائيات لوحة المعلم/المركز. rating_avg/reviews_count أعمدة محدَّثة تلقائياً
      * (راجع ReviewObserver) — لا تُعاد حسابتهما هنا. teaching_hours وtotal_students
      * محسوبان مباشرة إذ لا عمود مُخزَّن يعكسهما بدقة.

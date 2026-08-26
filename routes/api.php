@@ -94,6 +94,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('teachers/{teacher}/approve', [TeacherController::class, 'approve']);
     Route::post('teachers/{teacher}/reject', [TeacherController::class, 'reject']);
     Route::post('teachers/{teacher}/suspend', [TeacherController::class, 'suspend']);
+    Route::post('teachers/{teacher}/reactivate', [TeacherController::class, 'reactivate']);
 
     Route::middleware('throttle:uploads')->post('teachers/{teacher}/verification-documents', [VerificationDocumentController::class, 'store']);
     Route::get('verification-documents', [VerificationDocumentController::class, 'index']);
