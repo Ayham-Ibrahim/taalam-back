@@ -97,6 +97,56 @@ class SessionJoinTest extends TestCase
 
         $this->mock(BigBlueButtonService::class, function ($mock) {
             $mock->shouldReceive('meetingExists')->once()->andReturn(false);
+            // resolveJoinUrl يحاول إعادة إنشاء الغرفة قبل الاستسلام (انظر
+            // الاختبار الآخر أدناه) — هنا تفشل المحاولة أيضاً فيبقى الرفض قائماً.
+            $mock->shouldReceive('createMeeting')->once()->andReturn(false);
+        });
+
+        $response = $this->as($studentUser->createToken('t')->plainTextToken)
+            ->getJson("/api/class-sessions/{$session->id}/join");
+
+        $response->assertStatus(422);
+        $this->assertStringContainsString('تعذّر الوصول', $response->json('message'));
+    }
+
+    /**
+     * الغرفة قد لا تكون أُنشئت فعلاً على BBB من الأساس (بيانات اعتماد BBB لم
+     * تكن مضبوطة بعد وقت جدولة الجلسة، أو فشل استدعاء create وقتها) —
+     * createBbbRoom لا يُعيد المحاولة أبداً لجلسة معها bbb_meeting_id محفوظ
+     * سلفاً، فتبقى الجلسة محظورة الانضمام إلى الأبد حتى لو أُصلح إعداد BBB
+     * لاحقاً. resolveJoinUrl يعالج هذا بمحاولة إنشاء نفس الغرفة مرة أخيرة هنا.
+     */
+    public function test_join_self_heals_by_recreating_the_room_when_it_was_never_actually_created_on_bbb(): void
+    {
+        [$teacher, $teacherUser] = $this->createVerifiedTeacher();
+        [$booking, $session, $studentUser] = $this->createBookingWithSession($teacher, now()->subMinutes(5));
+
+        $this->mock(BigBlueButtonService::class, function ($mock) {
+            $mock->shouldReceive('meetingExists')->once()->andReturn(false);
+            $mock->shouldReceive('createMeeting')->once()->andReturn(true);
+        });
+
+        $response = $this->as($studentUser->createToken('t')->plainTextToken)
+            ->getJson("/api/class-sessions/{$session->id}/join");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.url', $session->join_url_student);
+    }
+
+    /**
+     * جلسة قديمة جداً بلا كلمتَي مرور BBB محفوظتين (مسار بيانات هامشي) يجب أن
+     * تسقط مباشرة لرسالة الفشل الواضحة بدل استدعاء createMeeting بمعاملات
+     * ناقصة، الذي كان سيُطلق TypeError صريحاً (استجابة 500 غير مفهومة للمستخدم).
+     */
+    public function test_join_skips_the_recreate_attempt_and_fails_cleanly_when_bbb_passwords_were_never_stored(): void
+    {
+        [$teacher, $teacherUser] = $this->createVerifiedTeacher();
+        [$booking, $session, $studentUser] = $this->createBookingWithSession($teacher, now()->subMinutes(5));
+        $session->update(['bbb_attendee_pw' => null, 'bbb_moderator_pw' => null]);
+
+        $this->mock(BigBlueButtonService::class, function ($mock) {
+            $mock->shouldReceive('meetingExists')->once()->andReturn(false);
+            $mock->shouldNotReceive('createMeeting');
         });
 
         $response = $this->as($studentUser->createToken('t')->plainTextToken)
@@ -205,6 +255,8 @@ class SessionJoinTest extends TestCase
             'duration_min' => 60,
             'status' => 'scheduled',
             'bbb_meeting_id' => $withJoinUrls ? (string) \Illuminate\Support\Str::uuid() : null,
+            'bbb_attendee_pw' => $withJoinUrls ? 'attendee-pw' : null,
+            'bbb_moderator_pw' => $withJoinUrls ? 'moderator-pw' : null,
             'join_url_teacher' => $withJoinUrls ? 'https://meet.example/teacher-x' : null,
             'join_url_student' => $withJoinUrls ? 'https://meet.example/student-x' : null,
         ]);

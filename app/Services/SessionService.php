@@ -92,6 +92,26 @@ class SessionService
             return ['joinable' => true, 'url' => $joinUrl];
         }
 
+        // الغرفة قد لا تكون أُنشئت فعلاً على BBB من الأساس (مثال: بيانات اعتماد
+        // BBB لم تكن مضبوطة بعد وقت جدولة الجلسة عبر CreateBbbRoomJob، أو فشل
+        // استدعاء create وقتها لأي سبب عابر) — createBbbRoom لا يُعيد المحاولة
+        // أبداً لجلسة معها bbb_meeting_id محفوظ سلفاً (يتوقف مبكراً)، فتبقى
+        // الجلسة محظورة الانضمام إلى الأبد حتى لو أُصلح إعداد BBB لاحقاً. محاولة
+        // إنشاء نفس الغرفة (نفس meetingId وكلمتَي المرور المحفوظتين — create آمن
+        // التكرار على BBB لنفس meetingID) هنا مرة أخيرة قبل الاستسلام تجعل
+        // الجلسة "تُشفى ذاتياً" بمجرد أن يصبح BBB متاحاً فعلاً، بلا أي تدخل يدوي.
+        // كلمتا المرور قد تكونان null لجلسة قديمة جداً أُنشئت قبل حفظهما — لا
+        // يصح استدعاء createMeeting بمعاملات ناقصة (تعطي TypeError صريحاً بدل
+        // false هادئة)، فنتخطى إعادة المحاولة حينها ونسقط مباشرة لرسالة الفشل.
+        if ($session->bbb_attendee_pw && $session->bbb_moderator_pw && $this->bbb->createMeeting(
+            $session->bbb_meeting_id,
+            "TAALAM Session #{$session->id}",
+            $session->bbb_attendee_pw,
+            $session->bbb_moderator_pw,
+        )) {
+            return ['joinable' => true, 'url' => $joinUrl];
+        }
+
         return ['joinable' => false, 'message' => 'تعذّر الوصول إلى غرفة الجلسة حالياً، يرجى المحاولة خلال لحظات أو التواصل مع الدعم.'];
     }
 
