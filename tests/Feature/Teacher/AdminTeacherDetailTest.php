@@ -75,8 +75,13 @@ class AdminTeacherDetailTest extends TestCase
         $response->assertJsonPath('data.teacher.name', $teacherUser->name);
         $response->assertJsonPath('data.teacher.status', 'pending');
         $response->assertJsonPath('data.teacher.rawStatus', 'pending_verification');
-        $response->assertJsonPath('data.teacher.canApprove', true);
-        $response->assertJsonPath('data.teacher.approvalBlockedReason', null);
+        // وثيقة واحدة فقط مرفوعة (identity)، وهي بحالة pending لا approved، وينقص
+        // نوعان مطلوبان بالكامل (academic, experience) — لا يمكن الاعتماد بعد.
+        $response->assertJsonPath('data.teacher.canApprove', false);
+        $response->assertJsonPath(
+            'data.teacher.approvalBlockedReason',
+            'لا يمكن اعتماد المعلم قبل الموافقة على جميع الوثائق الثبوتية المطلوبة.',
+        );
         $response->assertJsonPath('data.teacher.bio', 'معلم متمرس');
         $response->assertJsonPath('data.teacher.qualification', 'master');
         $response->assertJsonPath('data.teacher.experienceYears', '3_5');

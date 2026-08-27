@@ -9,6 +9,9 @@ class Teacher extends Model
 {
     use SoftDeletes;
 
+    /** لا يكتمل التسجيل بدونها — إثبات هوية، شهادة أكاديمية، وشهادة/إثبات خبرة */
+    public const REQUIRED_DOCUMENT_TYPES = ['identity', 'academic', 'experience'];
+
     protected $fillable = [
         'user_id',
         'teacher_type',

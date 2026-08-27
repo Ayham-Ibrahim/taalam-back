@@ -75,6 +75,49 @@ class AdminCreatesTeacherAccountTest extends TestCase
         $this->assertDatabaseHas('teachers', ['id' => $teacher->id, 'status' => 'pending_verification']);
     }
 
+    /**
+     * فاليديشن صارم على مستوى الباك اند أيضاً — الفرونت إند يمنع كتابة أرقام
+     * في حقل الاسم وحروف في حقل الهاتف أصلاً، لكن طلب API مباشر (يتجاوز
+     * الفرونت إند) يجب أن يُرفَض هنا أيضاً وإلا فالقيد شكلي لا فعلي.
+     */
+    public function test_name_with_digits_is_rejected(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $adminToken = $admin->createToken('t')->plainTextToken;
+
+        $response = $this->as($adminToken)->postJson('/api/teachers/create-account', [
+            'name' => 'أستاذ سالم2', 'email' => 'salem2@example.com', 'teacher_type' => 'school', 'password' => 'Password123!',
+        ]);
+
+        $response->assertStatus(422)->assertJsonValidationErrors('name');
+    }
+
+    public function test_phone_with_letters_is_rejected(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $adminToken = $admin->createToken('t')->plainTextToken;
+
+        $response = $this->as($adminToken)->postJson('/api/teachers/create-account', [
+            'name' => 'أستاذ سالم', 'email' => 'salem3@example.com', 'teacher_type' => 'school',
+            'password' => 'Password123!', 'phone' => '+966abc12345',
+        ]);
+
+        $response->assertStatus(422)->assertJsonValidationErrors('phone');
+    }
+
+    public function test_valid_name_and_phone_are_accepted(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $adminToken = $admin->createToken('t')->plainTextToken;
+
+        $response = $this->as($adminToken)->postJson('/api/teachers/create-account', [
+            'name' => "محمد-عبدالله سالم", 'email' => 'salem4@example.com', 'teacher_type' => 'school',
+            'password' => 'Password123!', 'phone' => '+966512345678',
+        ]);
+
+        $response->assertStatus(201);
+    }
+
     public function test_non_admin_cannot_create_a_teacher_account(): void
     {
         $studentUser = User::factory()->student()->create();

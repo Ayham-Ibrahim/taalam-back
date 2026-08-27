@@ -8,20 +8,20 @@ use App\Models\ClassSession;
 use App\Models\Enrollment;
 use App\Models\Teacher;
 use App\Models\User;
+use App\Models\VerificationDocument;
 use App\Notifications\AccountCreatedByAdmin;
 use App\Notifications\TeacherInvited;
 use App\Notifications\TeacherVerificationReviewed;
 use App\Traits\LogsAuditEvents;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class TeacherService
 {
     use LogsAuditEvents;
-
-    /** لا يكتمل التسجيل بدونها — إثبات هوية، شهادة أكاديمية، وشهادة/إثبات خبرة */
-    private const REQUIRED_DOCUMENT_TYPES = ['identity', 'academic', 'experience'];
 
     public function __construct(
         private readonly SettingsService $settings,
@@ -164,7 +164,7 @@ class TeacherService
         }
 
         $uploadedTypes = $teacher->verificationDocuments()->pluck('type')->unique()->all();
-        $missingTypes = array_diff(self::REQUIRED_DOCUMENT_TYPES, $uploadedTypes);
+        $missingTypes = array_diff(Teacher::REQUIRED_DOCUMENT_TYPES, $uploadedTypes);
 
         if (! $teacher->bio || ! empty($missingTypes)) {
             throw ValidationException::withMessages([
@@ -186,6 +186,8 @@ class TeacherService
                 'status' => ['يمكن التوثيق فقط من حالة قيد المراجعة'],
             ]);
         }
+
+        $this->assertRequiredDocumentsApproved($teacher);
 
         $old = $teacher->only(['status']);
 
@@ -214,6 +216,9 @@ class TeacherService
         ]);
 
         $teacher->loadMissing('user');
+        // إجراء عقابي — يقطع وصول المعلم فوراً بدل الانتظار حتى ينتهي/يُستخدم
+        // التوكن الحالي؛ عليه تسجيل الدخول من جديد ليحصل على توكن جديد.
+        $teacher->user?->tokens()->delete();
         $this->notifications->send($teacher->user, new TeacherVerificationReviewed(false, $reason), 'teacher.rejected');
 
         $this->audit('teacher.rejected', $teacher, $old, ['status' => 'rejected'], $reason);
@@ -226,6 +231,13 @@ class TeacherService
         $old = $teacher->only(['status']);
 
         $teacher->update(['status' => 'suspended']);
+
+        // نفس منطق reject(): التعليق إجراء عقابي، يجب أن يقطع الجلسات النشطة
+        // فوراً لا أن ينتظر. المعلم لا يزال يستطيع تسجيل الدخول من جديد (تسجيل
+        // الدخول غير مشروط بالحالة)، فيحصل على توكن جديد إن احتاج التفاعل مع
+        // حسابه أثناء التعليق (مثلاً إعادة رفع وثيقة).
+        $teacher->loadMissing('user');
+        $teacher->user?->tokens()->delete();
 
         $this->audit('teacher.suspended', $teacher, $old, ['status' => 'suspended'], $reason);
 
@@ -246,6 +258,8 @@ class TeacherService
             ]);
         }
 
+        $this->assertRequiredDocumentsApproved($teacher);
+
         $old = $teacher->only(['status']);
 
         $teacher->update(['status' => 'verified']);
@@ -253,6 +267,72 @@ class TeacherService
         $this->audit('teacher.reactivated', $teacher, $old, ['status' => 'verified']);
 
         return $teacher;
+    }
+
+    /**
+     * حذف حقيقي (لا تعليق ولا soft delete) — يُسمح به فقط لمعلم status='rejected'
+     * تحديداً (RULE، قرار عمل): لم يُوثَّق قط فلا يملك حجوزات/جلسات/مدفوعات/
+     * تقييمات حقيقية أصلاً (تلك تتطلب معلماً موثَّقاً ابتداءً)، فحذفه نهائياً
+     * آمن. قيود restrictOnDelete على bookings/payments/courses تبقى شبكة أمان
+     * أخيرة لو حدث ذلك رغم كل شيء (حالة شاذة غير متوقعة).
+     * teachers.user_id → users.id بقيد cascadeOnDelete، فحذف المستخدم وحده
+     * يكفي لحذف صف المعلم وكل ما يتفرّع منه (وثائق التوثيق، الشارات، الباقات،
+     * جداول subjects/curricula/languages المحورية) تلقائياً على مستوى القاعدة.
+     */
+    public function deleteTeacher(Teacher $teacher, User $admin): void
+    {
+        if ($teacher->status !== 'rejected') {
+            throw ValidationException::withMessages([
+                'status' => ['لا يمكن حذف المعلم إلا إذا كانت حالته "مرفوض"'],
+            ]);
+        }
+
+        $teacher->loadMissing('user', 'verificationDocuments');
+        $user = $teacher->user;
+        $filePaths = $teacher->verificationDocuments->pluck('s3_path')->all();
+        $oldValues = $teacher->only(['status', 'teacher_type']);
+
+        try {
+            DB::transaction(function () use ($user) {
+                $user?->tokens()->delete();
+                $user?->forceDelete();
+            });
+        } catch (QueryException $e) {
+            throw ValidationException::withMessages([
+                'status' => ['لا يمكن حذف هذا المعلم لوجود بيانات مرتبطة به (حجوزات أو مدفوعات سابقة).'],
+            ]);
+        }
+
+        // بعد النجاح فقط — لا يصح تسجيل حذف لم يحدث فعلاً لو فشلت المعاملة أعلاه
+        $this->audit('teacher.deleted', $teacher, $oldValues, [], null, $admin->id);
+
+        foreach ($filePaths as $path) {
+            Storage::disk(VerificationDocument::DISK)->delete($path);
+        }
+    }
+
+    /**
+     * لا يُعتمَد المعلم (توثيقاً أولياً أو إعادة تفعيل بعد تعليق) قبل أن تكون
+     * كل الوثائق الثبوتية المطلوبة (REQUIRED_DOCUMENT_TYPES) مُعتمَدة فعلياً —
+     * لا يكفي مجرد رفعها. لكل نوع، آخر وثيقة رُفعت منه فقط هي المعتمَدة (قد
+     * يرفع المعلم أكثر من مرة لنفس النوع بعد رفض سابق)، لا أي وثيقة تاريخية.
+     */
+    private function assertRequiredDocumentsApproved(Teacher $teacher): void
+    {
+        $latestPerType = $teacher->verificationDocuments()
+            ->whereIn('type', Teacher::REQUIRED_DOCUMENT_TYPES)
+            ->latest('id')
+            ->get()
+            ->unique('type');
+
+        $approvedTypes = $latestPerType->where('status', 'approved')->pluck('type')->all();
+        $missingApproval = array_diff(Teacher::REQUIRED_DOCUMENT_TYPES, $approvedTypes);
+
+        if (! empty($missingApproval)) {
+            throw ValidationException::withMessages([
+                'documents' => ['لا يمكن اعتماد المعلم قبل الموافقة على جميع الوثائق الثبوتية المطلوبة.'],
+            ]);
+        }
     }
 
     /**

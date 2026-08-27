@@ -97,7 +97,12 @@ class TeacherController extends Controller
 
         $teacher->load(['user:id,name,avatar_path', 'subjects', 'curricula', 'languages']);
         if ($isManager) {
-            $teacher->load(['user:id,name,email,phone,avatar_path', 'verificationDocuments']);
+            // الأحدث أولاً — قد يرفع المعلم أكثر من وثيقة لنفس النوع بعد رفض
+            // سابق؛ الواجهة تعرض أول تطابق لكل نوع فقط، فيجب أن يكون الأحدث.
+            $teacher->load([
+                'user:id,name,email,phone,avatar_path',
+                'verificationDocuments' => fn ($q) => $q->latest(),
+            ]);
         }
 
         $teacher->setAttribute('stats', $this->teacherService->getStats($teacher));
@@ -116,7 +121,9 @@ class TeacherController extends Controller
 
         $teacher->load([
             'user:id,name,email,phone,avatar_path',
-            'verificationDocuments',
+            // الأحدث أولاً — قد يرفع المعلم أكثر من وثيقة لنفس النوع بعد رفض
+            // سابق؛ الواجهة تعرض أول تطابق لكل نوع فقط، فيجب أن يكون الأحدث.
+            'verificationDocuments' => fn ($q) => $q->latest(),
             'badgeAwards.badge',
             'subjects',
             'curricula',
@@ -177,5 +184,14 @@ class TeacherController extends Controller
         $teacher = $this->teacherService->reactivate($teacher, $request->user());
 
         return $this->success($teacher, 'تمت إعادة تفعيل حساب المعلم بنجاح');
+    }
+
+    public function destroy(Request $request, Teacher $teacher)
+    {
+        $this->authorize('delete', $teacher);
+
+        $this->teacherService->deleteTeacher($teacher, $request->user());
+
+        return $this->success(null, 'تم حذف حساب المعلم بنجاح');
     }
 }

@@ -17,7 +17,7 @@ class UpdateTeacherProfileRequest extends FormRequest
         $isTrainingCenter = $this->route('teacher')?->isTrainingCenter();
 
         return [
-            'bio' => ['nullable', 'string', 'max:1000'],
+            'bio' => ['nullable', 'string', 'max:500'],
             'qualification' => ['nullable', Rule::in(['bachelor', 'master', 'phd', 'professional_cert', 'diploma'])],
             'experience_years' => ['nullable', Rule::in(['under_1', '1_3', '3_5', 'over_5'])],
             'age_groups' => ['nullable', 'array', 'max:20'],
@@ -26,7 +26,12 @@ class UpdateTeacherProfileRequest extends FormRequest
             'teaching_methods.*' => ['string', 'max:50'],
             'max_daily_sessions' => ['nullable', 'integer', 'min:1', 'max:24'],
 
-            'display_name_en' => [$isTrainingCenter ? 'required' : 'nullable', 'string', 'max:180'],
+            // أحرف فقط (بلا أرقام) — نفس قاعدة حقول الاسم الأخرى، على مستوى
+            // الباك اند أيضاً لا الفرونت إند فقط.
+            'display_name_en' => [
+                $isTrainingCenter ? 'required' : 'nullable', 'string', 'max:180',
+                'regex:/^[\p{L}\p{M}]+(?:[\s\'-][\p{L}\p{M}]+)*$/u',
+            ],
             'commercial_register' => [$isTrainingCenter ? 'required' : 'nullable', 'string', 'max:60'],
             'website' => ['nullable', 'string', 'url', 'max:255'],
             'address' => ['nullable', 'string', 'max:255'],

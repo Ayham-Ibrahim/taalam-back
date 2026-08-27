@@ -7,6 +7,7 @@ use App\Models\BadgeAward;
 use App\Models\Teacher;
 use App\Models\User;
 use App\Models\VerificationDocument;
+use App\Notifications\VerificationDocumentRejected;
 use App\Traits\LogsAuditEvents;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Validation\ValidationException;
@@ -14,6 +15,8 @@ use Illuminate\Validation\ValidationException;
 class VerificationService
 {
     use LogsAuditEvents;
+
+    public function __construct(private readonly NotificationService $notifications) {}
 
     public function uploadDocument(Teacher $teacher, UploadedFile $file, string $type): VerificationDocument
     {
@@ -67,6 +70,11 @@ class VerificationService
         ]);
 
         $this->audit('document.rejected', $document, $old, ['status' => 'rejected'], $reason);
+
+        $document->loadMissing('teacher.user');
+        if ($document->teacher?->user) {
+            $this->notifications->send($document->teacher->user, new VerificationDocumentRejected($document), 'document.rejected');
+        }
 
         return $document;
     }

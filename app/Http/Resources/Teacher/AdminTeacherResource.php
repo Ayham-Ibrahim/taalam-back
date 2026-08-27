@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources\Teacher;
 
+use App\Models\Teacher;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -24,7 +25,7 @@ class AdminTeacherResource extends JsonResource
             'type' => $this->teacher_type,
             'status' => $this->displayStatus(),
             'rawStatus' => $this->status,
-            'canApprove' => $this->status === 'pending_verification',
+            'canApprove' => $this->canApprove(),
             'approvalBlockedReason' => $this->approvalBlockedReason(),
             'city' => $this->city,
             'address' => $this->address,
@@ -54,12 +55,53 @@ class AdminTeacherResource extends JsonResource
         };
     }
 
+    private function canApprove(): bool
+    {
+        if ($this->status !== 'pending_verification') {
+            return false;
+        }
+
+        // null = العلاقة غير محمَّلة هنا (قائمة الأدمن العامة لا تحمّلها تجنباً
+        // لـN+1) فلا نستطيع الحكم مسبقاً؛ الباك اند يمنع الاعتماد فعلياً بصرف
+        // النظر عند الاستدعاء الفعلي — لا خطر أمني من ترك الزر ظاهراً هنا.
+        return $this->allRequiredDocumentsApproved() !== false;
+    }
+
     private function approvalBlockedReason(): ?string
     {
-        return match ($this->status) {
-            'active_unverified' => 'لم يُكمل المعلم ملفه الشخصي أو يرسل طلب التوثيق بعد، لذلك لا يمكن اعتماده الآن.',
-            'rejected' => 'لا يمكن اعتماد الطلب المرفوض مباشرة. يجب أن يُحدّث المعلم ملفه ثم يعيد إرسال طلب التوثيق أولاً.',
-            default => null,
-        };
+        if ($this->status === 'active_unverified') {
+            return 'لم يُكمل المعلم ملفه الشخصي أو يرسل طلب التوثيق بعد، لذلك لا يمكن اعتماده الآن.';
+        }
+
+        if ($this->status === 'rejected') {
+            return 'لا يمكن اعتماد الطلب المرفوض مباشرة. يجب أن يُحدّث المعلم ملفه ثم يعيد إرسال طلب التوثيق أولاً.';
+        }
+
+        if ($this->status === 'pending_verification' && $this->allRequiredDocumentsApproved() === false) {
+            return 'لا يمكن اعتماد المعلم قبل الموافقة على جميع الوثائق الثبوتية المطلوبة.';
+        }
+
+        return null;
+    }
+
+    /**
+     * true = كل الوثائق المطلوبة (Teacher::REQUIRED_DOCUMENT_TYPES) مُعتمَدة
+     * فعلياً (بآخر وثيقة من كل نوع فقط — قد يرفع المعلم أكثر من مرة لنفس
+     * النوع بعد رفض سابق)، false = ناقصة، null = العلاقة غير محمَّلة أصلاً.
+     */
+    private function allRequiredDocumentsApproved(): ?bool
+    {
+        if (! $this->relationLoaded('verificationDocuments')) {
+            return null;
+        }
+
+        $latestPerType = $this->verificationDocuments
+            ->whereIn('type', Teacher::REQUIRED_DOCUMENT_TYPES)
+            ->sortByDesc('id')
+            ->unique('type');
+
+        $approvedTypes = $latestPerType->where('status', 'approved')->pluck('type')->all();
+
+        return empty(array_diff(Teacher::REQUIRED_DOCUMENT_TYPES, $approvedTypes));
     }
 }
