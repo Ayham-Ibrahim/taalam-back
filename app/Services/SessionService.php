@@ -255,4 +255,46 @@ class SessionService
         ]);
     }
 
+    /**
+     * تُستدعى دورياً (FetchSessionRecordingsJob) — تبحث عن جلسات أُنشئت غرفتها
+     * فعلياً على BBB وانتهى موعدها لكن لم يُعثر على رابط تسجيلها بعد، وتستعلم
+     * BBB دفعة واحدة (لا استعلام منفصل لكل جلسة) عن أي منها بات تسجيله جاهزاً
+     * ومنشوراً. تتوقف عن محاولة جلسة تجاوز عمرها نافذة البحث (افتراضياً 14
+     * يوماً عبر recording_lookup_window_days) كي لا تتراكم استعلامات BBB إلى
+     * الأبد لجلسات لم يُسجَّل لها شيء أصلاً (فشل صامت، أو كانت قبل تفعيل
+     * التسجيل). حذف BBB/ZcaleRight للتسجيلات بعد فترة الاحتفاظ لديهم (6 أشهر
+     * حالياً) مسؤوليتهم وحدهم — لا شيء هنا يُخفي/يمسح recording_url بعدها.
+     */
+    public function fetchAvailableRecordings(): int
+    {
+        $windowDays = (int) $this->settings->get('recording_lookup_window_days', 14);
+
+        $sessions = ClassSession::query()
+            ->whereNotNull('bbb_meeting_id')
+            ->whereNull('recording_url')
+            ->whereRaw('DATE_ADD(scheduled_at, INTERVAL duration_min MINUTE) <= ?', [now()])
+            ->where('scheduled_at', '>=', now()->subDays($windowDays))
+            ->get(['id', 'bbb_meeting_id']);
+
+        if ($sessions->isEmpty()) {
+            return 0;
+        }
+
+        $urlsByMeetingId = $this->bbb->getRecordingUrls($sessions->pluck('bbb_meeting_id')->all());
+
+        if (empty($urlsByMeetingId)) {
+            return 0;
+        }
+
+        $updated = 0;
+
+        foreach ($sessions as $session) {
+            if (isset($urlsByMeetingId[$session->bbb_meeting_id])) {
+                $session->update(['recording_url' => $urlsByMeetingId[$session->bbb_meeting_id]]);
+                $updated++;
+            }
+        }
+
+        return $updated;
+    }
 }

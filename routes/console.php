@@ -1,6 +1,7 @@
 <?php
 
 use App\Jobs\ExpireStaleBookingsJob;
+use App\Jobs\FetchSessionRecordingsJob;
 use App\Jobs\SendSessionRemindersJob;
 use App\Services\RankingService;
 use Illuminate\Foundation\Inspiring;
@@ -15,6 +16,9 @@ Schedule::job(new ExpireStaleBookingsJob)->everyMinute();
 
 // إرسال رابط الجلسة تلقائياً للطالب والمعلم قبل موعدها (session_reminder_minutes_before).
 Schedule::job(new SendSessionRemindersJob)->everyMinute();
+
+// جلب روابط تسجيلات الجلسات المنتهية من BBB فور توفّرها (تستغرق معالجتها وقتاً على BBB نفسه).
+Schedule::job(new FetchSessionRecordingsJob)->everyFifteenMinutes();
 
 // إعادة حساب ranking_score لكل معلم موثّق — موزّعة على طابور واحد لكل معلم
 // كي لا تُحسَب مباشرة عند القراءة (متطلب أداء صريح).

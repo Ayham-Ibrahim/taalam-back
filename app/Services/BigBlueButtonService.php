@@ -27,7 +27,7 @@ class BigBlueButtonService
                 'meetingID' => $meetingId,
                 'attendeePW' => $attendeePw,
                 'moderatorPW' => $moderatorPw,
-                'record' => 'false',
+                'record' => 'true',
                 'duration' => '0',
             ]));
 
@@ -119,6 +119,62 @@ class BigBlueButtonService
             Log::warning('bbb.get_meeting_info_exception', ['meetingId' => $meetingId, 'message' => $e->getMessage()]);
 
             return false;
+        }
+    }
+
+    /**
+     * تُرجع رابط تشغيل التسجيل (playback) لكل meetingID تسجيله منشور فعلاً —
+     * مفتاح المصفوفة meetingID، والقيمة رابط التشغيل. أي meetingID لا يظهر في
+     * النتيجة يعني فقط أن تسجيله ليس جاهزاً بعد (لا يزال قيد المعالجة على BBB)
+     * أو لم يُسجَّل أصلاً — لا خطأ يستحق استثناءً لأجله. استعلام واحد لعدة
+     * اجتماعات معاً (BBB يدعم meetingID مفصولة بفواصل) بدل استعلام لكل جلسة.
+     */
+    public function getRecordingUrls(array $meetingIds): array
+    {
+        if (! $this->isConfigured() || empty($meetingIds)) {
+            return [];
+        }
+
+        try {
+            $response = Http::timeout(15)->get($this->signedUrl('getRecordings', [
+                'meetingID' => implode(',', $meetingIds),
+            ]));
+
+            $xml = $response->ok() ? @simplexml_load_string($response->body()) : null;
+
+            if ($xml === false || $xml === null || (string) $xml->returncode !== 'SUCCESS') {
+                return [];
+            }
+
+            $urls = [];
+
+            foreach ($xml->recordings->recording as $recording) {
+                if ((string) $recording->published !== 'true') {
+                    continue;
+                }
+
+                $meetingId = (string) $recording->meetingID;
+                $format = $recording->playback->format;
+
+                // presentation هو التنسيق القياسي المطلوب للعرض في المتصفح — إن
+                // توفّرت عدة تنسيقات (فيديو خام، صوت فقط...) نفضّله تحديداً.
+                foreach ($recording->playback->format as $candidate) {
+                    if ((string) $candidate->type === 'presentation') {
+                        $format = $candidate;
+                        break;
+                    }
+                }
+
+                if ($meetingId !== '' && (string) $format->url !== '') {
+                    $urls[$meetingId] = (string) $format->url;
+                }
+            }
+
+            return $urls;
+        } catch (Throwable $e) {
+            Log::warning('bbb.get_recordings_exception', ['meetingIds' => $meetingIds, 'message' => $e->getMessage()]);
+
+            return [];
         }
     }
 
