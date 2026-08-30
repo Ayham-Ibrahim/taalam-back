@@ -186,6 +186,24 @@ class SessionJoinTest extends TestCase
         $response->assertStatus(403);
     }
 
+    /**
+     * حجز فردي يُوافَق عليه (تُنشأ جلساته وسطر حضوره) قبل إكمال الدفع فعلياً —
+     * لو انقضت مهلة الدفع المؤقتة دون إتمامه يصبح status='expired'، لكن سطر
+     * الحضور يبقى في القاعدة كما هو. الانضمام يجب أن يُرفض رغم بقاء سطر
+     * الحضور، لا أن يُسمح به لمجرد وجوده (انظر ClassSessionPolicy::view).
+     */
+    public function test_a_student_whose_booking_expired_cannot_join_even_though_the_attendee_row_still_exists(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        [$booking, $session, $studentUser] = $this->createBookingWithSession($teacher, now()->subMinutes(5));
+        $booking->update(['status' => 'expired', 'cancelled_at' => now()]);
+
+        $response = $this->as($studentUser->createToken('t')->plainTextToken)
+            ->getJson("/api/class-sessions/{$session->id}/join");
+
+        $response->assertStatus(403);
+    }
+
     public function test_join_fails_cleanly_when_no_join_url_was_ever_set(): void
     {
         [$teacher, $teacherUser] = $this->createVerifiedTeacher();

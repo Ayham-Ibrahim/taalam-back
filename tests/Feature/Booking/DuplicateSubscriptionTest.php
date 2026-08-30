@@ -2,13 +2,16 @@
 
 namespace Tests\Feature\Booking;
 
+use App\Models\ClassSession;
 use App\Models\Package;
+use App\Models\SessionAttendee;
 use App\Models\Student;
 use App\Models\Subject;
 use App\Models\Teacher;
 use App\Models\User;
 use App\Services\BookingService;
 use App\Services\PricingService;
+use App\Services\SessionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -155,6 +158,79 @@ class DuplicateSubscriptionTest extends TestCase
 
         $this->assertSame('pending_teacher_confirmation', $second->status);
         $this->assertSame(2, DB::table('bookings')->where('package_id', $package->id)->count());
+    }
+
+    /**
+     * القيد يجب أن يُطبَّق على الباقة نفسها ما دامت لم تنتهِ فقط — بمجرد استهلاك
+     * كل جلسات الاشتراك السابق (booking ينتقل لـ'completed'، انظر SessionService)
+     * يُسمح للطالب بالاشتراك بنفس الباقة من جديد. فردية عمداً لا جماعية — الجماعية
+     * تتشارك جلسات ثابتة واحدة (لا يعقل "إعادة حضور" جلسة ماضية منتهية بالفعل).
+     */
+    public function test_student_can_resubscribe_to_the_same_individual_package_after_finishing_it(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        $package = $this->createActiveIndividualPackage($teacher, teacherPrice: 100, margin: 60);
+        $student = $this->createStudent();
+        $admin = User::factory()->admin()->create();
+
+        $nextWednesday = Carbon::now()->next(3);
+        $package->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
+
+        $firstBooking = app(BookingService::class)->createManualBooking(
+            $student, $package, $admin, 'الحجز الأول', [['date' => $nextWednesday->toDateString(), 'start_time' => '09:00']],
+        );
+
+        $session = ClassSession::where('booking_id', $firstBooking->id)->firstOrFail();
+        $attendee = SessionAttendee::where('class_session_id', $session->id)->where('student_id', $student->id)->firstOrFail();
+        app(SessionService::class)->markPresent($attendee);
+
+        $this->assertSame('completed', $firstBooking->fresh()->status);
+
+        // مسألة منفصلة تماماً عن هذا الاختبار: enrolled_count لا يتحرر تلقائياً
+        // عند اكتمال الاشتراك طبيعياً (فقط عند الإلغاء)، فتبقى باقة فردية
+        // (نصابها 1) "ممتلئة" للأبد بعد أول حجز رغم انتهائه — PackageObserver
+        // يُغلقها. غير مرتبط بفحص التكرار المقصود هنا فنعزله يدوياً.
+        $package->update(['enrolled_count' => 0]);
+
+        $secondBooking = app(BookingService::class)->createManualBooking(
+            $student, $package, $admin, 'اشتراك جديد بعد الانتهاء', [['date' => $nextWednesday->copy()->addWeek()->toDateString(), 'start_time' => '09:00']],
+        );
+
+        $this->assertSame('confirmed', $secondBooking->status);
+        $this->assertSame(2, DB::table('bookings')->where('package_id', $package->id)->where('student_id', $student->id)->count());
+    }
+
+    /**
+     * الاعتماد على sessions_used/status وحده لا يكفي — يشترط تسجيل حضور/غياب
+     * صريحاً لا يحدث أبداً لطالب اشترك ولم يحضر جلساته أصلاً. معيار الانتهاء
+     * الحاسم هو الوقت: انقضاء موعد آخر جلسة من جلسات الحجز، بصرف النظر عن
+     * تسجيل الحضور من عدمه.
+     */
+    public function test_student_can_resubscribe_after_the_last_sessions_time_has_passed_even_without_recorded_attendance(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        $package = $this->createActiveIndividualPackage($teacher, teacherPrice: 100, margin: 60);
+        $student = $this->createStudent();
+        $admin = User::factory()->admin()->create();
+
+        $nextWednesday = Carbon::now()->next(3);
+        $package->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
+
+        $firstBooking = app(BookingService::class)->createManualBooking(
+            $student, $package, $admin, 'الحجز الأول', [['date' => $nextWednesday->toDateString(), 'start_time' => '09:00']],
+        );
+
+        // لا حضور ولا غياب سُجِّل إطلاقاً — لكن موعد الجلسة الوحيدة مضى فعلياً
+        ClassSession::where('booking_id', $firstBooking->id)->update(['scheduled_at' => now()->subDay()]);
+        $this->assertSame('confirmed', $firstBooking->fresh()->status);
+
+        $package->update(['enrolled_count' => 0]); // نفس عزل مسألة capacity كما في الاختبار أعلاه
+
+        $secondBooking = app(BookingService::class)->createManualBooking(
+            $student, $package, $admin, 'اشتراك جديد', [['date' => $nextWednesday->copy()->addWeek()->toDateString(), 'start_time' => '09:00']],
+        );
+
+        $this->assertSame('confirmed', $secondBooking->status);
     }
 
     public function test_student_with_an_open_booking_can_still_book_a_different_package(): void

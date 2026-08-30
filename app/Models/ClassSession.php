@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ClassSession extends Model
 {
@@ -120,9 +121,11 @@ class ClassSession extends Model
     /**
      * يقيّد استعلام session_attendees بالسطور التي ما زالت تمثّل اشتراكاً قائماً:
      * الحجز ليس expired/cancelled، والتسجيل ليس cancelled/withdrawn (وأي طرف غير
-     * مرتبط أصلاً يُتجاوز). مشترك بين فرعَي الطالب والمعلم في scopeVisibleTo.
+     * مرتبط أصلاً يُتجاوز). مشترك بين فرعَي الطالب والمعلم في scopeVisibleTo،
+     * وبين ClassSessionPolicy::view أيضاً (نفس شرط "اشتراك قائم" بالضبط يحسم من
+     * يملك حق مشاهدة/الانضمام لجلسة، لا فقط من يظهر في قائمة الجلسات).
      */
-    protected static function constrainToLiveAttendee(Builder $attendees): void
+    public static function constrainToLiveAttendee(Builder|HasMany $attendees): void
     {
         $attendees
             ->where(fn ($q) => $q

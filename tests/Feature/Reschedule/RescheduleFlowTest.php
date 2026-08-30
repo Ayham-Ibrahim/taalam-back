@@ -419,6 +419,43 @@ class RescheduleFlowTest extends TestCase
     }
 
     /**
+     * حجز وافق عليه المعلم (أُنشئت جلساته) لكن انقضت مهلة الدفع المؤقتة دون
+     * إتمامه → status='expired'. لا معنى لتغيير موعد جلسة اشتراكها لم يعد
+     * قائماً أصلاً، بصرف النظر عن status الجلسة نفسها (لا يزال scheduled).
+     */
+    public function test_cannot_request_reschedule_for_a_session_whose_booking_expired(): void
+    {
+        [$teacher, $teacherToken] = $this->createVerifiedTeacher();
+        $session = $this->createSession($teacher, now()->addDays(5), bookingStatus: 'expired');
+
+        $response = $this->as($teacherToken)->postJson("/api/class-sessions/{$session->id}/reschedule-requests", [
+            'proposed_scheduled_at' => now()->addDays(6)->toDateTimeString(),
+            'reason' => 'محاولة على حجز منتهي الصلاحية',
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJsonPath('errors.session.0', 'لا يمكن تغيير موعد جلسة اشتراكها لم يعد قائماً.');
+
+        $this->assertDatabaseMissing('reschedule_requests', ['class_session_id' => $session->id]);
+    }
+
+    public function test_cannot_request_reschedule_for_a_session_whose_booking_was_cancelled(): void
+    {
+        [$teacher, $teacherToken] = $this->createVerifiedTeacher();
+        $session = $this->createSession($teacher, now()->addDays(5), bookingStatus: 'cancelled');
+
+        $response = $this->as($teacherToken)->postJson("/api/class-sessions/{$session->id}/reschedule-requests", [
+            'proposed_scheduled_at' => now()->addDays(6)->toDateTimeString(),
+            'reason' => 'محاولة على حجز ملغى',
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJsonPath('errors.session.0', 'لا يمكن تغيير موعد جلسة اشتراكها لم يعد قائماً.');
+
+        $this->assertDatabaseMissing('reschedule_requests', ['class_session_id' => $session->id]);
+    }
+
+    /**
      * موعد جلسة الباقة الجماعية مشترك بين عدة طلاب دفعوا عليه معاً — تغييره
      * لأجل طرف واحد يكسر جدول البقية بلا أي تنسيق بينهم، فطلبات تغيير الموعد
      * تبقى متاحة فقط لجلسات الباقات الفردية.

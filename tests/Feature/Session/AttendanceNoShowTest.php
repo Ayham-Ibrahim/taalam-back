@@ -49,6 +49,38 @@ class AttendanceNoShowTest extends TestCase
         $this->assertSame(3, $booking->fresh()->sessions_remaining);
     }
 
+    /**
+     * 'completed' معرَّفة أصلاً في enum حالة الحجز لكنها لم تكن تُضبَط قط —
+     * يبقى الحجز confirmed للأبد حتى بعد انتهاء كل جلساته فعلياً، فيمنع الطالب
+     * من الاشتراك بنفس الباقة مجدداً (انظر DuplicateSubscriptionTest).
+     */
+    public function test_booking_transitions_to_completed_status_after_its_last_session_is_consumed(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        [$booking, $session] = $this->createBookingWithSession($teacher, now()->addHours(2));
+        // محاكاة أن 3 من أصل 4 جلسات استُهلكت مسبقاً — هذه هي الأخيرة
+        $booking->update(['sessions_used' => 3, 'sessions_remaining' => 1]);
+        $attendee = $this->attendeeFor($session, $booking);
+
+        app(SessionService::class)->markPresent($attendee);
+
+        $this->assertSame(4, $booking->fresh()->sessions_used);
+        $this->assertSame(0, $booking->fresh()->sessions_remaining);
+        $this->assertSame('completed', $booking->fresh()->status);
+    }
+
+    public function test_booking_status_is_unchanged_while_sessions_remain(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        [$booking, $session] = $this->createBookingWithSession($teacher, now()->addHours(2));
+        $attendee = $this->attendeeFor($session, $booking);
+
+        app(SessionService::class)->markPresent($attendee);
+
+        $this->assertSame(1, $booking->fresh()->sessions_used);
+        $this->assertSame('confirmed', $booking->fresh()->status);
+    }
+
     public function test_absence_without_any_notice_is_treated_as_unnotified(): void
     {
         [$teacher] = $this->createVerifiedTeacher();

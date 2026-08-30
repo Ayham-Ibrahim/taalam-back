@@ -240,10 +240,18 @@ class SessionService
         }
 
         $newUsed = $booking->sessions_used + 1;
+        $isNowComplete = $newUsed >= $booking->sessions_total;
 
         $booking->update([
             'sessions_used' => $newUsed,
             'sessions_remaining' => $booking->sessions_total - $newUsed,
+            // 'completed' معرَّفة أصلاً في enum الحالة لكنها لم تكن تُضبَط هنا قط
+            // — يبقى الحجز confirmed/active للأبد حتى بعد استهلاك كل جلساته
+            // فعلياً، فيمنع BookingService::assertNoOpenBookingForPackage الطالب
+            // من الاشتراك بنفس الباقة مجدداً رغم انتهائها فعلاً.
+            ...($isNowComplete && in_array($booking->status, ['confirmed', 'active'], true)
+                ? ['status' => 'completed']
+                : []),
         ]);
     }
 

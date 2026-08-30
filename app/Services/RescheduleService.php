@@ -139,9 +139,20 @@ class RescheduleService
      */
     private function assertSessionIsPaid(ClassSession $session, User $requester, string $requesterRole): void
     {
-        if ($this->resolvePaymentStatus($session, $requester, $requesterRole) === 'pending_payment') {
+        $status = $this->resolvePaymentStatus($session, $requester, $requesterRole);
+
+        if ($status === 'pending_payment') {
             throw ValidationException::withMessages([
                 'session' => ['لا يمكن تغيير موعد جلسة غير مدفوعة.'],
+            ]);
+        }
+
+        // expired: انتهت مهلة الدفع المؤقتة دون إكمالها. cancelled/withdrawn:
+        // أُلغي الاشتراك صراحةً. في الحالتين لم يعد اشتراك الطالب/الحجز قائماً
+        // فعلاً، فلا معنى لتغيير موعد جلسة لم يعد يملك حقاً فيها.
+        if (in_array($status, ['expired', 'cancelled', 'withdrawn'], true)) {
+            throw ValidationException::withMessages([
+                'session' => ['لا يمكن تغيير موعد جلسة اشتراكها لم يعد قائماً.'],
             ]);
         }
     }

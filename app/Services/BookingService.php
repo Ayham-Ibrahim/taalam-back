@@ -494,12 +494,29 @@ class BookingService
      * pending_payment أو confirmed أو active — أي شيء لم يُلغَ/يُرفض/ينتهِ/يكتمل
      * بعد. مُطبَّق على كل مسارات إنشاء الحجز (ذاتي فردي/جماعي ويدوي من الأدمن)
      * بلا استثناء، فالقيد على الطالب لا على من يُنشئ الحجز نيابةً عنه.
+     *
+     * "انتهى" لا يُشتَرط فيها اكتمال sessions_used فعلياً (SessionService يضبطها
+     * completed عندها، لكن ذلك يتطلب تسجيل حضور/غياب صريحاً) — فمعيار الانتهاء
+     * الحاسم هنا هو الوقت: انقضاء موعد آخر جلسة من جلسات الحجز (بدايتها + مدتها)،
+     * بصرف النظر عمّا إذا حضر الطالب فعلياً أم لا. هذا يمنع بقاء حجز "قائم" للأبد
+     * لطالب اشترك ولم يحضر أياً من جلساته في وقتها.
      */
     private function assertNoOpenBookingForPackage(Student $student, Package $package): void
     {
+        $now = now();
+
         $hasOpenBooking = Booking::where('student_id', $student->id)
             ->where('package_id', $package->id)
             ->whereIn('status', ['pending_teacher_confirmation', 'pending_payment', 'confirmed', 'active'])
+            ->where(function ($query) use ($now) {
+                // لا جلسات بعد (فردي بانتظار موافقة المعلم على الموعد) — ما زال مفتوحاً بلا شك
+                $query->whereDoesntHave('sessions')
+                    // أو له جلسة واحدة على الأقل لم تنتهِ بعد (بدايتها + مدتها لم تمضِ)
+                    ->orWhereHas('sessions', fn ($q) => $q->whereRaw(
+                        'DATE_ADD(scheduled_at, INTERVAL duration_min MINUTE) >= ?',
+                        [$now]
+                    ));
+            })
             ->exists();
 
         if ($hasOpenBooking) {
