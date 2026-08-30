@@ -6,6 +6,7 @@ use App\Models\ClassSession;
 use App\Models\RescheduleRequest;
 use App\Models\User;
 use App\Notifications\RescheduleRequestReviewed;
+use App\Notifications\RescheduleRequestSubmitted;
 use App\Traits\LogsAuditEvents;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
@@ -65,7 +66,7 @@ class RescheduleService
             ]);
         }
 
-        return RescheduleRequest::create([
+        $rescheduleRequest = RescheduleRequest::create([
             'class_session_id' => $session->id,
             'booking_id' => $session->booking_id,
             'requested_by' => $requester->id,
@@ -78,6 +79,55 @@ class RescheduleService
             'status' => 'pending',
             'sla_due_at' => now()->addHours((int) $this->settings->get('sla_reschedule_hours', 12)),
         ]);
+
+        $this->notifyRequestSubmitted($session, $rescheduleRequest, $requesterRole);
+
+        return $rescheduleRequest;
+    }
+
+    /**
+     * فور تسجيل الطلب: الطالب والمعلم يتلقّيان تأكيد الاستلام، وكل أدمن نشط
+     * يتلقّى تنبيهاً بأن قراره مطلوب (الموافقة إلزامية دائماً — FR-8.1). القناتان
+     * mail + database، فيصل بريد ويظهر تنبيه على جرس لوحة التحكم معاً — تماماً
+     * كإشعار مراجعة الطلب (RescheduleRequestReviewed) الموجود أصلاً.
+     */
+    private function notifyRequestSubmitted(ClassSession $session, RescheduleRequest $rescheduleRequest, string $requesterRole): void
+    {
+        $session->loadMissing(['teacher.user', 'booking.student.user']);
+
+        $parties = collect([
+            $session->teacher?->user,
+            $session->booking?->student?->user,
+        ])->filter()->unique('id');
+
+        foreach ($parties as $partyUser) {
+            $this->notifications->send(
+                $partyUser,
+                new RescheduleRequestSubmitted(
+                    $rescheduleRequest->current_scheduled_at,
+                    $rescheduleRequest->proposed_scheduled_at,
+                    $requesterRole,
+                    $rescheduleRequest->reason,
+                ),
+                'reschedule.submitted',
+            );
+        }
+
+        User::query()
+            ->where('role', 'admin')
+            ->where('is_active', true)
+            ->get()
+            ->each(fn (User $admin) => $this->notifications->send(
+                $admin,
+                new RescheduleRequestSubmitted(
+                    $rescheduleRequest->current_scheduled_at,
+                    $rescheduleRequest->proposed_scheduled_at,
+                    $requesterRole,
+                    $rescheduleRequest->reason,
+                    forReviewer: true,
+                ),
+                'reschedule.submitted',
+            ));
     }
 
     /**
@@ -186,13 +236,23 @@ class RescheduleService
 
         $this->audit('reschedule.rejected', $rescheduleRequest, [], ['status' => 'rejected'], $reason, $admin->id);
 
-        if ($requester = $rescheduleRequest->loadMissing('requester')->requester) {
-            $this->notifications->send(
-                $requester,
+        // يُبلَّغ الطرفان معاً — الطالب والمعلم — لا صاحب الطلب وحده: رفض التغيير
+        // يعني بقاء الجلسة على وقتها الأصلي، وهذا يخص جدول الطرفين كليهما (صاحب
+        // الطلب دائماً أحدهما، فلا يفقد أحد إشعاره). القناتان mail + database،
+        // فيصل بريد ويظهر تنبيه على جرس لوحة التحكم معاً.
+        $rescheduleRequest->loadMissing(['session.teacher.user', 'session.booking.student.user']);
+
+        collect([
+            $rescheduleRequest->session?->teacher?->user,
+            $rescheduleRequest->session?->booking?->student?->user,
+        ])
+            ->filter()
+            ->unique('id')
+            ->each(fn (User $party) => $this->notifications->send(
+                $party,
                 new RescheduleRequestReviewed('rejected', reason: $reason),
                 'reschedule.rejected',
-            );
-        }
+            ));
 
         return $rescheduleRequest->fresh();
     }

@@ -11,6 +11,7 @@ use App\Models\Subject;
 use App\Models\Teacher;
 use App\Models\User;
 use App\Notifications\RescheduleRequestReviewed;
+use App\Notifications\RescheduleRequestSubmitted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Notification;
@@ -157,6 +158,36 @@ class RescheduleFlowTest extends TestCase
             fn ($notification) => $notification->toArray($teacher->user)['status'] === 'rejected'
                 && $notification->toArray($teacher->user)['reason'] === 'لا يوجد موعد بديل متاح',
         );
+    }
+
+    public function test_rejecting_a_request_notifies_both_the_student_and_the_teacher(): void
+    {
+        Notification::fake();
+
+        [$teacher, $teacherToken] = $this->createVerifiedTeacher();
+        $session = $this->createSession($teacher, now()->addDays(5));
+        $studentUser = $session->booking->student->user;
+
+        // المعلم هو صاحب الطلب هنا — الطالب هو الطرف الآخر الذي كان لا يُبلَّغ إطلاقاً
+        $create = $this->as($teacherToken)->postJson("/api/class-sessions/{$session->id}/reschedule-requests", [
+            'proposed_scheduled_at' => now()->addDays(6)->toDateTimeString(),
+            'reason' => 'سبب',
+        ]);
+        $requestId = $create->json('data.id');
+
+        [, $adminToken] = $this->createAdmin();
+        $this->as($adminToken)->postJson("/api/reschedule-requests/{$requestId}/reject", [
+            'reason' => 'لا يوجد موعد بديل متاح',
+        ])->assertStatus(200)->assertJsonPath('data.status', 'rejected');
+
+        foreach ([$studentUser, $teacher->user] as $party) {
+            Notification::assertSentTo(
+                $party,
+                RescheduleRequestReviewed::class,
+                fn ($n) => $n->toArray($party)['status'] === 'rejected'
+                    && $n->toArray($party)['reason'] === 'لا يوجد موعد بديل متاح',
+            );
+        }
     }
 
     public function test_non_admin_cannot_approve_or_reject(): void
@@ -306,6 +337,45 @@ class RescheduleFlowTest extends TestCase
         ]);
 
         $response->assertStatus(201);
+    }
+
+    public function test_submitting_a_request_notifies_the_student_the_teacher_and_every_admin(): void
+    {
+        Notification::fake();
+
+        [$teacher, $teacherToken] = $this->createVerifiedTeacher();
+        $session = $this->createSession($teacher, now()->addDays(5));
+        $studentUser = $session->booking->student->user;
+
+        [$admin1] = $this->createAdmin();
+        [$admin2] = $this->createAdmin();
+        $inactiveAdmin = User::factory()->admin()->create(['is_active' => false]);
+
+        $proposedAt = now()->addDays(6);
+        $this->as($teacherToken)->postJson("/api/class-sessions/{$session->id}/reschedule-requests", [
+            'proposed_scheduled_at' => $proposedAt->toDateTimeString(),
+            'reason' => 'ظرف طارئ',
+        ])->assertStatus(201);
+
+        // تأكيد الاستلام — للطالب والمعلم (ليس بصيغة المراجع)
+        foreach ([$studentUser, $teacher->user] as $party) {
+            Notification::assertSentTo(
+                $party,
+                RescheduleRequestSubmitted::class,
+                fn ($n) => $n->toArray($party)['forReviewer'] === false
+                    && $n->toArray($party)['proposedScheduledAt'] === $proposedAt->toIso8601String(),
+            );
+        }
+
+        // تنبيه المراجعة — لكل أدمن نشط، لا للأدمن المعطَّل
+        foreach ([$admin1, $admin2] as $admin) {
+            Notification::assertSentTo(
+                $admin,
+                RescheduleRequestSubmitted::class,
+                fn ($n) => $n->toArray($admin)['forReviewer'] === true,
+            );
+        }
+        Notification::assertNotSentTo($inactiveAdmin, RescheduleRequestSubmitted::class);
     }
 
     public function test_cannot_request_reschedule_for_an_ended_session_and_no_request_is_created(): void

@@ -37,8 +37,11 @@ class RescheduleRequestReviewed extends Notification implements ShouldQueue
         $mail = (new MailMessage)->greeting("Hello {$notifiable->name},");
 
         if ($this->status === 'rejected') {
-            return $mail->subject('Your Reschedule Request Was Declined')
-                ->line("We're sorry, your request to reschedule the session was declined.")
+            // يصل الآن لطرفَي الجلسة معاً (طالب ومعلم)، لا لصاحب الطلب وحده —
+            // فالصياغة محايدة لا تفترض أن المستلم هو من قدّم الطلب.
+            return $mail->subject('Session Reschedule Request Declined')
+                ->line('The request to reschedule this session has been declined by the administration.')
+                ->line('The session stays at its original time.')
                 ->line('Reason: '.$this->reason);
         }
 

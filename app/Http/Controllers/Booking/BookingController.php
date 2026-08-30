@@ -27,6 +27,7 @@ class BookingController extends Controller
     {
         $this->authorize('viewAny', Booking::class);
         $this->bookingService->expireStalePendingTeacherConfirmations();
+        $this->bookingService->expireStalePendingPayments();
 
         $user = $request->user();
 
@@ -54,6 +55,7 @@ class BookingController extends Controller
     {
         $this->authorize('view', $booking);
         $this->bookingService->expireStalePendingTeacherConfirmations();
+        $this->bookingService->expireStalePendingPayments();
         $booking->refresh();
 
         return $this->success($booking->load([

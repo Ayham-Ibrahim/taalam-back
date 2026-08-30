@@ -15,10 +15,14 @@ class UpdateMyProfileRequest extends FormRequest
 
     public function rules(): array
     {
+        // أرقام فقط (٧–٢٤ خانة) مع بادئة + اختيارية للرقم الدولي — نفس نمط
+        // CreateTeacherAccountRequest، فلا يُقبل أي حرف أو رمز.
+        $phoneFormat = ['nullable', 'string', 'max:25', 'regex:/^\+?[0-9]{7,24}$/'];
+
         return [
             'name' => ['required', 'string', 'max:150'],
-            'phone' => ['nullable', 'string', 'max:25', Rule::unique('users', 'phone')->ignore($this->user()->id)],
-            'whatsapp' => ['nullable', 'string', 'max:25'],
+            'phone' => [...$phoneFormat, Rule::unique('users', 'phone')->ignore($this->user()->id)],
+            'whatsapp' => $phoneFormat,
             'gender' => ['nullable', Rule::in(['male', 'female'])],
             // اختيار المستخدم اليدوي للمنطقة الزمنية من الإعدادات — يوقف التحديث التلقائي من المتصفح (SyncTimezoneRequest)
             'timezone' => ['nullable', 'string', 'max:64', 'timezone:all'],
@@ -34,6 +38,14 @@ class UpdateMyProfileRequest extends FormRequest
             'whatsapp' => 'واتساب',
             'gender' => 'الجنس',
             'timezone' => 'المنطقة الزمنية',
+        ];
+    }
+
+    public function messages(): array
+    {
+        return [
+            'phone.regex' => 'رقم الهاتف يجب أن يحتوي أرقامًا فقط (من ٧ إلى ٢٤ رقمًا)، ويمكن أن يبدأ بعلامة + للرقم الدولي.',
+            'whatsapp.regex' => 'رقم الواتساب يجب أن يحتوي أرقامًا فقط (من ٧ إلى ٢٤ رقمًا)، ويمكن أن يبدأ بعلامة + للرقم الدولي.',
         ];
     }
 }

@@ -5,16 +5,26 @@ namespace App\Http\Controllers\Session;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\Session\ClassSessionResource;
 use App\Models\ClassSession;
+use App\Services\BookingService;
 use App\Services\SessionService;
 use Illuminate\Http\Request;
 
 class ClassSessionController extends Controller
 {
-    public function __construct(private readonly SessionService $sessionService) {}
+    public function __construct(
+        private readonly SessionService $sessionService,
+        private readonly BookingService $bookingService,
+    ) {}
 
     public function index(Request $request)
     {
         $this->authorize('viewAny', ClassSession::class);
+
+        // الجلسات تُنشأ فور موافقة المعلم بصرف النظر عن الدفع، فحجز انقضت مهلته
+        // المؤقتة دون دفع تبقى جلساته "قادمة" ظاهرةً للطالب حتى يلحق المجدول
+        // الدوري بتحويله إلى expired. نحوّله كسْلاً هنا أولاً (نفس نمط
+        // BookingController) كي يُخفيه فلتر visibleTo فوراً، لا بعد دقيقة.
+        $this->bookingService->expireStalePendingPayments();
 
         $sessions = ClassSession::query()
             ->visibleTo($request->user())

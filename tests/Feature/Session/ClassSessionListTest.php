@@ -57,6 +57,131 @@ class ClassSessionListTest extends TestCase
         $this->assertFalse($ids->contains($session2->id));
     }
 
+    public function test_teacher_does_not_see_a_session_whose_every_attendee_booking_is_expired(): void
+    {
+        [$teacher, $token] = $this->createVerifiedTeacher();
+
+        // جلسة فردية انتهت صلاحية حجزها الوحيد → لن تُعقد → تختفي من جدول المعلم
+        [$deadBooking, $deadSession] = $this->createBookingWithSession($teacher, now()->addDays(2));
+        $this->attendeeFor($deadSession, $deadBooking);
+        $deadBooking->update(['status' => 'expired']);
+
+        // جلسة بحجز قائم → تبقى ظاهرة
+        [$liveBooking, $liveSession] = $this->createBookingWithSession($teacher, now()->addDays(3));
+        $this->attendeeFor($liveSession, $liveBooking);
+
+        $response = $this->as($token)->getJson('/api/class-sessions');
+
+        $response->assertStatus(200);
+        $ids = collect($response->json('data'))->pluck('id');
+        $this->assertFalse($ids->contains($deadSession->id));
+        $this->assertTrue($ids->contains($liveSession->id));
+    }
+
+    public function test_teacher_still_sees_a_group_session_when_at_least_one_attendee_booking_is_live(): void
+    {
+        [$teacher, $token] = $this->createVerifiedTeacher();
+
+        [$expiredBooking, $session] = $this->createBookingWithSession($teacher, now()->addDays(2), 'group');
+        $this->attendeeFor($session, $expiredBooking);
+        $expiredBooking->update(['status' => 'expired']);
+
+        // طالب ثانٍ على نفس جلسة المجموعة ما زال حجزه قائماً
+        $otherStudentUser = User::factory()->student()->create();
+        $otherStudent = Student::create(['user_id' => $otherStudentUser->id, 'education_type' => 'school']);
+        $liveBooking = Booking::create([
+            'reference' => 'BK-'.strtoupper(uniqid()),
+            'student_id' => $otherStudent->id,
+            'teacher_id' => $teacher->id,
+            'package_id' => $expiredBooking->package_id,
+            'amount_paid' => 160, 'teacher_amount' => 100, 'platform_amount' => 60,
+            'margin_percent_snapshot' => 60, 'sessions_total' => 4, 'sessions_remaining' => 4,
+            'status' => 'confirmed',
+        ]);
+        SessionAttendee::create([
+            'class_session_id' => $session->id,
+            'student_id' => $otherStudent->id,
+            'booking_id' => $liveBooking->id,
+            'attendance' => 'registered',
+        ]);
+
+        $response = $this->as($token)->getJson('/api/class-sessions');
+
+        $response->assertStatus(200);
+        $this->assertTrue(collect($response->json('data'))->pluck('id')->contains($session->id));
+    }
+
+    public function test_student_does_not_see_sessions_whose_booking_expired_or_was_cancelled(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+
+        // الطالب صاحب الحجز المنتهي — لا يجب أن يرى جلسته إطلاقاً في قائمته
+        [$expiredBooking, $expiredSession] = $this->createBookingWithSession($teacher, now()->addDays(2));
+        $this->attendeeFor($expiredSession, $expiredBooking);
+        $expiredBooking->update(['status' => 'expired']);
+
+        $expiredStudentUser = User::find($expiredBooking->student->user_id);
+        $expiredStudentToken = $expiredStudentUser->createToken('t')->plainTextToken;
+
+        $response = $this->as($expiredStudentToken)->getJson('/api/class-sessions');
+        $response->assertStatus(200);
+        $this->assertFalse(collect($response->json('data'))->pluck('id')->contains($expiredSession->id));
+
+        // الطالب صاحب الحجز الملغى — نفس السلوك
+        [$cancelledBooking, $cancelledSession] = $this->createBookingWithSession($teacher, now()->addDays(3));
+        $this->attendeeFor($cancelledSession, $cancelledBooking);
+        $cancelledBooking->update(['status' => 'cancelled']);
+
+        $cancelledStudentUser = User::find($cancelledBooking->student->user_id);
+        $cancelledStudentToken = $cancelledStudentUser->createToken('t')->plainTextToken;
+
+        $response = $this->as($cancelledStudentToken)->getJson('/api/class-sessions');
+        $response->assertStatus(200);
+        $this->assertFalse(collect($response->json('data'))->pluck('id')->contains($cancelledSession->id));
+
+        // ضبط: جلسة بحجز صالح تبقى ظاهرة
+        [$validBooking, $validSession] = $this->createBookingWithSession($teacher, now()->addDay());
+        $this->attendeeFor($validSession, $validBooking);
+        $validStudentUser = User::find($validBooking->student->user_id);
+        $validStudentToken = $validStudentUser->createToken('t')->plainTextToken;
+
+        $response = $this->as($validStudentToken)->getJson('/api/class-sessions');
+        $response->assertStatus(200);
+        $this->assertTrue(collect($response->json('data'))->pluck('id')->contains($validSession->id));
+    }
+
+    /**
+     * السيناريو الواقعي: الحجز ما زال pending_payment (المجدول الدوري لم يلحق به بعد)
+     * لكن مهلته المؤقتة انقضت — يجب أن تختفي جلسته فوراً من قائمة الطالب دون انتظار
+     * ExpireStaleBookingsJob، عبر التحويل الكسول في ClassSessionController::index.
+     */
+    public function test_student_does_not_see_sessions_of_a_pending_payment_booking_whose_hold_has_lapsed(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+
+        [$staleBooking, $staleSession] = $this->createBookingWithSession($teacher, now()->addDays(2));
+        $this->attendeeFor($staleSession, $staleBooking);
+        $staleBooking->update(['status' => 'pending_payment', 'hold_expires_at' => now()->subMinutes(5)]);
+
+        [$freshBooking, $freshSession] = $this->createBookingWithSession($teacher, now()->addDays(2));
+        $this->attendeeFor($freshSession, $freshBooking);
+        $freshBooking->update(['status' => 'pending_payment', 'hold_expires_at' => now()->addMinutes(10)]);
+        $freshBooking->update(['student_id' => $staleBooking->student_id]);
+        $freshSession->attendees()->update(['student_id' => $staleBooking->student_id]);
+
+        $studentUser = User::find($staleBooking->student->user_id);
+        $studentToken = $studentUser->createToken('t')->plainTextToken;
+
+        $response = $this->as($studentToken)->getJson('/api/class-sessions');
+
+        $response->assertStatus(200);
+        $ids = collect($response->json('data'))->pluck('id');
+        $this->assertFalse($ids->contains($staleSession->id));
+        $this->assertTrue($ids->contains($freshSession->id));
+        $this->assertSame('expired', $staleBooking->fresh()->status);
+        $this->assertSame('pending_payment', $freshBooking->fresh()->status);
+    }
+
     public function test_admin_sees_sessions_across_all_teachers(): void
     {
         [$teacherA] = $this->createVerifiedTeacher();

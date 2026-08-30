@@ -228,6 +228,8 @@ class TeacherService
 
     public function suspend(Teacher $teacher, User $admin, string $reason): Teacher
     {
+        $this->assertNoLiveOrImminentSessions($teacher);
+
         $old = $teacher->only(['status']);
 
         $teacher->update(['status' => 'suspended']);
@@ -242,6 +244,36 @@ class TeacherService
         $this->audit('teacher.suspended', $teacher, $old, ['status' => 'suspended'], $reason);
 
         return $teacher;
+    }
+
+    /**
+     * التعليق إجراء يقطع وصول المعلم فوراً — تطبيقه على معلم له جلسة جارية الآن
+     * أو جلسة وشيكة (خلال ٢٤ ساعة) يترك طلابها بلا معلم في اللحظة الأخيرة دون
+     * بديل. يُمنع التعليق حتى تنتهي تلك الجلسات (بطبيعتها أو بإلغائها/إعادة
+     * جدولتها). الجلسات الأبعد لا تمنع — للأدمن وقت للترتيب قبلها.
+     *
+     * نافذة ٢٤ ساعة متدحرجة لا "نهاية اليوم" التقويمية: scheduled_at مخزّنة UTC
+     * و app.timezone=UTC، فـ "اليوم" يختلف حسب منطقة المعلم/الطالب — النافذة
+     * المتدحرجة تتفادى غموض حدّ منتصف الليل وتغطّي "جلسات اليوم" في كل المناطق.
+     * "قائمة" = حالة scheduled/active (نفس تعريف ScheduleConflictService).
+     */
+    private function assertNoLiveOrImminentSessions(Teacher $teacher): void
+    {
+        $blocking = ClassSession::query()
+            ->where('teacher_id', $teacher->id)
+            ->whereIn('status', ['scheduled', 'active'])
+            ->where('scheduled_at', '<=', now()->addDay())
+            ->get(['id', 'scheduled_at', 'duration_min'])
+            ->first(fn (ClassSession $session) => $session->scheduled_at
+                ->copy()
+                ->addMinutes($session->duration_min)
+                ->isAfter(now()));
+
+        if ($blocking) {
+            throw ValidationException::withMessages([
+                'session' => ['لا يمكن تعليق الحساب لوجود جلسات نشطة أو جلسات ستبدأ خلال ٢٤ ساعة — يجب انتظار انتهائها أو إلغاؤها أولاً.'],
+            ]);
+        }
     }
 
     /**

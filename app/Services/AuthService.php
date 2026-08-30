@@ -172,6 +172,12 @@ class AuthService
             ]);
         }
 
+        if (Hash::check($newPassword, $user->password)) {
+            throw ValidationException::withMessages([
+                'password' => ['كلمة المرور الجديدة يجب أن تكون مختلفة عن الحالية'],
+            ]);
+        }
+
         $user->update(['password' => $newPassword]);
 
         // إبطال كل الجلسات الأخرى دفاعاً في العمق — الجلسة الحالية فقط تبقى صالحة

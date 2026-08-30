@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Jobs\CreateBbbRoomJob;
 use App\Models\Booking;
 use App\Models\ClassSession;
+use App\Models\Enrollment;
 use App\Models\Package;
 use App\Models\Payment;
 use App\Models\SessionAttendee;
@@ -180,6 +181,29 @@ class BookingService
     public function pendingTeacherConfirmationExpiredMessage(): string
     {
         return self::EXPIRED_PENDING_TEACHER_CONFIRMATION_REASON;
+    }
+
+    /**
+     * الحجوزات/التسجيلات المعلَّقة للدفع التي انقضت مهلتها المؤقتة (hold_expires_at)
+     * دون إتمام الدفع — تُحوَّل نهائياً إلى expired (وللتسجيلات cancelled لغياب قيمة
+     * expired في enum الخاص بها). مستخرَجة من ExpireStaleBookingsJob كي تُستدعى
+     * أيضاً كسْلاً عند القراءة (نفس نمط expireStalePendingTeacherConfirmations)،
+     * فلا تعتمد صحة ما يُعرَض للطالب على لحاق المجدول الدوري بها.
+     */
+    public function expireStalePendingPayments(): int
+    {
+        $expired = Booking::where('status', 'pending_payment')
+            ->whereNotNull('hold_expires_at')
+            ->where('hold_expires_at', '<', now())
+            ->update(['status' => 'expired', 'cancelled_at' => now()]);
+
+        // enrollments.status لا تملك قيمة 'expired' — أقرب حالة متاحة لدفع لم يكتمل هي 'cancelled'
+        Enrollment::where('status', 'pending_payment')
+            ->whereNotNull('hold_expires_at')
+            ->where('hold_expires_at', '<', now())
+            ->update(['status' => 'cancelled']);
+
+        return $expired;
     }
 
     private function expirePendingTeacherConfirmationIfNeeded(Booking $booking): bool

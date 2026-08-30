@@ -3,6 +3,7 @@
 namespace Tests\Feature\Teacher;
 
 use App\Models\AccountInvitation;
+use App\Models\ClassSession;
 use App\Models\Curriculum;
 use App\Models\Language;
 use App\Models\Subject;
@@ -246,6 +247,63 @@ class TeacherInviteVerifyFlowTest extends TestCase
 
         $suspend->assertStatus(200)->assertJsonPath('data.status', 'suspended');
         $this->assertDatabaseHas('audit_logs', ['action' => 'teacher.suspended']);
+    }
+
+    public function test_cannot_suspend_a_teacher_who_has_an_ongoing_session(): void
+    {
+        [$teacher, , $adminToken] = $this->createTeacherReadyForReview();
+        $this->as($adminToken)->postJson("/api/teachers/{$teacher->id}/approve")->assertStatus(200);
+
+        ClassSession::create([
+            'teacher_id' => $teacher->id,
+            'sequence_no' => 1,
+            'scheduled_at' => now()->subMinutes(10), // بدأت وما زالت جارية (60 دقيقة)
+            'duration_min' => 60,
+            'status' => 'scheduled',
+        ]);
+
+        $response = $this->as($adminToken)->postJson("/api/teachers/{$teacher->id}/suspend", ['reason' => 'شكوى']);
+
+        $response->assertStatus(422)
+            ->assertJsonPath('errors.session.0', 'لا يمكن تعليق الحساب لوجود جلسات نشطة أو جلسات ستبدأ خلال ٢٤ ساعة — يجب انتظار انتهائها أو إلغاؤها أولاً.');
+        $this->assertSame('verified', $teacher->fresh()->status);
+    }
+
+    public function test_cannot_suspend_a_teacher_who_has_a_session_starting_within_24_hours(): void
+    {
+        [$teacher, , $adminToken] = $this->createTeacherReadyForReview();
+        $this->as($adminToken)->postJson("/api/teachers/{$teacher->id}/approve")->assertStatus(200);
+
+        ClassSession::create([
+            'teacher_id' => $teacher->id,
+            'sequence_no' => 1,
+            'scheduled_at' => now()->addMinutes(90),
+            'duration_min' => 60,
+            'status' => 'scheduled',
+        ]);
+
+        $this->as($adminToken)->postJson("/api/teachers/{$teacher->id}/suspend", ['reason' => 'شكوى'])
+            ->assertStatus(422);
+        $this->assertSame('verified', $teacher->fresh()->status);
+    }
+
+    public function test_can_suspend_a_teacher_whose_only_sessions_are_on_later_days_or_already_finished(): void
+    {
+        [$teacher, , $adminToken] = $this->createTeacherReadyForReview();
+        $this->as($adminToken)->postJson("/api/teachers/{$teacher->id}/approve")->assertStatus(200);
+
+        ClassSession::create([
+            'teacher_id' => $teacher->id, 'sequence_no' => 1,
+            'scheduled_at' => now()->addDays(3), 'duration_min' => 60, 'status' => 'scheduled',
+        ]);
+        ClassSession::create([
+            'teacher_id' => $teacher->id, 'sequence_no' => 2,
+            'scheduled_at' => now()->subHours(4), 'duration_min' => 60, 'status' => 'completed',
+        ]);
+
+        $this->as($adminToken)->postJson("/api/teachers/{$teacher->id}/suspend", ['reason' => 'شكوى'])
+            ->assertStatus(200)
+            ->assertJsonPath('data.status', 'suspended');
     }
 
     /** التعليق إجراء عقابي — يجب أن يقطع أي جلسة نشطة للمعلم فوراً */

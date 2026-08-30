@@ -4,6 +4,7 @@ namespace Tests\Feature\Profile;
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class UpdateProfileTest extends TestCase
@@ -24,7 +25,34 @@ class UpdateProfileTest extends TestCase
 
         $response->assertStatus(200);
         $this->assertSame('اسم جديد', $response->json('data.name'));
-        $this->assertDatabaseHas('users', ['id' => $user->id, 'name' => 'اسم جديد', 'phone' => '0599999999']);
+        $this->assertDatabaseHas('users', [
+            'id' => $user->id,
+            'name' => 'اسم جديد',
+            'phone' => '0599999999',
+            'whatsapp' => '0599999999',
+            'gender' => 'male',
+        ]);
+    }
+
+    /** واتساب/الجنس يُحفظان على users ويظهران في ملف الطالب — يبقيان بعد إعادة التحميل. */
+    public function test_whatsapp_and_gender_persist_and_are_returned_by_the_student_profile(): void
+    {
+        $user = User::factory()->student()->create(['whatsapp' => null, 'gender' => null]);
+        $student = \App\Models\Student::create(['user_id' => $user->id, 'education_type' => 'school']);
+        $token = $user->createToken('t')->plainTextToken;
+
+        $this->as($token)->putJson('/api/me/profile', [
+            'name' => $user->name,
+            'whatsapp' => '0577777777',
+            'gender' => 'female',
+        ])->assertStatus(200);
+
+        $this->assertDatabaseHas('users', ['id' => $user->id, 'whatsapp' => '0577777777', 'gender' => 'female']);
+
+        $this->as($token)->getJson("/api/students/{$student->id}")
+            ->assertStatus(200)
+            ->assertJsonPath('data.whatsapp', '0577777777')
+            ->assertJsonPath('data.gender', 'female');
     }
 
     public function test_timezone_sync_updates_when_auto_detect_is_enabled(): void
@@ -94,6 +122,54 @@ class UpdateProfileTest extends TestCase
         $response->assertStatus(422)->assertJsonValidationErrors(['timezone']);
     }
 
+    #[DataProvider('nonNumericPhoneValues')]
+    public function test_profile_update_rejects_non_numeric_phone_and_whatsapp(string $badValue): void
+    {
+        $user = User::factory()->student()->create(['phone' => null]);
+        $token = $user->createToken('t')->plainTextToken;
+
+        $phoneResponse = $this->as($token)->putJson('/api/me/profile', [
+            'name' => $user->name,
+            'phone' => $badValue,
+        ]);
+        $phoneResponse->assertStatus(422)
+            ->assertJsonPath('errors.phone.0', 'رقم الهاتف يجب أن يحتوي أرقامًا فقط (من ٧ إلى ٢٤ رقمًا)، ويمكن أن يبدأ بعلامة + للرقم الدولي.');
+
+        $whatsappResponse = $this->as($token)->putJson('/api/me/profile', [
+            'name' => $user->name,
+            'whatsapp' => $badValue,
+        ]);
+        $whatsappResponse->assertStatus(422)
+            ->assertJsonPath('errors.whatsapp.0', 'رقم الواتساب يجب أن يحتوي أرقامًا فقط (من ٧ إلى ٢٤ رقمًا)، ويمكن أن يبدأ بعلامة + للرقم الدولي.');
+
+        $this->assertDatabaseHas('users', ['id' => $user->id, 'phone' => null]);
+    }
+
+    public static function nonNumericPhoneValues(): array
+    {
+        return [
+            'letters' => ['abc123'],
+            'digits with letters' => ['0555test'],
+            'symbols' => ['123!@#'],
+            'spaces' => ['055 512 3456'],
+            'too short' => ['12345'],
+        ];
+    }
+
+    public function test_profile_update_accepts_a_plain_or_international_numeric_phone(): void
+    {
+        $user = User::factory()->student()->create(['phone' => null]);
+        $token = $user->createToken('t')->plainTextToken;
+
+        $this->as($token)->putJson('/api/me/profile', [
+            'name' => $user->name,
+            'phone' => '0555123456',
+            'whatsapp' => '+966555123456',
+        ])->assertStatus(200);
+
+        $this->assertDatabaseHas('users', ['id' => $user->id, 'phone' => '0555123456']);
+    }
+
     public function test_profile_update_rejects_a_phone_already_used_by_another_user(): void
     {
         User::factory()->student()->create(['phone' => '0511111111']);
@@ -137,6 +213,24 @@ class UpdateProfileTest extends TestCase
         ]);
 
         $response->assertStatus(422)->assertJsonValidationErrors(['current_password']);
+    }
+
+    public function test_password_change_is_rejected_when_the_new_password_equals_the_current_one(): void
+    {
+        $user = User::factory()->student()->create(['password' => 'OldPass123']);
+        $token = $user->createToken('t')->plainTextToken;
+
+        $response = $this->as($token)->putJson('/api/me/password', [
+            'current_password' => 'OldPass123',
+            'password' => 'OldPass123',
+            'password_confirmation' => 'OldPass123',
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJsonPath('errors.password.0', 'كلمة المرور الجديدة يجب أن تكون مختلفة عن الحالية');
+
+        // لم تتغيّر — تسجيل الدخول بالقديمة ما زال يعمل
+        $this->postJson('/api/auth/login', ['email' => $user->email, 'password' => 'OldPass123'])->assertStatus(200);
     }
 
     public function test_password_change_revokes_other_sessions_but_keeps_the_current_one(): void
