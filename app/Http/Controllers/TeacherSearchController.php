@@ -38,10 +38,10 @@ class TeacherSearchController extends Controller
                 $q->whereHas('languages', fn ($lq) => $lq->where('languages.id', $languageId));
             })
             ->when($filters['min_price'] ?? null, function ($q, $minPrice) {
-                $q->whereHas('packages', fn ($pq) => $pq->where('status', 'active')->where('student_price', '>=', $minPrice));
+                $q->whereHas('packages', fn ($pq) => $pq->bookable()->where('student_price', '>=', $minPrice));
             })
             ->when($filters['max_price'] ?? null, function ($q, $maxPrice) {
-                $q->whereHas('packages', fn ($pq) => $pq->where('status', 'active')->where('student_price', '<=', $maxPrice));
+                $q->whereHas('packages', fn ($pq) => $pq->bookable()->where('student_price', '<=', $maxPrice));
             })
             ->with('user:id,name,avatar_path')
             ->orderByDesc('ranking_score')

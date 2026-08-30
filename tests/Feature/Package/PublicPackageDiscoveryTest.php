@@ -34,6 +34,30 @@ class PublicPackageDiscoveryTest extends TestCase
         $this->assertArrayNotHasKey('teacher_price', $response->json('data.0'));
     }
 
+    public function test_a_group_package_whose_schedule_dates_all_passed_is_hidden_from_the_listing(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+
+        $activeIndividual = $this->createIndividualPackage($teacher, status: 'active');
+
+        $expiredGroup = $this->createGroupPackage($teacher);
+        $expiredGroup->schedules()->create(['date' => now()->subDays(5)->toDateString(), 'day_of_week' => 1, 'start_time' => '09:00', 'end_time' => '10:00']);
+
+        $futureGroup = $this->createGroupPackage($teacher);
+        $futureGroup->schedules()->create(['date' => now()->addDays(5)->toDateString(), 'day_of_week' => 1, 'start_time' => '09:00', 'end_time' => '10:00']);
+
+        $student = $this->createStudent();
+        $studentToken = User::find($student->user_id)->createToken('t')->plainTextToken;
+
+        $response = $this->as($studentToken)->getJson("/api/teachers/{$teacher->id}/packages");
+
+        $response->assertStatus(200);
+        $ids = collect($response->json('data'))->pluck('id');
+        $this->assertTrue($ids->contains($activeIndividual->id));
+        $this->assertTrue($ids->contains($futureGroup->id));
+        $this->assertFalse($ids->contains($expiredGroup->id));
+    }
+
     public function test_packages_of_unverified_teacher_are_not_discoverable(): void
     {
         $teacherUser = User::factory()->teacher()->create();
@@ -111,6 +135,27 @@ class PublicPackageDiscoveryTest extends TestCase
             'platform_revenue' => $computed['platform_revenue'],
             'status' => $status,
             'approved_at' => $status === 'active' ? now() : null,
+        ]);
+    }
+
+    private function createGroupPackage(Teacher $teacher): Package
+    {
+        $subject = Subject::create(['code' => 'subj-'.uniqid(), 'name_ar' => 'مادة', 'education_type' => 'school']);
+        $computed = app(PricingService::class)->calculateStudentPrice(100, 60, 2);
+
+        return Package::create([
+            'teacher_id' => $teacher->id,
+            'title' => 'باقة جماعية',
+            'subject_id' => $subject->id,
+            'session_format' => 'group',
+            'capacity' => 5,
+            'sessions_count' => 2,
+            'teacher_price' => 100,
+            'platform_margin_percent' => 60,
+            'student_price' => $computed['student_price'],
+            'platform_revenue' => $computed['platform_revenue'],
+            'status' => 'active',
+            'approved_at' => now(),
         ]);
     }
 }

@@ -72,7 +72,7 @@ class PackageController extends Controller
 
         $packages = Package::query()
             ->where('teacher_id', $teacher->id)
-            ->where('status', 'active')
+            ->bookable()
             ->with(['subject:id,name_ar', 'schedules'])
             ->latest()
             ->paginate(20);
@@ -106,7 +106,7 @@ class PackageController extends Controller
         // فقط، بينما هذه المعلومة يحتاجها أي طالب يستكشف الحجز — نفس منطق
         // indexForTeacher العام: أي مستخدم موثَّق قد يحجز هذه الباقة يحتاج معرفة
         // متى معلمها مشغول فعلاً، بصرف النظر عن ملكيته لها).
-        abort_unless($package->status === 'active', 404);
+        abort_unless($package->isBookable(), 404);
 
         $date = $request->string('date')->value();
         abort_if(! $date, 422, 'التاريخ مطلوب');

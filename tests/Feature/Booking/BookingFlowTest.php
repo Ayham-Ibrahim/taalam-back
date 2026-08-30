@@ -183,6 +183,30 @@ class BookingFlowTest extends TestCase
         }
     }
 
+    public function test_joining_a_group_package_whose_schedule_dates_all_passed_is_rejected_as_unavailable(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        $package = $this->createActiveGroupPackage($teacher, capacity: 5, sessionsCount: 2, teacherPrice: 50, margin: 40);
+
+        // كل تواريخ الجدول في الماضي — الباقة "منتهية" فعلياً رغم بقاء status='active'
+        $package->schedules()->create(['date' => Carbon::now()->subDays(10)->toDateString(), 'day_of_week' => 1, 'start_time' => '09:00', 'end_time' => '10:00']);
+        $package->schedules()->create(['date' => Carbon::now()->subDays(3)->toDateString(), 'day_of_week' => 1, 'start_time' => '09:00', 'end_time' => '10:00']);
+
+        $this->assertFalse($package->isBookable());
+
+        $student = $this->createStudent();
+
+        try {
+            app(BookingService::class)->joinGroupPackage($student, $package);
+            $this->fail('توقّعنا ValidationException لأن الباقة منتهية');
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            // الرسالة الصحيحة — لا رسالة تعارض جدول
+            $this->assertSame('هذه الباقة غير متاحة للحجز', $e->errors()['package'][0]);
+        }
+
+        $this->assertDatabaseCount('bookings', 0);
+    }
+
     public function test_manual_booking_is_confirmed_immediately_and_audit_logged(): void
     {
         [$teacher] = $this->createVerifiedTeacher();

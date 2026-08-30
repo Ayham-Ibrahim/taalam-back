@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
@@ -95,5 +96,40 @@ class Package extends Model
     public function isIndividual(): bool
     {
         return $this->session_format === 'individual';
+    }
+
+    /**
+     * الباقة الجماعية جدولها تواريخ ثابتة اختارها المعلم — بعد مرور آخرها لم يبقَ
+     * فيها موعد جلسة قابل للانضمام (كل جلساتها في الماضي)، فهي "منتهية" فعلياً حتى
+     * لو بقيت status='active'. الفردية لا جدول تواريخ لها (الطالب يختار مواعيد
+     * مستقبلية لاحقاً) فلا تنتهي بهذا المعنى.
+     */
+    public function isBookable(): bool
+    {
+        if ($this->status !== 'active') {
+            return false;
+        }
+
+        if ($this->isIndividual()) {
+            return true;
+        }
+
+        return $this->schedules()
+            ->whereNotNull('date')
+            ->whereDate('date', '>=', now()->toDateString())
+            ->exists();
+    }
+
+    /** نظير isBookable() على مستوى الاستعلام — لإخفاء الباقات المنتهية من قوائم الطالب والبحث. */
+    public function scopeBookable(Builder $query): Builder
+    {
+        return $query->where('status', 'active')
+            ->where(fn (Builder $q) => $q
+                ->where('session_format', 'individual')
+                ->orWhereHas('schedules', fn (Builder $s) => $s
+                    ->whereNotNull('date')
+                    ->whereDate('date', '>=', now()->toDateString())
+                )
+            );
     }
 }

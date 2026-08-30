@@ -482,9 +482,11 @@ class BookingService
 
     private function assertPackageBookable(Package $package): void
     {
-        if ($package->status !== 'active') {
+        // isBookable() يشمل status='active' + (للجماعية) وجود موعد جلسة لم يمضِ بعد،
+        // فالباقة الجماعية التي مرّت كل تواريخ جدولها تُرفض هنا قبل أي فحص تعارض.
+        if (! $package->isBookable()) {
             throw ValidationException::withMessages([
-                'package' => ['هذه الباقة غير متاحة للحجز حالياً'],
+                'package' => ['هذه الباقة غير متاحة للحجز'],
             ]);
         }
     }
