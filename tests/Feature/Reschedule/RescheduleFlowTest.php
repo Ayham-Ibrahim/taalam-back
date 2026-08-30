@@ -389,12 +389,28 @@ class RescheduleFlowTest extends TestCase
         ]);
 
         $response->assertStatus(422)
-            ->assertJsonPath('errors.session.0', 'لا يمكن طلب تغيير موعد لجلسة منتهية أو ملغاة');
+            ->assertJsonPath('errors.session.0', 'لا يمكن طلب تغيير موعد جلسة بدأت بالفعل أو انتهت');
 
         $this->assertDatabaseMissing('reschedule_requests', [
             'class_session_id' => $session->id,
             'requested_by' => $teacher->user_id,
         ]);
+    }
+
+    public function test_cannot_request_reschedule_for_a_session_that_is_currently_in_progress(): void
+    {
+        [$teacher, $teacherToken] = $this->createVerifiedTeacher();
+        // بدأت قبل 10 دقائق ومدتها 60 → تعمل الآن
+        $session = $this->createSession($teacher, now()->subMinutes(10));
+
+        $response = $this->as($teacherToken)->postJson("/api/class-sessions/{$session->id}/reschedule-requests", [
+            'proposed_scheduled_at' => now()->addDay()->toDateTimeString(),
+            'reason' => 'محاولة أثناء عمل الجلسة',
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJsonPath('errors.session.0', 'لا يمكن طلب تغيير موعد جلسة بدأت بالفعل أو انتهت');
+        $this->assertDatabaseMissing('reschedule_requests', ['class_session_id' => $session->id]);
     }
 
     public function test_cannot_request_reschedule_for_an_unpaid_session_and_no_request_is_created(): void

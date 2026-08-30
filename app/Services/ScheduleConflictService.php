@@ -16,11 +16,15 @@ use Illuminate\Validation\ValidationException;
  * الطالب نفسه فقط، فطالبان مختلفان يحجزان نفس المعلم في نفس اللحظة تماماً
  * كان يمر بلا أي منع — يزدحم جدول المعلم بجلستين متطابقتي التوقيت.
  *
- * "قائمة فعلاً" هنا تعني جلسة بحالة scheduled/active — أي جلسة تخص حجزاً أو
- * تسجيلاً بحالة pending_payment أو confirmed أو active على حد سواء، لأن
- * الجلسات نفسها تُنشأ فور الموافقة/الانضمام بصرف النظر عن اكتمال الدفع من
- * عدمه (join_url هو ما ينتظر الدفع، لا وجود السطر نفسه في class_sessions).
- * جلسات cancelled/completed/no_show_* لا تُحتسَب — لم تعد التزاماً فعلياً.
+ * "قائمة فعلاً" هنا تعني جلسة بحالة scheduled/active يخص حضورَها حجزٌ أو تسجيلٌ
+ * ما زال قائماً (pending_payment أو confirmed أو active) — الجلسات تُنشأ فور
+ * الموافقة/الانضمام بصرف النظر عن اكتمال الدفع (join_url هو ما ينتظر الدفع، لا
+ * وجود السطر نفسه في class_sessions). لا تُحتسَب:
+ *   - جلسات cancelled/completed/no_show_* (حالة الجلسة نفسها).
+ *   - جلسات حجزٍ انتهت مهلته (expired) أو أُلغي (cancelled) / تسجيلٍ مُلغى أو
+ *     منسحَب منه — صف class_sessions يبقى scheduled بعد ذلك لكنه لم يعد التزاماً،
+ *     فلا يمنع حجزاً جديداً على نفس الموعد (نفس شرط ClassSession::visibleTo).
+ *   - جلسات انقضى وقتها كاملاً (scheduled_at + المدة ≤ الآن) — لم تعد تشغل الوقت.
  */
 class ScheduleConflictService
 {
@@ -38,13 +42,37 @@ class ScheduleConflictService
     public function assertNoConflict(Student $student, int $teacherId, iterable $candidateStarts, int $candidateDurationMinutes, array $excludeSessionIds = []): void
     {
         $existingSessions = ClassSession::query()
-            ->where(function ($query) use ($student, $teacherId) {
-                $query->whereHas('attendees', fn ($q) => $q->where('student_id', $student->id))
-                    ->orWhere('teacher_id', $teacherId);
-            })
             ->whereIn('status', self::LIVE_STATUSES)
             ->when($excludeSessionIds, fn ($q) => $q->whereNotIn('id', $excludeSessionIds))
+            ->where(function ($query) use ($student, $teacherId) {
+                // (أ) جلسة يحضرها هذا الطالب باشتراكٍ ما زال قائماً — لا حجز/تسجيل
+                //     مُلغى أو منتهية مهلته. بعد إلغاء/انتهاء الحجز يبقى صف الجلسة
+                //     في class_sessions بحالة scheduled، لكنه لم يعد التزاماً فعلياً
+                //     فلا يجوز أن يمنع حجزاً جديداً على نفس الموعد.
+                $query->whereHas('attendees', function ($a) use ($student) {
+                    $a->where('student_id', $student->id);
+                    ClassSession::constrainToLiveAttendee($a);
+                })
+                    // (ب) أو جلسة لهذا المعلم لم يبطل كل حضورها (طالب واحد على الأقل
+                    //     باشتراك قائم)، أو جلسة دورة لا حضور مؤكَّد عليها بعد.
+                    ->orWhere(function ($q) use ($teacherId) {
+                        $q->where('teacher_id', $teacherId)
+                            ->where(function ($q2) {
+                                $q2->whereDoesntHave('attendees')
+                                    ->orWhereHas('attendees', fn ($a) => ClassSession::constrainToLiveAttendee($a));
+                            });
+                    });
+            })
             ->get(['id', 'teacher_id', 'scheduled_at', 'duration_min']);
+
+        // جلسة انقضى وقتها كاملاً (scheduled_at + المدة ≤ الآن) لم تعد تشغل أي وقت
+        // على الجدول، فلا يجوز أن تُحسَب في التعارض — لا شيء في الباك اند يضبط
+        // status='completed' فتبقى 'scheduled' إلى الأبد، لذا الفلترة بالوقت لا
+        // بالحالة. الجلسة الجارية الآن (بدأت ولم تنتهِ) تبقى محسوبة — ما زالت تشغل وقتها.
+        $now = now();
+        $existingSessions = $existingSessions->filter(
+            fn (ClassSession $s) => $s->scheduled_at->copy()->addMinutes($s->duration_min)->gt($now)
+        );
 
         if ($existingSessions->isEmpty()) {
             return;

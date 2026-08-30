@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Services\BookingService;
 use App\Services\EnrollmentService;
 use App\Services\PricingService;
+use App\Services\ScheduleConflictService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -266,6 +267,110 @@ class ScheduleConflictTest extends TestCase
         app(BookingService::class)->createManualBooking(
             $studentB, $packageB, $admin, 'حجز ثانٍ متعارض مع نفس المعلم', [['date' => $nextWednesday->toDateString(), 'start_time' => '15:00']],
         );
+    }
+
+    public function test_a_session_of_a_cancelled_or_expired_booking_no_longer_blocks_the_same_slot(): void
+    {
+        [$teacherA] = $this->createVerifiedTeacher();
+        $packageA = $this->createActiveIndividualPackage($teacherA, teacherPrice: 100, margin: 60, sessionsCount: 1);
+        $student = $this->createStudent();
+        $admin = User::factory()->admin()->create();
+
+        $nextWednesday = Carbon::now()->next(3);
+        $packageA->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
+
+        // حجز يُنشئ جلسة الساعة 10:00 ثم "يُحذف" (حجزه يُلغى) — صف class_sessions يبقى scheduled
+        $first = app(BookingService::class)->createManualBooking(
+            $student, $packageA, $admin, 'حجز سيُلغى', [['date' => $nextWednesday->toDateString(), 'start_time' => '10:00']],
+        );
+        $this->assertCount(1, $first->sessions);
+        $first->update(['status' => 'cancelled']);
+
+        // نفس الموعد بالضبط — يجب أن يمر الآن (لا تعارض من جلسة حجزٍ مُلغى)
+        [$teacherB] = $this->createVerifiedTeacher();
+        $packageB = $this->createActiveIndividualPackage($teacherB, teacherPrice: 100, margin: 60, sessionsCount: 1);
+        $packageB->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
+
+        $studentToken = User::find($student->user_id)->createToken('t')->plainTextToken;
+        $response = $this->as($studentToken)->postJson("/api/packages/{$packageB->id}/bookings/individual", [
+            'slots' => [['date' => $nextWednesday->toDateString(), 'start_time' => '10:00']],
+        ]);
+
+        $response->assertStatus(201);
+        $this->assertDatabaseHas('bookings', ['package_id' => $packageB->id, 'status' => 'pending_teacher_confirmation']);
+    }
+
+    public function test_a_live_bookings_session_still_blocks_the_same_slot(): void
+    {
+        // ضبط: نفس السيناريو لكن الحجز الأول confirmed (لم يُلغَ) → التعارض يبقى
+        [$teacherA] = $this->createVerifiedTeacher();
+        $packageA = $this->createActiveIndividualPackage($teacherA, teacherPrice: 100, margin: 60, sessionsCount: 1);
+        $student = $this->createStudent();
+        $admin = User::factory()->admin()->create();
+
+        $nextWednesday = Carbon::now()->next(3);
+        $packageA->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
+        app(BookingService::class)->createManualBooking(
+            $student, $packageA, $admin, 'حجز قائم', [['date' => $nextWednesday->toDateString(), 'start_time' => '10:00']],
+        );
+
+        [$teacherB] = $this->createVerifiedTeacher();
+        $packageB = $this->createActiveIndividualPackage($teacherB, teacherPrice: 100, margin: 60, sessionsCount: 1);
+        $packageB->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
+
+        $studentToken = User::find($student->user_id)->createToken('t')->plainTextToken;
+        $response = $this->as($studentToken)->postJson("/api/packages/{$packageB->id}/bookings/individual", [
+            'slots' => [['date' => $nextWednesday->toDateString(), 'start_time' => '10:00']],
+        ]);
+
+        $response->assertStatus(422)->assertJsonPath('errors.schedule.0', $this->studentConflictMessage(
+            Carbon::parse($nextWednesday->toDateString())->setTime(10, 0),
+        ));
+    }
+
+    public function test_a_session_whose_time_fully_elapsed_no_longer_counts_as_a_conflict(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        $student = $this->createStudent();
+        $admin = User::factory()->admin()->create();
+
+        $package = $this->createActiveIndividualPackage($teacher, teacherPrice: 100, margin: 60, sessionsCount: 1);
+        $nextWednesday = Carbon::now()->next(3);
+        $package->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
+
+        // حجز مؤكَّد بجلسة، ثم نُرجِع موعد جلسته إلى الماضي (انتهى وقتها كاملاً) —
+        // حالتها تبقى 'scheduled' لأن لا شيء يضبط 'completed'
+        $booking = app(BookingService::class)->createManualBooking(
+            $student, $package, $admin, 'حجز انتهت جلسته', [['date' => $nextWednesday->toDateString(), 'start_time' => '10:00']],
+        );
+        $pastStart = Carbon::now()->subHours(2);
+        $booking->sessions()->first()->update(['scheduled_at' => $pastStart]);
+
+        // فحص التعارض على نفس اللحظة الماضية بالضبط — يجب ألا يرمي شيئاً بعد الإصلاح
+        app(ScheduleConflictService::class)->assertNoConflict($student, $teacher->id, [$pastStart->copy()], 60);
+
+        $this->expectNotToPerformAssertions();
+    }
+
+    public function test_a_session_still_in_progress_now_still_counts_as_a_conflict(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        $student = $this->createStudent();
+        $admin = User::factory()->admin()->create();
+
+        $package = $this->createActiveIndividualPackage($teacher, teacherPrice: 100, margin: 60, sessionsCount: 1);
+        $nextWednesday = Carbon::now()->next(3);
+        $package->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
+
+        $booking = app(BookingService::class)->createManualBooking(
+            $student, $package, $admin, 'جلسة جارية', [['date' => $nextWednesday->toDateString(), 'start_time' => '10:00']],
+        );
+        // بدأت قبل 10 دقائق، مدتها 60 → ما زالت تشغل وقتها الآن
+        $inProgressStart = Carbon::now()->subMinutes(10);
+        $booking->sessions()->first()->update(['scheduled_at' => $inProgressStart]);
+
+        $this->expectException(ValidationException::class);
+        app(ScheduleConflictService::class)->assertNoConflict($student, $teacher->id, [$inProgressStart->copy()], 60);
     }
 
     public function test_booking_a_genuinely_different_time_still_succeeds(): void
