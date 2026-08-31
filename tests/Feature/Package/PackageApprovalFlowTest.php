@@ -22,6 +22,7 @@ class PackageApprovalFlowTest extends TestCase
 
         $create = $this->as($teacherToken)->postJson('/api/packages', [
             'title' => 'باقة رياضيات فردية',
+            'description' => 'باقة لتقوية أساسيات الرياضيات',
             'subject_id' => $subject->id,
             'session_format' => 'individual',
             'capacity' => 1,
@@ -137,6 +138,7 @@ class PackageApprovalFlowTest extends TestCase
         // sessions_count = 3 لكن تاريخان فقط — لا تكرار أسبوعي تلقائي بعد الآن
         $response = $this->as($teacherToken)->postJson('/api/packages', [
             'title' => 'باقة مجموعة',
+            'description' => 'وصف الباقة',
             'subject_id' => $subject->id,
             'session_format' => 'group',
             'capacity' => 5,
@@ -183,6 +185,72 @@ class PackageApprovalFlowTest extends TestCase
         ]);
 
         $response->assertStatus(403);
+    }
+
+    /**
+     * قبل هذا الإصلاح لم تكن CreatePackageRequest/UpdatePackageRequest تُعرِّفان
+     * messages()، فتسقط كل رسائل التحقق للرسائل الافتراضية الإنجليزية من
+     * Laravel — غير مفهومة لمستخدم عربي، وسبب مباشر في عدم معرفة أين الخطأ.
+     */
+    public function test_missing_required_fields_return_clear_arabic_messages(): void
+    {
+        [, $teacherToken] = $this->createVerifiedTeacher();
+
+        $response = $this->as($teacherToken)->postJson('/api/packages', []);
+
+        $response->assertStatus(422)
+            ->assertJsonPath('errors.title.0', 'عنوان الباقة مطلوب')
+            ->assertJsonPath('errors.description.0', 'الوصف حقل إلزامي ولا يمكن أن يكون فارغاً')
+            ->assertJsonPath('errors.subject_id.0', 'يرجى اختيار المادة')
+            ->assertJsonPath('errors.sessions_count.0', 'يرجى تحديد عدد الجلسات')
+            ->assertJsonPath('errors.teacher_price.0', 'يرجى تحديد سعر الساعة')
+            ->assertJsonPath('errors.schedules.0', 'يرجى إضافة موعد واحد على الأقل');
+    }
+
+    /**
+     * required وحدها لا ترفض قيمة "مسافات فقط" (Laravel يعتبرها "موجودة") —
+     * prepareForValidation() يُقلّمها أولاً فتصبح سلسلة فارغة فعلياً ترفضها required.
+     */
+    public function test_a_whitespace_only_description_is_rejected_as_empty(): void
+    {
+        [, $teacherToken] = $this->createVerifiedTeacher();
+        $subject = Subject::create(['code' => 'ws-'.uniqid(), 'name_ar' => 'مادة', 'education_type' => 'school']);
+
+        $response = $this->as($teacherToken)->postJson('/api/packages', [
+            'title' => 'باقة',
+            'description' => '   ',
+            'subject_id' => $subject->id,
+            'session_format' => 'individual',
+            'capacity' => 1,
+            'sessions_count' => 4,
+            'teacher_price' => 50,
+            'schedules' => [['day_of_week' => 3]],
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJsonPath('errors.description.0', 'الوصف حقل إلزامي ولا يمكن أن يكون فارغاً');
+        $this->assertDatabaseMissing('packages', ['title' => 'باقة']);
+    }
+
+    public function test_a_past_group_session_date_returns_a_clear_arabic_message(): void
+    {
+        [$teacher, $teacherToken] = $this->createVerifiedTeacher();
+        $subject = Subject::create(['code' => 'past-'.uniqid(), 'name_ar' => 'مادة', 'education_type' => 'school']);
+
+        $response = $this->as($teacherToken)->postJson('/api/packages', [
+            'title' => 'باقة بتاريخ ماضٍ',
+            'subject_id' => $subject->id,
+            'session_format' => 'group',
+            'capacity' => 5,
+            'sessions_count' => 1,
+            'teacher_price' => 50,
+            'schedules' => [
+                ['date' => now()->subDay()->toDateString(), 'start_time' => '10:00'],
+            ],
+        ]);
+
+        $response->assertStatus(422);
+        $this->assertSame('لا يمكن اختيار تاريخ جلسة في الماضي', $response->json('errors')['schedules.0.date'][0]);
     }
 
     public function test_package_auto_closes_to_full_at_capacity_and_reopens_when_freed(): void

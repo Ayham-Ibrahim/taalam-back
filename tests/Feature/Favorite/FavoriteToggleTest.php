@@ -96,4 +96,37 @@ class FavoriteToggleTest extends TestCase
         $this->assertSame('مركز النخبة', $courseItem['course']['providerName']);
         $this->assertEquals(150, $courseItem['course']['price']);
     }
+
+    /**
+     * معلم يفقد توثيقه بعد إضافته للمفضلة (تعليق، رفض...) يجب أن يختفي منها
+     * تماماً — نفس معيار الظهور العام (TeacherSearchController، TeacherPolicy).
+     * سطر المفضلة نفسه يبقى في القاعدة، فيعود ظاهراً تلقائياً لو اعتُمد
+     * المعلم مجدداً دون أن يحتاج الطالب لإعادة إضافته.
+     */
+    public function test_a_suspended_teacher_disappears_from_the_favorites_list(): void
+    {
+        $teacherUser = User::factory()->teacher()->create();
+        $teacher = Teacher::create(['user_id' => $teacherUser->id, 'teacher_type' => 'school', 'status' => 'verified']);
+
+        $studentUser = User::factory()->student()->create();
+        Student::create(['user_id' => $studentUser->id, 'education_type' => 'school']);
+        $token = $studentUser->createToken('t')->plainTextToken;
+
+        $this->as($token)->postJson("/api/favorites/teachers/{$teacher->id}")->assertStatus(201);
+        $this->as($token)->getJson('/api/favorites')->assertJsonCount(1, 'data');
+
+        $teacher->update(['status' => 'suspended']);
+
+        $response = $this->as($token)->getJson('/api/favorites');
+        $response->assertStatus(200)->assertJsonCount(0, 'data');
+
+        // السطر نفسه لم يُحذف — فقط أُخفي عن القائمة
+        $this->assertDatabaseHas('favorites', [
+            'favoritable_type' => Teacher::class,
+            'favoritable_id' => $teacher->id,
+        ]);
+
+        $teacher->update(['status' => 'verified']);
+        $this->as($token)->getJson('/api/favorites')->assertJsonCount(1, 'data');
+    }
 }

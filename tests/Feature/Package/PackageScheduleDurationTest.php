@@ -29,6 +29,7 @@ class PackageScheduleDurationTest extends TestCase
         // الطلب لا يرسل end_time إطلاقاً — ولو أُرسل، يُتجاهل: القاعدة سياسة منصّة لا مدخل معلم
         $response = $this->as($teacherToken)->postJson('/api/packages', [
             'title' => 'باقة',
+            'description' => 'وصف الباقة',
             'subject_id' => $subject->id,
             'session_format' => 'group',
             'capacity' => 5,

@@ -256,6 +256,24 @@ class SessionService
     }
 
     /**
+     * لا شيء آخر في النظام يُحوّل جلسة إلى 'completed' فعلياً بمجرد انتهاء وقتها
+     * — تبقى status='scheduled' إلى الأبد سواء حضر الطالب أو غاب (markPresent/
+     * recordStudentAbsence يُحدّثان رصيد الحجز فقط، لا حالة الجلسة نفسها). هذا
+     * يكسر ثلاثة أجزاء تعتمد حرفياً على status='completed': توليد المستحقات
+     * المالية (PayoutService::generateForPeriod يرفض دائماً "لا توجد جلسات
+     * مكتملة" لأن لا جلسة تحمل هذه القيمة فعلياً)، تقييم الجلسة (ReviewService)،
+     * ومنع تغيير موعد جلسة منتهية (RescheduleService، الذي أضاف فحصاً زمنياً
+     * مستقلاً تحسّباً لهذا بالضبط). تُستدعى دورياً (CompleteEndedSessionsJob).
+     */
+    public function completeEndedSessions(): int
+    {
+        return ClassSession::query()
+            ->where('status', 'scheduled')
+            ->whereRaw('DATE_ADD(scheduled_at, INTERVAL duration_min MINUTE) < ?', [now()])
+            ->update(['status' => 'completed']);
+    }
+
+    /**
      * تُستدعى دورياً (FetchSessionRecordingsJob) — تبحث عن جلسات أُنشئت غرفتها
      * فعلياً على BBB وانتهى موعدها لكن لم يُعثر على رابط تسجيلها بعد، وتستعلم
      * BBB دفعة واحدة (لا استعلام منفصل لكل جلسة) عن أي منها بات تسجيله جاهزاً
