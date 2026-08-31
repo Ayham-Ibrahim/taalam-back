@@ -33,6 +33,10 @@ class PackageService
         $schedules = $data['schedules'] ?? [];
         unset($data['curriculum_ids'], $data['stage_ids'], $data['schedules']);
 
+        // أرقام صفوف صِرفة (1-12) بلا جدول تصنيف — عمود JSON مباشر على الباقة
+        // لا علاقة pivot تحتاج sync()، بعكس stage_ids/curriculum_ids.
+        $data['grades'] = ! empty($data['grades']) ? array_values($data['grades']) : null;
+
         $package = Package::create(array_merge($data, [
             'teacher_id' => $teacher->id,
             'status' => 'draft',
@@ -68,6 +72,10 @@ class PackageService
         $stageIds = $data['stage_ids'] ?? null;
         $schedules = $data['schedules'] ?? null;
         unset($data['curriculum_ids'], $data['stage_ids'], $data['schedules']);
+
+        if (array_key_exists('grades', $data) && empty($data['grades'])) {
+            $data['grades'] = null;
+        }
 
         $package->fill($data);
         $package->save();

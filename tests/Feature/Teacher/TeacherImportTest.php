@@ -92,6 +92,46 @@ class TeacherImportTest extends TestCase
         $this->assertDatabaseMissing('users', ['email' => 'invalid.type.import@example.com']);
     }
 
+    /**
+     * ملفات نماذج خارجية حقيقية (Google Forms) بعناوين أعمدة أطول وأثقل من
+     * القالب البسيط — الحقول المنطقية تُقرأ منها أيضاً (name/email/phone/
+     * whatsapp/gender/teacher_type)، ونوع المعلم يُطابَق من نص حر ("School
+     * Teacher ( K - 12 )") لا قيمة نظيفة جاهزة. حقول بلا عمود مخصَّص (الجنسية،
+     * المواد، المنهج) تُجمَع في bio بدل فقدانها.
+     */
+    public function test_processing_a_batch_maps_rich_external_form_headers(): void
+    {
+        Notification::fake();
+        Storage::fake('local');
+
+        $admin = $this->createAdmin()[0];
+
+        $csv = <<<'CSV'
+        Full Name ( Arabic ),Full Name ( English ),Phone Number,Whatsapp Number,Email Address,Gender,Type Of Teaching,Nationality,Subject(s) you teach,Curriculum Type
+        معلمة الكيمياء,Rich Form Teacher,0500000010,00500000010,rich.form.teacher.import@example.com,Female,School Teacher ( K - 12 ),Syrian,"Chemistry, Biology","MOE, IG"
+        CSV;
+
+        $batch = $this->storeBatch($admin, $csv);
+
+        app(TeacherImportService::class)->processBatch($batch);
+        $batch->refresh();
+
+        $this->assertSame('completed', $batch->status);
+        $this->assertSame(1, $batch->imported_count);
+        $this->assertSame(0, $batch->failed_count);
+
+        $user = User::where('email', 'rich.form.teacher.import@example.com')->firstOrFail();
+        $this->assertSame('معلمة الكيمياء', $user->name);
+        $this->assertSame('00500000010', $user->whatsapp);
+        $this->assertSame('female', $user->gender);
+
+        $teacher = $user->teacher;
+        $this->assertSame('school', $teacher->teacher_type);
+        $this->assertStringContainsString('الجنسية: Syrian', $teacher->bio);
+        $this->assertStringContainsString('المواد التي يدرّسها: Chemistry, Biology', $teacher->bio);
+        $this->assertStringContainsString('نوع المنهج: MOE, IG', $teacher->bio);
+    }
+
     public function test_processing_marks_the_batch_failed_when_row_count_exceeds_max_setting(): void
     {
         Storage::fake('local');

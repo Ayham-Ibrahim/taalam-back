@@ -41,6 +41,7 @@ class AdminPackageResource extends JsonResource
             'rejection_reason' => $this->rejection_reason,
             'curricula' => $this->whenLoaded('curricula'),
             'stages' => $this->whenLoaded('stages'),
+            'grades' => $this->grades,
             'schedules' => $this->whenLoaded('schedules', fn () => $this->schedules->map(fn ($s) => [
                 'id' => $s->id, 'date' => $s->date?->toDateString(), 'day_of_week' => $s->day_of_week, 'start_time' => $s->start_time, 'end_time' => $s->end_time,
             ])),

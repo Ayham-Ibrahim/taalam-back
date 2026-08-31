@@ -10,6 +10,7 @@ use App\Models\Teacher;
 use App\Models\User;
 use App\Models\VerificationDocument;
 use App\Notifications\AccountCreatedByAdmin;
+use App\Notifications\PasswordResetByAdmin;
 use App\Notifications\TeacherInvited;
 use App\Notifications\TeacherVerificationReviewed;
 use App\Traits\LogsAuditEvents;
@@ -98,6 +99,34 @@ class TeacherService
 
             return $teacher;
         });
+    }
+
+    /**
+     * يوازي StudentService::resetPasswordByAdmin مع استثناء واحد: الطالب ليس له
+     * حالة "invited" (لا خطوة دعوة له أصلاً)، أما المعلم المستورَد/المدعو
+     * (invite()) فحسابه بلا كلمة مرور حتى يقبل الدعوة بنفسه؛ لو استخدم الأدمن
+     * هذه الدالة عليه مباشرة بدل ذلك (لتفعيله فوراً بلا انتظار قبوله للدعوة)
+     * وبقيت الحالة invited، تبقى شاشة "أكمل ملفك الشخصي" (CompleteTeacherProfilePage)
+     * تخفي نموذج البيانات الشخصية بالكامل (مقيَّد بـ status === 'active_unverified'
+     * فقط) — فيدخل المعلم برقم مرور فعّال لكن بلا أي طريق لرؤية نبذته المستورَدة
+     * أو تعديلها أو حتى إرسال طلبه للمراجعة، عالق نهائياً. لذا نطبّق هنا نفس
+     * انتقال الحالة الذي تُطبّقه acceptInvitation()/createByAdmin() عند التفعيل.
+     */
+    public function resetPasswordByAdmin(Teacher $teacher, string $newPassword, User $admin): void
+    {
+        $teacher->loadMissing('user');
+        $user = $teacher->user;
+
+        $user->update(['password' => $newPassword]);
+        $user->tokens()->delete();
+
+        if ($teacher->status === 'invited') {
+            $teacher->update(['status' => 'active_unverified']);
+        }
+
+        $this->notifications->send($user, new PasswordResetByAdmin($newPassword), 'teacher.password_reset_by_admin');
+
+        $this->audit('teacher.password_reset_by_admin', $teacher, [], [], null, $admin->id);
     }
 
     public function acceptInvitation(string $token, string $password): array

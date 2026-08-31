@@ -356,6 +356,69 @@ class PackageApprovalFlowTest extends TestCase
     }
 
     /**
+     * grades عمود JSON مباشر على الباقة (لا علاقة pivot)، بلا جدول تصنيف —
+     * أرقام صِرفة 1-12 تماماً كـ students.grade. مصفوفة فارغة تُطبَّع لـ null
+     * (PackageService::updateDraft) بدل تركها [] حرفياً.
+     */
+    public function test_package_stores_grades_and_they_can_be_cleared_on_update(): void
+    {
+        [$teacher, $teacherToken] = $this->createVerifiedTeacher();
+        $subject = Subject::create(['code' => 'grd-'.uniqid(), 'name_ar' => 'مادة', 'education_type' => 'school']);
+        AvailabilitySlot::create(['teacher_id' => $teacher->id, 'day_of_week' => 2]);
+
+        $create = $this->as($teacherToken)->postJson('/api/packages', [
+            'title' => 'باقة بصفوف محددة',
+            'description' => 'وصف الباقة',
+            'subject_id' => $subject->id,
+            'session_format' => 'individual',
+            'capacity' => 1,
+            'sessions_count' => 4,
+            'teacher_price' => 50,
+            'grades' => [7, 8, 9],
+            'schedules' => [['day_of_week' => 2]],
+        ]);
+
+        $create->assertStatus(201)->assertJsonPath('data.grades', [7, 8, 9]);
+        $packageId = $create->json('data.id');
+        $this->assertSame([7, 8, 9], Package::find($packageId)->grades);
+
+        $update = $this->as($teacherToken)->putJson("/api/packages/{$packageId}", [
+            'title' => 'باقة بصفوف محددة',
+            'description' => 'وصف الباقة',
+            'subject_id' => $subject->id,
+            'session_format' => 'individual',
+            'capacity' => 1,
+            'sessions_count' => 4,
+            'teacher_price' => 50,
+            'grades' => [],
+            'schedules' => [['day_of_week' => 2]],
+        ]);
+
+        $update->assertStatus(200);
+        $this->assertNull(Package::find($packageId)->grades);
+    }
+
+    public function test_grade_must_be_between_one_and_twelve(): void
+    {
+        [, $teacherToken] = $this->createVerifiedTeacher();
+        $subject = Subject::create(['code' => 'grd2-'.uniqid(), 'name_ar' => 'مادة', 'education_type' => 'school']);
+
+        $response = $this->as($teacherToken)->postJson('/api/packages', [
+            'title' => 'باقة',
+            'description' => 'وصف',
+            'subject_id' => $subject->id,
+            'session_format' => 'individual',
+            'capacity' => 1,
+            'sessions_count' => 4,
+            'teacher_price' => 50,
+            'grades' => [13],
+            'schedules' => [['day_of_week' => 2]],
+        ]);
+
+        $response->assertStatus(422)->assertJsonValidationErrors(['grades.0']);
+    }
+
+    /**
      * @return array{0: Teacher, 1: string}
      */
     private function createVerifiedTeacher(string $type = 'school'): array

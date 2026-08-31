@@ -4,6 +4,7 @@ namespace Tests\Feature\Package;
 
 use App\Models\AvailabilitySlot;
 use App\Models\Package;
+use App\Models\Stage;
 use App\Models\Student;
 use App\Models\Subject;
 use App\Models\Teacher;
@@ -83,6 +84,30 @@ class PublicPackageDiscoveryTest extends TestCase
 
         $response->assertStatus(200);
         $this->assertCount(1, $response->json('data'));
+    }
+
+    /**
+     * indexForTeacher كان لا يحمّل علاقة stages إطلاقاً (فتظهر فارغة دوماً في
+     * الاستجابة رغم whenLoaded('stages') في StudentPackageResource) — الطالب
+     * المتصفح لباقات معلم يحتاج رؤية المرحلة/الصفوف التي تستهدفها كل باقة.
+     */
+    public function test_package_listing_exposes_its_stages_and_grades(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        $stage = Stage::create(['code' => 'disc-'.uniqid(), 'name_ar' => 'مرحلة الاكتشاف']);
+
+        $package = $this->createIndividualPackage($teacher, status: 'active');
+        $package->stages()->attach($stage->id);
+        $package->update(['grades' => [4, 5]]);
+
+        $student = $this->createStudent();
+        $studentToken = User::find($student->user_id)->createToken('t')->plainTextToken;
+
+        $response = $this->as($studentToken)->getJson("/api/teachers/{$teacher->id}/packages");
+
+        $response->assertStatus(200)
+            ->assertJsonPath('data.0.stages.0.id', $stage->id)
+            ->assertJsonPath('data.0.grades', [4, 5]);
     }
 
     public function test_student_cannot_view_unverified_teachers_availability_slots(): void

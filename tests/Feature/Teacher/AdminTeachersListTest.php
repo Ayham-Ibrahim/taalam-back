@@ -63,11 +63,55 @@ class AdminTeachersListTest extends TestCase
         ];
     }
 
-    private function createTeacher(string $status): Teacher
+    public function test_teacher_type_filter_returns_only_matching_type(): void
     {
-        $user = User::factory()->teacher()->create();
+        [, $adminToken] = $this->createAdmin();
 
-        return Teacher::create(['user_id' => $user->id, 'teacher_type' => 'school', 'status' => $status]);
+        $school = $this->createTeacher('verified', 'school');
+        $university = $this->createTeacher('verified', 'university');
+        $trainingCenter = $this->createTeacher('verified', 'training_center');
+
+        $response = $this->as($adminToken)->getJson('/api/teachers?teacher_type=university');
+
+        $response->assertStatus(200);
+        $ids = collect($response->json('data'))->pluck('id')->all();
+
+        $this->assertContains($university->id, $ids);
+        $this->assertNotContains($school->id, $ids);
+        $this->assertNotContains($trainingCenter->id, $ids);
+    }
+
+    public function test_search_filter_matches_teacher_name_or_email(): void
+    {
+        [, $adminToken] = $this->createAdmin();
+
+        $matchingByName = $this->createTeacher('verified', 'school', ['name' => 'أحمد الفاروقي']);
+        $matchingByEmail = $this->createTeacher('verified', 'school', ['email' => 'farouqi.search@example.com']);
+        $other = $this->createTeacher('verified', 'school', ['name' => 'خالد آخر', 'email' => 'other.search@example.com']);
+
+        $response = $this->as($adminToken)->getJson('/api/teachers?search=فاروقي');
+
+        $response->assertStatus(200);
+        $ids = collect($response->json('data'))->pluck('id')->all();
+
+        $this->assertContains($matchingByName->id, $ids);
+        $this->assertNotContains($matchingByEmail->id, $ids);
+        $this->assertNotContains($other->id, $ids);
+
+        $response = $this->as($adminToken)->getJson('/api/teachers?search=farouqi.search');
+
+        $response->assertStatus(200);
+        $ids = collect($response->json('data'))->pluck('id')->all();
+
+        $this->assertContains($matchingByEmail->id, $ids);
+        $this->assertNotContains($other->id, $ids);
+    }
+
+    private function createTeacher(string $status, string $teacherType = 'school', array $userAttributes = []): Teacher
+    {
+        $user = User::factory()->teacher()->create($userAttributes);
+
+        return Teacher::create(['user_id' => $user->id, 'teacher_type' => $teacherType, 'status' => $status]);
     }
 
     /**

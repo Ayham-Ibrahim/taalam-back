@@ -68,4 +68,9 @@ class TeacherPolicy
     {
         return $user->isAdmin();
     }
+
+    public function resetPassword(User $user, Teacher $teacher): bool
+    {
+        return $user->isAdmin();
+    }
 }

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Teacher;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Teacher\AcceptInvitationRequest;
+use App\Http\Requests\Teacher\AdminResetTeacherPasswordRequest;
 use App\Http\Requests\Teacher\CreateTeacherAccountRequest;
 use App\Http\Requests\Teacher\InviteTeacherRequest;
 use App\Http\Requests\Teacher\RejectTeacherRequest;
@@ -31,6 +32,13 @@ class TeacherController extends Controller
             ->with('user:id,name,email,phone')
             ->when($request->filled('status'), fn ($q) => $this->applyStatusFilter($q, $request->string('status')->value()))
             ->when($request->filled('teacher_type'), fn ($q) => $q->where('teacher_type', $request->string('teacher_type')))
+            ->when($request->filled('search'), function ($q) use ($request) {
+                $search = $request->string('search');
+                $q->whereHas('user', function ($userQuery) use ($search) {
+                    $userQuery->where('name', 'like', "%{$search}%")
+                        ->orWhere('email', 'like', "%{$search}%");
+                });
+            })
             ->latest()
             ->paginate($request->integer('per_page', 20));
 
@@ -103,6 +111,11 @@ class TeacherController extends Controller
                 'user:id,name,email,phone,avatar_path',
                 'verificationDocuments' => fn ($q) => $q->latest(),
             ]);
+        } else {
+            // المراحل/الصفوف المعروضة للطالب مُشتقّة من باقات المعلم الفعلية
+            // القابلة للحجز فقط (PublicTeacherResource) — لا من تصنيف عام، ولا
+            // من باقات مسودة/معطّلة لا يمكن للطالب حجزها أصلاً.
+            $teacher->load(['packages' => fn ($q) => $q->bookable()->with('stages')]);
         }
 
         $teacher->setAttribute('stats', $this->teacherService->getStats($teacher));
@@ -143,6 +156,14 @@ class TeacherController extends Controller
         $teacher = $this->teacherService->updateProfile($teacher, $request->validated());
 
         return $this->success($teacher, 'تم تحديث الملف الشخصي بنجاح');
+    }
+
+    /** الأدمن يعيد تعيين كلمة مرور معلم مباشرة — بلا حاجة لمعرفة القديمة، ترسَل الجديدة بالبريد (يوازي StudentController::resetPassword) */
+    public function resetPassword(AdminResetTeacherPasswordRequest $request, Teacher $teacher)
+    {
+        $this->teacherService->resetPasswordByAdmin($teacher, $request->validated('password'), $request->user());
+
+        return $this->success(null, 'تم تغيير كلمة مرور المعلم بنجاح، وأُرسلت له عبر البريد الإلكتروني');
     }
 
     public function submitForVerification(Teacher $teacher)

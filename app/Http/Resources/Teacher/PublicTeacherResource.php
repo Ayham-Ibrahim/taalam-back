@@ -41,6 +41,21 @@ class PublicTeacherResource extends JsonResource
             'languages' => $this->whenLoaded('languages', fn () => $this->languages->map(fn ($l) => [
                 'code' => $l->code, 'name_ar' => $l->name_ar,
             ])),
+            /**
+             * مُشتقّة من باقاته الفعلية القابلة للحجز (package_stage وعمود
+             * packages.grades)، لا من ملفه الشخصي مباشرة — لا يملك المعلم حقل
+             * "مرحلة/صف" خاصاً به، فهذه تلخيص لما يُدرّسه فعلياً حالياً.
+             */
+            'stages' => $this->whenLoaded('packages', fn () => $this->packages
+                ->flatMap(fn ($p) => $p->stages)
+                ->unique('id')
+                ->values()
+                ->map(fn ($s) => ['id' => $s->id, 'name_ar' => $s->name_ar])),
+            'grades' => $this->whenLoaded('packages', fn () => $this->packages
+                ->flatMap(fn ($p) => $p->grades ?? [])
+                ->unique()
+                ->sort()
+                ->values()),
             'stats' => $this->stats,
         ];
     }

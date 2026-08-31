@@ -32,7 +32,17 @@ class TeacherSearchController extends Controller
                 $q->whereHas('curricula', fn ($cq) => $cq->where('curricula.id', $curriculumId));
             })
             ->when($filters['stage_id'] ?? null, function ($q, $stageId) {
-                $q->whereHas('subjects.stages', fn ($sq) => $sq->where('stages.id', $stageId));
+                // المرحلة تُستنتَج من الباقات الفعلية القابلة للحجز التي يقدّمها
+                // المعلم (package_stage)، لا من تصنيف عام يربط مادته بمرحلة
+                // (subject_stage) — الأخير كان يُظهر معلماً حتى لو لم تستهدف أي
+                // من باقاته الفعلية هذه المرحلة إطلاقاً، لمجرد أن مادته عموماً
+                // مصنَّفة لها إدارياً.
+                $q->whereHas('packages', fn ($pq) => $pq->bookable()
+                    ->whereHas('stages', fn ($sq) => $sq->where('stages.id', $stageId)));
+            })
+            ->when($filters['grade'] ?? null, function ($q, $grade) {
+                $q->whereHas('packages', fn ($pq) => $pq->bookable()
+                    ->whereJsonContains('grades', (int) $grade));
             })
             ->when($filters['language_id'] ?? null, function ($q, $languageId) {
                 $q->whereHas('languages', fn ($lq) => $lq->where('languages.id', $languageId));

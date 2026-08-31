@@ -38,6 +38,7 @@ class Package extends Model
         'platform_revenue',
         'currency',
         'discount_percent',
+        'grades',
         'status',
         'submitted_at',
         'approved_at',
@@ -53,6 +54,7 @@ class Package extends Model
             'student_price' => 'decimal:2',
             'platform_revenue' => 'decimal:2',
             'discount_percent' => 'decimal:2',
+            'grades' => 'array',
             'submitted_at' => 'datetime',
             'approved_at' => 'datetime',
         ];

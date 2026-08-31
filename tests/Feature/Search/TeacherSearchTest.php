@@ -65,18 +65,59 @@ class TeacherSearchTest extends TestCase
         $this->assertSame($matching->id, $response->json('data.0.id'));
     }
 
+    /**
+     * المرحلة تُستنتَج من الباقات الفعلية القابلة للحجز (package_stage)، لا من
+     * تصنيف عام يربط المادة بمرحلة (subject_stage) — راجع الاختبار التالي
+     * الذي يثبت أن التصنيف العام وحده لم يعد كافياً لإظهار المعلم.
+     */
     public function test_search_filters_by_stage(): void
+    {
+        $subject = Subject::create(['code' => 'ts-'.uniqid(), 'name_ar' => 'مادة']);
+        $stage = Stage::create(['code' => 'stg-'.uniqid(), 'name_ar' => 'مرحلة']);
+
+        $matching = $this->createTeacher('school', 'verified', ranking: 10);
+        $matchingPackage = $this->createPackage($matching, $subject, 100);
+        $matchingPackage->stages()->attach($stage->id);
+
+        $other = $this->createTeacher('school', 'verified', ranking: 20);
+        $this->createPackage($other, $subject, 100);
+
+        $response = $this->getJson("/api/teachers/search?stage_id={$stage->id}");
+
+        $response->assertStatus(200);
+        $this->assertCount(1, $response->json('data'));
+        $this->assertSame($matching->id, $response->json('data.0.id'));
+    }
+
+    public function test_stage_filter_ignores_generic_subject_taxonomy_without_a_matching_package(): void
     {
         $subject = Subject::create(['code' => 'ts-'.uniqid(), 'name_ar' => 'مادة']);
         $stage = Stage::create(['code' => 'stg-'.uniqid(), 'name_ar' => 'مرحلة']);
         $subject->stages()->attach($stage->id);
 
-        $matching = $this->createTeacher('school', 'verified', ranking: 10);
-        $matching->subjects()->attach($subject->id);
-
-        $this->createTeacher('school', 'verified', ranking: 20);
+        $teacher = $this->createTeacher('school', 'verified', ranking: 10);
+        $teacher->subjects()->attach($subject->id);
+        $this->createPackage($teacher, $subject, 100);
 
         $response = $this->getJson("/api/teachers/search?stage_id={$stage->id}");
+
+        $response->assertStatus(200);
+        $this->assertCount(0, $response->json('data'));
+    }
+
+    public function test_search_filters_by_grade(): void
+    {
+        $subject = Subject::create(['code' => 'ts-'.uniqid(), 'name_ar' => 'مادة']);
+
+        $matching = $this->createTeacher('school', 'verified', ranking: 10);
+        $matchingPackage = $this->createPackage($matching, $subject, 100);
+        $matchingPackage->update(['grades' => [7, 8, 9]]);
+
+        $other = $this->createTeacher('school', 'verified', ranking: 20);
+        $otherPackage = $this->createPackage($other, $subject, 100);
+        $otherPackage->update(['grades' => [10, 11, 12]]);
+
+        $response = $this->getJson('/api/teachers/search?grade=8');
 
         $response->assertStatus(200);
         $this->assertCount(1, $response->json('data'));

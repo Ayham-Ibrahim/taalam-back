@@ -42,6 +42,8 @@ class CreatePackageRequest extends FormRequest
             'curriculum_ids.*' => ['integer', 'exists:curricula,id'],
             'stage_ids' => ['nullable', 'array', 'max:20'],
             'stage_ids.*' => ['integer', 'exists:stages,id'],
+            'grades' => ['nullable', 'array', 'max:12'],
+            'grades.*' => ['integer', 'distinct', 'min:1', 'max:12'],
             /**
              * جماعية: المعلم يحدد تاريخ أول جلسة ووقتها صراحةً — لا اختيار طالب لاحقاً،
              *   والتكرار أسبوعي من هذا التاريخ. day_of_week يُشتق من date، وend_time من
@@ -88,6 +90,10 @@ class CreatePackageRequest extends FormRequest
             'curriculum_ids.*.exists' => 'أحد المناهج المختارة غير موجود',
             'stage_ids.max' => 'لا يمكن اختيار أكثر من 20 مرحلة',
             'stage_ids.*.exists' => 'إحدى المراحل المختارة غير موجودة',
+            'grades.max' => 'لا يمكن اختيار أكثر من 12 صفاً',
+            'grades.*.distinct' => 'لا يمكن اختيار نفس الصف أكثر من مرة',
+            'grades.*.min' => 'الصف يجب أن يكون بين 1 و12',
+            'grades.*.max' => 'الصف يجب أن يكون بين 1 و12',
             'schedules.required' => 'يرجى إضافة موعد واحد على الأقل',
             'schedules.min' => 'يرجى إضافة موعد واحد على الأقل',
             'schedules.max' => 'لا يمكن إضافة أكثر من 200 موعد',

@@ -19,6 +19,7 @@ class SearchTeachersRequest extends FormRequest
             'subject_id' => ['nullable', 'integer', 'exists:subjects,id'],
             'curriculum_id' => ['nullable', 'integer', 'exists:curricula,id'],
             'stage_id' => ['nullable', 'integer', 'exists:stages,id'],
+            'grade' => ['nullable', 'integer', 'min:1', 'max:12'],
             'language_id' => ['nullable', 'integer', 'exists:languages,id'],
             'min_rating' => ['nullable', 'numeric', 'min:0', 'max:5'],
             'min_price' => ['nullable', 'numeric', 'min:0'],
