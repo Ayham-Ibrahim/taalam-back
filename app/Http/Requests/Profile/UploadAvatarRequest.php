@@ -23,4 +23,20 @@ class UploadAvatarRequest extends FormRequest
     {
         return ['avatar' => 'الصورة الشخصية'];
     }
+
+    /**
+     * لا يوجد lang/ar في هذا المشروع (APP_LOCALE=en) — بلا messages() صريحة
+     * هنا تصل الرسائل بالإنجليزية الكاملة، لا فقط اسم الحقل (نفس فجوة
+     * UploadVerificationDocumentRequest/TaxonomyItemRequest المُصلَحة سابقاً).
+     */
+    public function messages(): array
+    {
+        return [
+            'avatar.required' => 'يرجى اختيار صورة',
+            'avatar.image' => 'الملف المُرسَل يجب أن يكون صورة',
+            'avatar.mimes' => 'صيغة الصورة غير مدعومة — يُسمح فقط بصورة JPG أو PNG',
+            'avatar.max' => 'حجم الصورة أكبر من الحد المسموح (5 ميغابايت كحد أقصى)',
+            'avatar.dimensions' => 'أبعاد الصورة صغيرة جداً — الحد الأدنى 400×400 بكسل',
+        ];
+    }
 }

@@ -40,7 +40,28 @@ class AvatarUploadTest extends TestCase
             'avatar' => UploadedFile::fake()->image('avatar.jpg', 100, 100),
         ]);
 
-        $response->assertStatus(422);
+        $response->assertStatus(422)
+            ->assertJsonPath('errors.avatar.0', 'أبعاد الصورة صغيرة جداً — الحد الأدنى 400×400 بكسل');
+    }
+
+    /**
+     * لا يوجد lang/ar في هذا المشروع (APP_LOCALE=en) — بلا messages() عربية
+     * صريحة كانت هذه الرسالة تصل بالإنجليزية الافتراضية من Laravel.
+     */
+    public function test_avatar_over_5mb_is_rejected_with_an_arabic_message(): void
+    {
+        Storage::fake('public');
+
+        $user = User::factory()->student()->create();
+        $token = $user->createToken('t')->plainTextToken;
+
+        $response = $this->as($token)->post('/api/me/avatar', [
+            'avatar' => UploadedFile::fake()->image('avatar.jpg', 500, 500)->size(5121),
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJsonPath('errors.avatar.0', 'حجم الصورة أكبر من الحد المسموح (5 ميغابايت كحد أقصى)');
+        $this->assertNull($user->fresh()->avatar_path);
     }
 
     public function test_uploading_a_new_avatar_replaces_and_deletes_the_old_one(): void
