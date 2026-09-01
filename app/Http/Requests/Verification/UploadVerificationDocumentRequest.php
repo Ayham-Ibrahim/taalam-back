@@ -24,4 +24,21 @@ class UploadVerificationDocumentRequest extends FormRequest
             'file' => ['required', 'file', 'mimes:jpeg,jpg,png,pdf', 'max:5120'],
         ];
     }
+
+    /**
+     * لا يوجد lang/ar في هذا المشروع (APP_LOCALE=en) — بلا messages() صريحة
+     * هنا تصل رسائل Laravel الافتراضية بالإنجليزية بصمت، بعكس كل طلبات
+     * الرفع/الإنشاء الأخرى في هذا التطبيق التي تُعرِّف رسائل عربية صراحة.
+     */
+    public function messages(): array
+    {
+        return [
+            'type.required' => 'يرجى اختيار نوع الوثيقة',
+            'type.in' => 'نوع الوثيقة غير صالح',
+            'file.required' => 'يرجى اختيار ملف',
+            'file.file' => 'الملف المُرسَل غير صالح',
+            'file.mimes' => 'صيغة الملف غير مدعومة — يُسمح فقط بصورة (JPG/PNG) أو PDF',
+            'file.max' => 'حجم الملف أكبر من الحد المسموح (5 ميغابايت كحد أقصى)',
+        ];
+    }
 }

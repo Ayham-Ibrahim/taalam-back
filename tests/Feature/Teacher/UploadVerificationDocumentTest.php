@@ -46,6 +46,11 @@ class UploadVerificationDocumentTest extends TestCase
         $response->assertStatus(201);
     }
 
+    /**
+     * لا يوجد lang/ar في هذا المشروع (APP_LOCALE=en) — بلا messages() عربية
+     * صريحة في UploadVerificationDocumentRequest كانت هذه الرسالة تصل
+     * بالإنجليزية الافتراضية من Laravel صمتاً، لا برسالة عربية واضحة.
+     */
     public function test_document_over_5mb_is_rejected(): void
     {
         Storage::fake('local');
@@ -57,7 +62,9 @@ class UploadVerificationDocumentTest extends TestCase
             'file' => UploadedFile::fake()->create('identity.pdf', 5121, 'application/pdf'),
         ]);
 
-        $response->assertStatus(422)->assertJsonValidationErrors('file');
+        $response->assertStatus(422)
+            ->assertJsonPath('errors.file.0', 'حجم الملف أكبر من الحد المسموح (5 ميغابايت كحد أقصى)');
+        $this->assertDatabaseCount('verification_documents', 0);
     }
 
     #[DataProvider('disallowedFileProvider')]
