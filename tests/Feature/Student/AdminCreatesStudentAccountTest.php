@@ -57,6 +57,8 @@ class AdminCreatesStudentAccountTest extends TestCase
             'curriculum_id' => $curriculum->id,
             'stage_id' => $stage->id,
             'grade' => 6,
+            'guardian_name' => 'أبو سارة',
+            'guardian_phone' => '0590000000',
         ]);
         $complete->assertStatus(200)->assertJsonPath('data.education_type', 'school');
         $this->assertDatabaseHas('students', ['id' => $student->id, 'education_type' => 'school', 'grade' => 6]);

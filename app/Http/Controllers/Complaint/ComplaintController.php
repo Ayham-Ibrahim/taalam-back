@@ -17,12 +17,15 @@ class ComplaintController extends Controller
     {
         $this->authorize('viewAny', Complaint::class);
 
-        $user = $request->user();
+        $user = $request->user()->loadMissing(['student', 'teacher']);
 
         $complaints = Complaint::query()
+            ->with(['student.user:id,name', 'teacher.user:id,name', 'booking.package.subject', 'session.booking.package.subject'])
             ->when(! $user->isAdmin(), function ($q) use ($user) {
-                $student = $user->loadMissing('student')->student;
-                $q->where('student_id', $student?->id ?? 0);
+                $q->where(function ($q) use ($user) {
+                    $q->where('student_id', $user->student?->id ?? 0)
+                        ->orWhere('teacher_id', $user->teacher?->id ?? 0);
+                });
             })
             ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))
             ->latest()
@@ -35,14 +38,20 @@ class ComplaintController extends Controller
     {
         $this->authorize('view', $complaint);
 
-        return $this->success($complaint->load(['booking:id,reference', 'session:id,scheduled_at', 'resolver:id,name']));
+        return $this->success($complaint->load([
+            'student.user:id,name',
+            'teacher.user:id,name',
+            'booking:id,reference',
+            'session:id,scheduled_at',
+            'resolver:id,name',
+        ]));
     }
 
     public function store(FileComplaintRequest $request)
     {
-        $student = $request->user()->loadMissing('student')->student;
+        $user = $request->user()->loadMissing(['student', 'teacher']);
 
-        $complaint = $this->complaintService->file($student, $request->validated());
+        $complaint = $this->complaintService->file($user->student, $user->teacher, $request->validated());
 
         return $this->success($complaint, 'تم تسجيل الشكوى بنجاح', 201);
     }

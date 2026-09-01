@@ -9,6 +9,7 @@ class Complaint extends Model
     protected $fillable = [
         'reference',
         'student_id',
+        'teacher_id',
         'booking_id',
         'class_session_id',
         'category',
@@ -32,6 +33,11 @@ class Complaint extends Model
     public function student()
     {
         return $this->belongsTo(Student::class);
+    }
+
+    public function teacher()
+    {
+        return $this->belongsTo(Teacher::class);
     }
 
     public function booking()

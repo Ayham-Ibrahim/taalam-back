@@ -9,7 +9,9 @@ use App\Models\Student;
 use App\Models\Subject;
 use App\Models\Teacher;
 use App\Models\User;
+use App\Notifications\ComplaintFiled;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Notification;
 use Tests\TestCase;
 
 class ComplaintFlowTest extends TestCase
@@ -26,7 +28,45 @@ class ComplaintFlowTest extends TestCase
         ]);
 
         $response->assertStatus(201)->assertJsonPath('data.status', 'open');
-        $this->assertDatabaseHas('complaints', ['student_id' => $student->id, 'status' => 'open']);
+        $this->assertDatabaseHas('complaints', ['student_id' => $student->id, 'teacher_id' => null, 'status' => 'open']);
+    }
+
+    public function test_teacher_can_file_a_complaint(): void
+    {
+        [$teacher, $teacherToken] = $this->createVerifiedTeacher();
+
+        $response = $this->as($teacherToken)->postJson('/api/complaints', [
+            'category' => 'technical_issue',
+            'description' => 'مشكلة تقنية في المنصة',
+        ]);
+
+        $response->assertStatus(201)->assertJsonPath('data.status', 'open');
+        $this->assertDatabaseHas('complaints', ['teacher_id' => $teacher->id, 'student_id' => null, 'status' => 'open']);
+    }
+
+    public function test_filing_a_complaint_notifies_every_active_admin(): void
+    {
+        Notification::fake();
+
+        [$student, $studentToken] = $this->createStudent();
+        [$admin1] = $this->createAdmin();
+        [$admin2] = $this->createAdmin();
+        $inactiveAdmin = User::factory()->admin()->create(['is_active' => false]);
+
+        $this->as($studentToken)->postJson('/api/complaints', [
+            'category' => 'other',
+            'description' => 'شكوى عامة',
+        ])->assertStatus(201);
+
+        foreach ([$admin1, $admin2] as $admin) {
+            Notification::assertSentTo(
+                $admin,
+                ComplaintFiled::class,
+                fn ($n) => $n->toArray($admin)['filerRole'] === 'student',
+            );
+        }
+        Notification::assertNotSentTo($inactiveAdmin, ComplaintFiled::class);
+        Notification::assertNotSentTo($student->user, ComplaintFiled::class);
     }
 
     public function test_resolution_type_is_restricted_to_non_refund_options(): void
@@ -117,14 +157,14 @@ class ComplaintFlowTest extends TestCase
     }
 
     /**
-     * @return array{0: Teacher}
+     * @return array{0: Teacher, 1: string}
      */
     private function createVerifiedTeacher(): array
     {
         $user = User::factory()->teacher()->create();
         $teacher = Teacher::create(['user_id' => $user->id, 'teacher_type' => 'school', 'status' => 'verified']);
 
-        return [$teacher];
+        return [$teacher, $user->createToken('t')->plainTextToken];
     }
 
     /**

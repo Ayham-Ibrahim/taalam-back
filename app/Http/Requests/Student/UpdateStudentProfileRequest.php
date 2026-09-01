@@ -31,9 +31,9 @@ class UpdateStudentProfileRequest extends FormRequest
 
             'birth_date' => ['nullable', 'date', 'before:today'],
             // أحرف فقط (بلا أرقام أو رموز) — نفس نمط CreateTeacherAccountRequest::name
-            'guardian_name' => ['nullable', 'string', 'max:150', 'regex:/^[\p{L}\p{M}]+(?:[\s\'-][\p{L}\p{M}]+)*$/u'],
+            'guardian_name' => ['required', 'string', 'max:150', 'regex:/^[\p{L}\p{M}]+(?:[\s\'-][\p{L}\p{M}]+)*$/u'],
             // أرقام فقط (٧–٢٤ خانة) مع بادئة + اختيارية — نفس نمط بقية حقول الهاتف
-            'guardian_phone' => ['nullable', 'string', 'max:25', 'regex:/^\+?[0-9]{7,24}$/'],
+            'guardian_phone' => ['required', 'string', 'max:25', 'regex:/^\+?[0-9]{7,24}$/'],
         ];
     }
 
@@ -58,7 +58,9 @@ class UpdateStudentProfileRequest extends FormRequest
             'grade.integer' => 'الصف الدراسي يجب أن يكون رقمًا صحيحًا بين 1 و 12.',
             'grade.min' => 'الصف الدراسي يجب أن يكون بين 1 و 12.',
             'grade.max' => 'الصف الدراسي يجب أن يكون بين 1 و 12.',
+            'guardian_name.required' => 'اسم ولي الأمر مطلوب.',
             'guardian_name.regex' => 'اسم ولي الأمر يجب أن يحتوي على أحرف فقط من دون أرقام أو رموز.',
+            'guardian_phone.required' => 'رقم هاتف ولي الأمر مطلوب.',
             'guardian_phone.regex' => 'رقم هاتف ولي الأمر يجب أن يحتوي أرقامًا فقط (من 7 إلى 24 رقمًا)، ويمكن أن يبدأ بعلامة + للرقم الدولي.',
         ];
     }

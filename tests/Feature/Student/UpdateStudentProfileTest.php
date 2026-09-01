@@ -102,9 +102,48 @@ class UpdateStudentProfileTest extends TestCase
             'course_field_id' => $field->id,
             'level' => 'beginner',
             'guardian_name' => 'أبو عبد الرحمن',
+            'guardian_phone' => '0590000000',
         ])->assertStatus(200);
 
         $this->assertSame('أبو عبد الرحمن', $student->fresh()->guardian_name);
+    }
+
+    public function test_guardian_name_is_required(): void
+    {
+        $user = User::factory()->student()->create();
+        $field = CourseField::create(['code' => 'f-'.uniqid(), 'name_ar' => 'مجال']);
+        $student = Student::create(['user_id' => $user->id, 'education_type' => 'training']);
+        $token = $user->createToken('t')->plainTextToken;
+
+        $response = $this->as($token)->putJson("/api/students/{$student->id}", [
+            'education_type' => 'training',
+            'course_field_id' => $field->id,
+            'level' => 'beginner',
+            'guardian_phone' => '0590000000',
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJsonPath('errors.guardian_name.0', 'اسم ولي الأمر مطلوب.');
+        $this->assertNull($student->fresh()->guardian_name);
+    }
+
+    public function test_guardian_phone_is_required(): void
+    {
+        $user = User::factory()->student()->create();
+        $field = CourseField::create(['code' => 'f-'.uniqid(), 'name_ar' => 'مجال']);
+        $student = Student::create(['user_id' => $user->id, 'education_type' => 'training']);
+        $token = $user->createToken('t')->plainTextToken;
+
+        $response = $this->as($token)->putJson("/api/students/{$student->id}", [
+            'education_type' => 'training',
+            'course_field_id' => $field->id,
+            'level' => 'beginner',
+            'guardian_name' => 'أبو الطالب',
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJsonPath('errors.guardian_phone.0', 'رقم هاتف ولي الأمر مطلوب.');
+        $this->assertNull($student->fresh()->guardian_phone);
     }
 
     public function test_grade_rejects_non_numeric_values(): void
@@ -146,6 +185,7 @@ class UpdateStudentProfileTest extends TestCase
             'curriculum_id' => $curriculum->id,
             'stage_id' => $stage->id,
             'grade' => 7,
+            'guardian_name' => 'أبو الطالب',
             'guardian_phone' => '+966555123456',
         ])->assertStatus(200);
 
@@ -166,6 +206,8 @@ class UpdateStudentProfileTest extends TestCase
             'course_field_id' => $field->id,
             'level' => 'beginner',
             'birth_date' => now()->subYears(18)->toDateString(),
+            'guardian_name' => 'أبو الطالب',
+            'guardian_phone' => '0590000000',
         ])->assertStatus(200);
 
         $this->assertSame(now()->subYears(18)->toDateString(), $student->fresh()->birth_date->toDateString());
