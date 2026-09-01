@@ -205,6 +205,115 @@ class RescheduleFlowTest extends TestCase
         $response->assertStatus(403);
     }
 
+    /**
+     * لم يكن أي تغيير موعد يتحقق من تعارض الموعد الجديد إطلاقاً — يمكن نقل
+     * جلسة لتطابق تماماً جلسة أخرى من نفس الحجز (نفس المعلم ونفس الطالب) بلا
+     * أي رفض. راجع RescheduleService::assertNewTimeHasNoConflict.
+     */
+    public function test_requesting_a_reschedule_that_would_overlap_a_sibling_session_of_the_same_booking_is_rejected(): void
+    {
+        $teacherUser = User::factory()->teacher()->create(['timezone' => 'UTC']);
+        $teacher = Teacher::create(['user_id' => $teacherUser->id, 'teacher_type' => 'school', 'status' => 'verified']);
+        $teacherToken = $teacherUser->createToken('t')->plainTextToken;
+
+        $subject = Subject::create(['code' => 'rs-'.uniqid(), 'name_ar' => 'مادة']);
+        $package = Package::create([
+            'teacher_id' => $teacher->id,
+            'title' => 'باقة بجلستين',
+            'subject_id' => $subject->id,
+            'session_format' => 'individual',
+            'capacity' => 1,
+            'sessions_count' => 2,
+            'teacher_price' => 100,
+            'platform_margin_percent' => 60,
+            'student_price' => 160,
+            'platform_revenue' => 60,
+            'status' => 'active',
+            'approved_at' => now(),
+        ]);
+
+        $studentUser = User::factory()->student()->create(['timezone' => 'UTC']);
+        $student = Student::create(['user_id' => $studentUser->id, 'education_type' => 'school']);
+
+        $booking = Booking::create([
+            'reference' => 'BK-'.strtoupper(uniqid()),
+            'student_id' => $student->id,
+            'teacher_id' => $teacher->id,
+            'package_id' => $package->id,
+            'amount_paid' => 160,
+            'teacher_amount' => 100,
+            'platform_amount' => 60,
+            'margin_percent_snapshot' => 60,
+            'sessions_total' => 2,
+            'sessions_remaining' => 2,
+            'status' => 'confirmed',
+        ]);
+
+        $sessionA = $booking->sessions()->create(['teacher_id' => $teacher->id, 'sequence_no' => 1, 'scheduled_at' => now()->addDays(5), 'duration_min' => 60, 'status' => 'scheduled']);
+        $sessionB = $booking->sessions()->create(['teacher_id' => $teacher->id, 'sequence_no' => 2, 'scheduled_at' => now()->addDays(6), 'duration_min' => 60, 'status' => 'scheduled']);
+        SessionAttendee::create(['class_session_id' => $sessionA->id, 'student_id' => $student->id, 'booking_id' => $booking->id, 'attendance' => 'registered']);
+        SessionAttendee::create(['class_session_id' => $sessionB->id, 'student_id' => $student->id, 'booking_id' => $booking->id, 'attendance' => 'registered']);
+
+        $response = $this->as($teacherToken)->postJson("/api/class-sessions/{$sessionA->id}/reschedule-requests", [
+            'proposed_scheduled_at' => $sessionB->scheduled_at->toDateTimeString(),
+            'reason' => 'محاولة تطابق مع جلسة أخرى من نفس الباقة',
+        ]);
+
+        $when = $sessionB->scheduled_at->copy()->setTimezone('UTC')->format('Y-m-d H:i');
+        $response->assertStatus(422)
+            ->assertJsonPath('errors.schedule.0', "لا يمكن الحجز — يوجد بالفعل حجز آخر بين هذا المعلم وهذا الطالب في نفس هذا التوقيت ({$when}).");
+
+        $this->assertDatabaseMissing('reschedule_requests', ['class_session_id' => $sessionA->id]);
+    }
+
+    /**
+     * فحص approve() مستقل عن فحص request() — تعارض ظهر بعد تقديم الطلب (سباق
+     * واقعي) يجب أن يمنع الموافقة أيضاً، لا فقط لحظة تقديم الطلب نفسها.
+     */
+    public function test_approving_a_reschedule_is_rejected_if_a_conflict_appeared_after_the_request_was_made(): void
+    {
+        [$teacher, $teacherToken] = $this->createVerifiedTeacher();
+        $session = $this->createSession($teacher, now()->addDays(5));
+        $studentUser = $session->booking->student->user;
+        $proposedAt = now()->addDays(6);
+
+        $create = $this->as($teacherToken)->postJson("/api/class-sessions/{$session->id}/reschedule-requests", [
+            'proposed_scheduled_at' => $proposedAt->toDateTimeString(),
+            'reason' => 'سبب',
+        ]);
+        $requestId = $create->json('data.id');
+
+        // بين تقديم الطلب والموافقة، يُنشأ للطالب نفسه حجز آخر (معلم مختلف تماماً) بنفس التوقيت المقترح تماماً
+        [$otherTeacher] = $this->createVerifiedTeacher();
+        $otherSubject = Subject::create(['code' => 'rs-'.uniqid(), 'name_ar' => 'مادة أخرى']);
+        $otherPackage = Package::create([
+            'teacher_id' => $otherTeacher->id, 'title' => 'باقة أخرى', 'subject_id' => $otherSubject->id,
+            'session_format' => 'individual', 'capacity' => 1, 'sessions_count' => 1,
+            'teacher_price' => 100, 'platform_margin_percent' => 60, 'student_price' => 160, 'platform_revenue' => 60,
+            'status' => 'active', 'approved_at' => now(),
+        ]);
+        $student = $session->booking->student;
+        $otherBooking = Booking::create([
+            'reference' => 'BK-'.strtoupper(uniqid()), 'student_id' => $student->id, 'teacher_id' => $otherTeacher->id,
+            'package_id' => $otherPackage->id, 'amount_paid' => 160, 'teacher_amount' => 100, 'platform_amount' => 60,
+            'margin_percent_snapshot' => 60, 'sessions_total' => 1, 'sessions_remaining' => 1, 'status' => 'confirmed',
+        ]);
+        $otherSession = $otherBooking->sessions()->create(['teacher_id' => $otherTeacher->id, 'sequence_no' => 1, 'scheduled_at' => $proposedAt, 'duration_min' => 60, 'status' => 'scheduled']);
+        SessionAttendee::create(['class_session_id' => $otherSession->id, 'student_id' => $student->id, 'booking_id' => $otherBooking->id, 'attendance' => 'registered']);
+
+        [, $adminToken] = $this->createAdmin();
+        $approve = $this->as($adminToken)->postJson("/api/reschedule-requests/{$requestId}/approve");
+
+        $approve->assertStatus(422)->assertJsonPath('errors.schedule.0', function ($message) {
+            return str_contains($message, 'جلسة أخرى مؤكدة');
+        });
+
+        $this->assertSame(
+            $session->scheduled_at->toDateTimeString(),
+            $session->fresh()->scheduled_at->toDateTimeString(),
+        );
+    }
+
     public function test_second_request_is_blocked_while_first_still_pending(): void
     {
         [$teacher, $teacherToken] = $this->createVerifiedTeacher();

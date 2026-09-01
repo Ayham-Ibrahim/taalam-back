@@ -23,7 +23,33 @@ class RescheduleService
     public function __construct(
         private readonly SettingsService $settings,
         private readonly NotificationService $notifications,
+        private readonly ScheduleConflictService $conflicts,
     ) {}
+
+    /**
+     * لم يكن أي تغيير موعد (طلب أو موافقة) يتحقق من تعارض الموعد الجديد إطلاقاً
+     * — يمكن نقل جلسة لتتطابق تماماً مع جلسة أخرى لنفس الطالب/المعلم (حتى لو
+     * كانت الجلسة الأخرى من نفس الباقة تحديداً) بلا أي رفض. يوازي فحص
+     * ScheduleConflictService المستخدَم في كل مسارات إنشاء الحجز — الجلسة نفسها
+     * تُستبعَد من فحصها (excludeSessionIds) فلا "تتعارض مع نفسها".
+     *
+     * الطالب المرجعي هو طالب الحجز نفسه (booking.student) — نفس نمط
+     * resolvePaymentStatus() أعلاه — لا حضور الجلسة (attendees)؛ تغيير الموعد
+     * أصلاً مقصور على باقات فردية فقط (request() يرفض الجماعية صراحة)، فحجز
+     * الجلسة له طالب واحد محدَّد دوماً. assertNoConflict() تتحقق من جانب
+     * المعلم أيضاً ضمن استعلامها الداخلي بصرف النظر عن الطالب المُمرَّر، فتُغطي
+     * الحالتين معاً بنداء واحد.
+     */
+    private function assertNewTimeHasNoConflict(ClassSession $session, Carbon $newTime): void
+    {
+        $student = $session->loadMissing('booking.student')->booking?->student;
+
+        if (! $student) {
+            return;
+        }
+
+        $this->conflicts->assertNoConflict($student, $session->teacher_id, [$newTime], $session->duration_min, [$session->id]);
+    }
 
     public function request(ClassSession $session, User $requester, string $requesterRole, Carbon $proposedAt, ?string $reason = null): RescheduleRequest
     {
@@ -53,6 +79,7 @@ class RescheduleService
         }
 
         $this->assertSessionIsPaid($session, $requester, $requesterRole);
+        $this->assertNewTimeHasNoConflict($session, $proposedAt);
 
         $freeWindowHours = (int) $this->settings->get('reschedule_free_window_hours', 24);
         $hoursBeforeSession = max(0, now()->diffInHours($session->scheduled_at, false));
@@ -206,6 +233,10 @@ class RescheduleService
 
         $rescheduleRequest->loadMissing('session');
         $session = $rescheduleRequest->session;
+
+        // فحص ملزم مستقل عن فحص request() — الوقت بينهما قد يشهد حجوزاً آخر
+        // يتعارض مع نفس هذا الموعد المقترح (نفس مبدأ إعادة الفحص عند approveIndividualRequest).
+        $this->assertNewTimeHasNoConflict($session, $newTime);
 
         $session->update([
             'original_scheduled_at' => $session->original_scheduled_at ?? $session->scheduled_at,
