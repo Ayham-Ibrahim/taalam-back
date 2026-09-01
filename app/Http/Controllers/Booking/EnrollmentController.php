@@ -34,6 +34,8 @@ class EnrollmentController extends Controller
                 'course.curricula:id,name_ar',
                 'teacher:id,user_id',
                 'teacher.user:id,name,avatar_path',
+                'student:id,user_id',
+                'student.user:id,name,avatar_path',
             ])
             ->visibleTo($user)
             ->when($request->filled('student_id'), fn ($q) => $q->where('student_id', $request->integer('student_id')))

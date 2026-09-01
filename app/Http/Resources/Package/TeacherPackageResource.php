@@ -18,6 +18,7 @@ class TeacherPackageResource extends JsonResource
             'title' => $this->title,
             'description' => $this->description,
             'subject_id' => $this->subject_id,
+            'subject' => $this->whenLoaded('subject', fn () => $this->subject?->name_ar),
             'session_format' => $this->session_format,
             'capacity' => $this->capacity,
             'enrolled_count' => $this->enrolled_count,
