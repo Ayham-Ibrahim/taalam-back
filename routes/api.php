@@ -170,8 +170,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('complaints/{complaint}/resolve', [ComplaintController::class, 'resolve']);
     Route::post('complaints/{complaint}/escalate', [ComplaintController::class, 'escalate']);
 
+    // ترتيب مقصود: export مسار حرفي ثابت — يجب تسجيله قبل payouts/{payout} كي
+    // لا يحاول Route Model Binding مطابقة "export" كأنه معرّف مستحقات رقمي.
+    Route::get('payouts/export', [PayoutController::class, 'export']);
     Route::get('payouts', [PayoutController::class, 'index']);
     Route::get('payouts/{payout}', [PayoutController::class, 'show']);
+    Route::get('payouts/{payout}/invoice', [PayoutController::class, 'downloadInvoice']);
     Route::post('teachers/{teacher}/payouts/generate', [PayoutController::class, 'generate']);
     Route::post('payouts/{payout}/approve', [PayoutController::class, 'approve']);
     Route::post('payouts/{payout}/mark-paid', [PayoutController::class, 'markPaid']);

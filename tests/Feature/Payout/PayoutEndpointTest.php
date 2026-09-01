@@ -56,6 +56,84 @@ class PayoutEndpointTest extends TestCase
         $response->assertStatus(422);
     }
 
+    public function test_invoice_is_rejected_for_a_pending_payout_and_available_once_approved(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $adminToken = $admin->createToken('t')->plainTextToken;
+
+        $teacherUser = User::factory()->teacher()->create();
+        $teacher = Teacher::create(['user_id' => $teacherUser->id, 'teacher_type' => 'school', 'status' => 'verified']);
+        $this->createCompletedPackageSession($teacher, teacherPrice: 100, sessionsTotal: 4);
+
+        $generate = $this->as($adminToken)->postJson(
+            "/api/teachers/{$teacher->id}/payouts/generate",
+            ['period_start' => now()->subDay()->toDateString(), 'period_end' => now()->addDay()->toDateString()],
+        );
+        $payoutId = $generate->json('data.id');
+
+        $this->as($adminToken)->getJson("/api/payouts/{$payoutId}/invoice")->assertStatus(422);
+
+        $this->as($adminToken)->postJson("/api/payouts/{$payoutId}/approve")->assertStatus(200);
+
+        $response = $this->as($adminToken)->get("/api/payouts/{$payoutId}/invoice");
+        $response->assertStatus(200);
+        $response->assertHeader('content-type', 'application/pdf');
+    }
+
+    public function test_teacher_can_download_their_own_approved_payout_invoice_but_not_another_teachers(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $adminToken = $admin->createToken('t')->plainTextToken;
+
+        $teacherUser = User::factory()->teacher()->create();
+        $teacher = Teacher::create(['user_id' => $teacherUser->id, 'teacher_type' => 'school', 'status' => 'verified']);
+        $this->createCompletedPackageSession($teacher, teacherPrice: 100, sessionsTotal: 4);
+
+        $generate = $this->as($adminToken)->postJson(
+            "/api/teachers/{$teacher->id}/payouts/generate",
+            ['period_start' => now()->subDay()->toDateString(), 'period_end' => now()->addDay()->toDateString()],
+        );
+        $payoutId = $generate->json('data.id');
+        $this->as($adminToken)->postJson("/api/payouts/{$payoutId}/approve")->assertStatus(200);
+
+        $this->as($teacherUser->createToken('t')->plainTextToken)
+            ->get("/api/payouts/{$payoutId}/invoice")
+            ->assertStatus(200)
+            ->assertHeader('content-type', 'application/pdf');
+
+        $otherTeacherUser = User::factory()->teacher()->create();
+        Teacher::create(['user_id' => $otherTeacherUser->id, 'teacher_type' => 'school', 'status' => 'verified']);
+
+        $this->as($otherTeacherUser->createToken('t')->plainTextToken)
+            ->getJson("/api/payouts/{$payoutId}/invoice")
+            ->assertStatus(403);
+    }
+
+    public function test_admin_can_export_payouts_to_excel_but_a_teacher_cannot(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $adminToken = $admin->createToken('t')->plainTextToken;
+
+        $teacherUser = User::factory()->teacher()->create();
+        $teacher = Teacher::create(['user_id' => $teacherUser->id, 'teacher_type' => 'school', 'status' => 'verified']);
+        $this->createCompletedPackageSession($teacher, teacherPrice: 100, sessionsTotal: 4);
+        $this->as($adminToken)->postJson(
+            "/api/teachers/{$teacher->id}/payouts/generate",
+            ['period_start' => now()->subDay()->toDateString(), 'period_end' => now()->addDay()->toDateString()],
+        )->assertStatus(201);
+
+        $response = $this->as($adminToken)->get('/api/payouts/export');
+        $response->assertStatus(200);
+        $response->assertHeader(
+            'content-type',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        );
+
+        $this->as($teacherUser->createToken('t')->plainTextToken)
+            ->getJson('/api/payouts/export')
+            ->assertStatus(403);
+    }
+
     public function test_mark_paid_requires_a_transfer_reference_and_succeeds_when_provided(): void
     {
         $admin = User::factory()->admin()->create();

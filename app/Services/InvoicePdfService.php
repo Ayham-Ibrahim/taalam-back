@@ -4,6 +4,8 @@ namespace App\Services;
 
 use App\Models\Booking;
 use App\Models\Enrollment;
+use App\Models\Payout;
+use App\Models\PayoutItem;
 use Mpdf\Mpdf;
 use Mpdf\Output\Destination;
 use RuntimeException;
@@ -70,6 +72,55 @@ class InvoicePdfService
         ]);
     }
 
+    /**
+     * كشف مستحقات (لا فاتورة طالب) — لا معنى له قبل الاعتماد (pending قابلة
+     * للتعديل بالكامل، لا رقم رسمي يُصدَر عنها بعد). قالب منفصل عن invoices.pdf
+     * (بند واحد ثابت) لأن كشف المستحقات يحتاج سطراً لكل جلسة ضمن الفترة.
+     */
+    public function forPayout(Payout $payout): string
+    {
+        if (! in_array($payout->status, ['approved', 'paid'], true)) {
+            throw new RuntimeException('لا يتوفر كشف مستحقات قبل اعتمادها');
+        }
+
+        $payout->loadMissing(['teacher.user', 'items.session.course', 'items.session.booking.package']);
+
+        $items = $payout->items->map(function (PayoutItem $item) {
+            $session = $item->session;
+
+            return [
+                'date' => $session?->scheduled_at?->format('Y-m-d') ?? '—',
+                'title' => $session?->course?->title ?? $session?->booking?->package?->title ?? '—',
+                'amount' => (float) $item->amount,
+            ];
+        });
+
+        return $this->render([
+            'payoutId' => $payout->id,
+            'teacherName' => $payout->teacher?->user?->name,
+            'periodStart' => $payout->period_start->format('Y-m-d'),
+            'periodEnd' => $payout->period_end->format('Y-m-d'),
+            'issueDate' => ($payout->paid_at ?? $payout->approved_at ?? $payout->created_at)->format('Y-m-d'),
+            'sessionsCount' => $payout->sessions_count,
+            'items' => $items,
+            'grossAmount' => (float) $payout->gross_amount,
+            'deductions' => (float) $payout->deductions,
+            'netAmount' => (float) $payout->net_amount,
+            'currency' => $payout->currency,
+            'statusLabel' => $this->payoutStatusLabel($payout->status),
+            'transferReference' => $payout->transfer_reference,
+        ], 'invoices.payout-pdf');
+    }
+
+    private function payoutStatusLabel(string $status): string
+    {
+        return match ($status) {
+            'approved' => 'معتمدة',
+            'paid' => 'مدفوعة',
+            default => $status,
+        };
+    }
+
     private function paidAt(Booking|Enrollment $record): string
     {
         $paidAt = $record->payments->firstWhere('status', 'paid')?->paid_at ?? $record->confirmed_at ?? $record->created_at;
@@ -86,7 +137,7 @@ class InvoicePdfService
         };
     }
 
-    private function render(array $data): string
+    private function render(array $data, string $view = 'invoices.pdf'): string
     {
         $data['logoDataUri'] = $this->logoDataUri();
 
@@ -101,7 +152,7 @@ class InvoicePdfService
             'autoLangToFont' => true,
         ]);
         $mpdf->SetDirectionality('rtl');
-        $mpdf->WriteHTML(view('invoices.pdf', $data)->render());
+        $mpdf->WriteHTML(view($view, $data)->render());
 
         return $mpdf->Output('', Destination::STRING_RETURN);
     }
