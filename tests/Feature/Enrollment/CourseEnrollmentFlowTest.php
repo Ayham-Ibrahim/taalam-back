@@ -152,6 +152,24 @@ class CourseEnrollmentFlowTest extends TestCase
         ]);
     }
 
+    /**
+     * لا شيء كان يمنع التسجيل في دورة انتهت جلساتها فعلياً (end_date في
+     * الماضي) طالما بقيت status='active' — يوازي Package::isBookable() الذي
+     * يمنع حجز باقة جماعية منتهية بنفس المنطق.
+     */
+    public function test_enrolling_in_a_course_whose_end_date_has_passed_is_rejected(): void
+    {
+        [$center] = $this->createVerifiedCenter();
+        $start = Carbon::now()->subDays(20)->startOfDay();
+        $end = Carbon::now()->subDays(6)->startOfDay();
+        $course = $this->createActiveCourse($center, teacherPrice: 100, margin: 50, start: $start, end: $end);
+
+        $student = $this->createStudent();
+
+        $this->expectException(ValidationException::class);
+        app(EnrollmentService::class)->initiateEnrollment($student, $course);
+    }
+
     public function test_course_fills_to_capacity_and_rejects_further_enrollment(): void
     {
         [$center] = $this->createVerifiedCenter();

@@ -66,13 +66,19 @@ class PackageController extends Controller
      * تصفح عام لباقات معلم موثّق النشطة فقط (للحجز) — بيانات غير حساسة، بلا Policy
      * خاص، بنفس منطق TeacherSearchController العام. المعلم غير الموثّق لا تظهر باقاته.
      */
+    /**
+     * عمداً status='active' فقط، لا scopeBookable() — باقة جماعية انتهت كل
+     * جلساتها يجب أن تبقى ظاهرة للطالب موسومة "منتهية" (PackagesSection.jsx
+     * يعرض هذا الوسم فعلاً)، لا أن تختفي بصمت من القائمة. المنع الفعلي من
+     * الحجز يبقى عبر Package::isBookable() في BookingService/busySlots، لا هنا.
+     */
     public function indexForTeacher(Teacher $teacher)
     {
         abort_unless($teacher->isVerified(), 404);
 
         $packages = Package::query()
             ->where('teacher_id', $teacher->id)
-            ->bookable()
+            ->where('status', 'active')
             ->with(['subject:id,name_ar', 'stages', 'schedules'])
             ->latest()
             ->paginate(20);
@@ -115,10 +121,21 @@ class PackageController extends Controller
         $dayStart = Carbon::parse($date, $timezone)->startOfDay()->setTimezone(config('app.timezone'));
         $dayEnd = $dayStart->copy()->addDay();
 
+        /**
+         * كان الاستعلام يعتمد على status=scheduled/active وحدها — صف class_sessions
+         * يبقى بهذه الحالة إلى الأبد حتى بعد انتهاء مهلة دفع حجزه (expired) أو
+         * إلغائه، فتظهر "جلسات شبح" غير حقيقية كأوقات مشغولة (أوقات مكررة/غير
+         * موجودة فعلياً في جدول المعلم). نفس شرط "التزام قائم فعلاً" المستخدَم في
+         * ClassSession::visibleTo وScheduleConflictService بالضبط — راجعهما.
+         */
         $sessions = ClassSession::where('teacher_id', $package->teacher_id)
             ->whereIn('status', ['scheduled', 'active'])
             ->whereBetween('scheduled_at', [$dayStart, $dayEnd])
-            ->get(['scheduled_at', 'duration_min']);
+            ->where(fn ($q) => $q->whereDoesntHave('attendees')
+                ->orWhereHas('attendees', fn ($a) => ClassSession::constrainToLiveAttendee($a)))
+            ->get(['scheduled_at', 'duration_min'])
+            ->filter(fn (ClassSession $session) => $session->scheduled_at->copy()->addMinutes($session->duration_min)->gt(now()))
+            ->values();
 
         return $this->success($sessions->map(fn (ClassSession $session) => [
             'start' => $session->scheduled_at->toIso8601String(),

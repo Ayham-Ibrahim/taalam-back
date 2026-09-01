@@ -269,6 +269,71 @@ class ScheduleConflictTest extends TestCase
         );
     }
 
+    /**
+     * الفحص عبر الأنواع من جهة المعلم تحديداً (لا الطالب) — لم يكن له اختبار
+     * صريح رغم أن الاستعلام نفسه بلا تمييز نوع أصلاً (booking_id فردي/جماعي
+     * أو course_id، كلاهما teacher_id مباشر على class_sessions). يثبت هذا أن
+     * جلسة قائمة من باقة فردية تمنع طالباً آخر تماماً من الانضمام لباقة
+     * جماعية لنفس المعلم في نفس اللحظة.
+     */
+    public function test_joining_a_group_package_is_rejected_when_it_overlaps_the_teachers_existing_individual_session(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        $individualPackage = $this->createActiveIndividualPackage($teacher, teacherPrice: 100, margin: 60, sessionsCount: 1);
+        $nextWednesday = Carbon::now()->next(3);
+        $individualPackage->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
+
+        $existingStudent = $this->createStudent();
+        $admin = User::factory()->admin()->create();
+        app(BookingService::class)->createManualBooking(
+            $existingStudent, $individualPackage, $admin, 'حجز فردي قائم', [['date' => $nextWednesday->toDateString(), 'start_time' => '13:00']],
+        );
+
+        // طالب آخر تماماً يحاول الانضمام لباقة جماعية لنفس المعلم بنفس اللحظة
+        $groupPackage = $this->createActiveGroupPackage($teacher, capacity: 10, sessionsCount: 1, teacherPrice: 100, margin: 60);
+        $groupPackage->schedules()->create([
+            'date' => $nextWednesday->toDateString(),
+            'day_of_week' => $nextWednesday->dayOfWeek,
+            'start_time' => '13:00',
+            'end_time' => '14:00',
+        ]);
+        $joiningStudent = $this->createStudent();
+
+        $this->expectException(ValidationException::class);
+        $this->expectExceptionMessage($this->teacherConflictMessage(Carbon::parse($nextWednesday->toDateString())->setTime(13, 0)));
+
+        app(BookingService::class)->joinGroupPackage($joiningStudent, $groupPackage);
+    }
+
+    /** نظير الاختبار السابق بالاتجاه المعاكس: جلسة جماعية قائمة تمنع حجزاً فردياً لاحقاً لنفس المعلم بنفس اللحظة */
+    public function test_an_individual_booking_is_rejected_when_it_overlaps_the_teachers_existing_group_session(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        $nextWednesday = Carbon::now()->next(3);
+
+        $groupPackage = $this->createActiveGroupPackage($teacher, capacity: 10, sessionsCount: 1, teacherPrice: 100, margin: 60);
+        $groupPackage->schedules()->create([
+            'date' => $nextWednesday->toDateString(),
+            'day_of_week' => $nextWednesday->dayOfWeek,
+            'start_time' => '13:00',
+            'end_time' => '14:00',
+        ]);
+        $groupStudent = $this->createStudent();
+        app(BookingService::class)->joinGroupPackage($groupStudent, $groupPackage);
+
+        $individualPackage = $this->createActiveIndividualPackage($teacher, teacherPrice: 100, margin: 60, sessionsCount: 1);
+        $individualPackage->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
+        $admin = User::factory()->admin()->create();
+        $otherStudent = $this->createStudent();
+
+        $this->expectException(ValidationException::class);
+        $this->expectExceptionMessage($this->teacherConflictMessage(Carbon::parse($nextWednesday->toDateString())->setTime(13, 0)));
+
+        app(BookingService::class)->createManualBooking(
+            $otherStudent, $individualPackage, $admin, 'حجز فردي متعارض مع باقة جماعية', [['date' => $nextWednesday->toDateString(), 'start_time' => '13:00']],
+        );
+    }
+
     public function test_a_session_of_a_cancelled_or_expired_booking_no_longer_blocks_the_same_slot(): void
     {
         [$teacherA] = $this->createVerifiedTeacher();

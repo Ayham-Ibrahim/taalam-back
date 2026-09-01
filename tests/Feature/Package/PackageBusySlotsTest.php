@@ -9,6 +9,7 @@ use App\Models\Student;
 use App\Models\Subject;
 use App\Models\Teacher;
 use App\Models\User;
+use App\Services\BookingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Tests\TestCase;
@@ -99,6 +100,75 @@ class PackageBusySlotsTest extends TestCase
 
         $response->assertStatus(200);
         $this->assertCount(0, $response->json('data'));
+    }
+
+    /**
+     * "جلسة شبح": صف class_sessions يبقى scheduled إلى الأبد بعد انتهاء مهلة
+     * دفع حجزه (BookingService::expireStalePendingPayments لا يلمس الجلسات
+     * إطلاقاً) — يجب ألا تُحتسَب كوقت مشغول حقيقي، وإلا ظهرت للطالب أوقات
+     * "غير متاحة" لا تقابل أي جلسة فعلية في جدول المعلم.
+     */
+    public function test_a_session_of_an_expired_booking_is_not_counted_as_busy(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        $package = $this->createActiveIndividualPackage($teacher);
+        $student = $this->createStudent();
+        $admin = User::factory()->admin()->create();
+
+        $day = Carbon::now('UTC')->addWeek()->startOfDay();
+        $package->schedules()->create(['day_of_week' => $day->dayOfWeek]);
+        $booking = app(BookingService::class)->createManualBooking(
+            $student, $package, $admin, 'حجز سينتهي', [['date' => $day->toDateString(), 'start_time' => '10:00']],
+        );
+        // الجلسة تبقى scheduled كما هي — فقط الحجز نفسه ينتهي (نفس أثر expireStalePendingPayments)
+        $booking->update(['status' => 'expired']);
+        // enrolled_count لا يُخفَّض تلقائياً عند انتهاء حجز (فجوة منفصلة معروفة) —
+        // نعزل هذا الاختبار عنها كي لا يُحجَب الوصول للـ endpoint بحجة status='full'
+        $package->update(['enrolled_count' => 0]);
+
+        $studentToken = User::find($student->user_id)->createToken('t')->plainTextToken;
+        $response = $this->as($studentToken)->getJson(
+            "/api/packages/{$package->id}/busy-slots?date=".$day->toDateString()
+        );
+
+        $response->assertStatus(200);
+        $this->assertCount(0, $response->json('data'));
+    }
+
+    /**
+     * سبب الأزواج المكرَّرة تحديداً: انتهاء حجز أول لا يمنع تعارض جدولة (نفس
+     * قاعدة ScheduleConflictService)، فيحجز طالب آخر نفس الموعد بالضبط —
+     * جلسة شبح + جلسة حقيقية بنفس الوقت معاً. يجب أن تظهر مرة واحدة فقط.
+     */
+    public function test_a_real_session_at_the_same_time_as_an_expired_ghost_appears_only_once(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        $package = $this->createActiveIndividualPackage($teacher);
+        $ghostStudent = $this->createStudent();
+        $realStudent = $this->createStudent();
+        $admin = User::factory()->admin()->create();
+
+        $day = Carbon::now('UTC')->addWeek()->startOfDay();
+        $package->schedules()->create(['day_of_week' => $day->dayOfWeek]);
+        $ghostBooking = app(BookingService::class)->createManualBooking(
+            $ghostStudent, $package, $admin, 'حجز سينتهي', [['date' => $day->toDateString(), 'start_time' => '10:00']],
+        );
+        $ghostBooking->update(['status' => 'expired']);
+        $package->update(['enrolled_count' => 0]);
+
+        $otherPackage = $this->createActiveIndividualPackage($teacher);
+        $otherPackage->schedules()->create(['day_of_week' => $day->dayOfWeek]);
+        app(BookingService::class)->createManualBooking(
+            $realStudent, $otherPackage, $admin, 'حجز حقيقي بنفس الموعد', [['date' => $day->toDateString(), 'start_time' => '10:00']],
+        );
+
+        $viewerToken = User::find($this->createStudent()->user_id)->createToken('t')->plainTextToken;
+        $response = $this->as($viewerToken)->getJson(
+            "/api/packages/{$package->id}/busy-slots?date=".$day->toDateString()
+        );
+
+        $response->assertStatus(200);
+        $this->assertCount(1, $response->json('data'));
     }
 
     /**

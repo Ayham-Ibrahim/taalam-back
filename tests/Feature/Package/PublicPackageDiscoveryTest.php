@@ -35,7 +35,13 @@ class PublicPackageDiscoveryTest extends TestCase
         $this->assertArrayNotHasKey('teacher_price', $response->json('data.0'));
     }
 
-    public function test_a_group_package_whose_schedule_dates_all_passed_is_hidden_from_the_listing(): void
+    /**
+     * عمداً لا تُخفى — الطالب يجب أن يرى الباقة الجماعية المنتهية موسومة
+     * "انتهت" (PackagesSection.jsx) بدل اختفائها بصمت، فيعرف أنها انتهت
+     * تحديداً بدل ألا يجد لها أثراً إطلاقاً. المنع الفعلي من الحجز يبقى قائماً
+     * عبر Package::isBookable() في مسار الحجز نفسه، لا في هذه القائمة.
+     */
+    public function test_a_group_package_whose_schedule_dates_all_passed_still_appears_in_the_listing(): void
     {
         [$teacher] = $this->createVerifiedTeacher();
 
@@ -47,6 +53,8 @@ class PublicPackageDiscoveryTest extends TestCase
         $futureGroup = $this->createGroupPackage($teacher);
         $futureGroup->schedules()->create(['date' => now()->addDays(5)->toDateString(), 'day_of_week' => 1, 'start_time' => '09:00', 'end_time' => '10:00']);
 
+        $draftPackage = $this->createIndividualPackage($teacher, status: 'draft');
+
         $student = $this->createStudent();
         $studentToken = User::find($student->user_id)->createToken('t')->plainTextToken;
 
@@ -56,7 +64,8 @@ class PublicPackageDiscoveryTest extends TestCase
         $ids = collect($response->json('data'))->pluck('id');
         $this->assertTrue($ids->contains($activeIndividual->id));
         $this->assertTrue($ids->contains($futureGroup->id));
-        $this->assertFalse($ids->contains($expiredGroup->id));
+        $this->assertTrue($ids->contains($expiredGroup->id));
+        $this->assertFalse($ids->contains($draftPackage->id));
     }
 
     public function test_packages_of_unverified_teacher_are_not_discoverable(): void

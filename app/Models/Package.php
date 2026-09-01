@@ -105,6 +105,17 @@ class Package extends Model
      * فيها موعد جلسة قابل للانضمام (كل جلساتها في الماضي)، فهي "منتهية" فعلياً حتى
      * لو بقيت status='active'. الفردية لا جدول تواريخ لها (الطالب يختار مواعيد
      * مستقبلية لاحقاً) فلا تنتهي بهذا المعنى.
+     *
+     * لا يوجد حالياً أي إجراء فعلي في المنصة يُلغي جلسة واحدة بمعزل عن الحجز
+     * كاملاً (status='cancelled' على class_sessions قيمة موجودة في المخطط
+     * بلا أي كود يكتبها) — لكن إن حدث ذلك (تعديل يدوي، أو ميزة مستقبلية)، كانت
+     * package_schedules (تاريخ الجدول فقط) منفصلة تماماً عن class_sessions
+     * الفعلية المتولّدة منها، فتبقى الباقة الجماعية "متاحة للحجز" ظاهرياً رغم
+     * أن جلستها الوحيدة الفعلية ملغاة — فينضم طالب جديد إليها فعلياً (راجع
+     * BookingService::sessionsFor الذي يُعيد استخدام الجلسات المولَّدة سابقاً
+     * دون أي فلترة على status). الفحص هنا يغلق هذه الفجوة: إن كانت الجلسات
+     * الفعلية قد تولَّدت مسبقاً لهذه الباقة (حجز سابق)، يجب أن تبقى واحدة على
+     * الأقل غير ملغاة.
      */
     public function isBookable(): bool
     {
@@ -116,10 +127,16 @@ class Package extends Model
             return true;
         }
 
-        return $this->schedules()
+        $hasFutureSchedule = $this->schedules()
             ->whereNotNull('date')
             ->whereDate('date', '>=', now()->toDateString())
             ->exists();
+
+        if (! $hasFutureSchedule) {
+            return false;
+        }
+
+        return ! $this->generatedSessionsAllCancelled();
     }
 
     /** نظير isBookable() على مستوى الاستعلام — لإخفاء الباقات المنتهية من قوائم الطالب والبحث. */
@@ -128,10 +145,24 @@ class Package extends Model
         return $query->where('status', 'active')
             ->where(fn (Builder $q) => $q
                 ->where('session_format', 'individual')
-                ->orWhereHas('schedules', fn (Builder $s) => $s
-                    ->whereNotNull('date')
-                    ->whereDate('date', '>=', now()->toDateString())
+                ->orWhere(fn (Builder $group) => $group
+                    ->whereHas('schedules', fn (Builder $s) => $s
+                        ->whereNotNull('date')
+                        ->whereDate('date', '>=', now()->toDateString())
+                    )
+                    ->where(fn (Builder $notAllCancelled) => $notAllCancelled
+                        ->whereDoesntHave('bookings.sessions')
+                        ->orWhereHas('bookings.sessions', fn (Builder $cs) => $cs->where('status', '!=', 'cancelled'))
+                    )
                 )
             );
+    }
+
+    private function generatedSessionsAllCancelled(): bool
+    {
+        $generated = $this->bookings()->whereHas('sessions');
+
+        return $generated->exists()
+            && ! $this->bookings()->whereHas('sessions', fn (Builder $q) => $q->where('status', '!=', 'cancelled'))->exists();
     }
 }

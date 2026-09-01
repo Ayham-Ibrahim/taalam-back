@@ -131,9 +131,9 @@ class EnrollmentService
 
     private function assertCourseEnrollable(Course $course): void
     {
-        if ($course->status !== 'active') {
+        if (! $course->isBookable()) {
             throw ValidationException::withMessages([
-                'course' => ['هذه الدورة غير متاحة للتسجيل حالياً'],
+                'course' => ['هذه الدورة غير متاحة للتسجيل حالياً — إما غير نشطة أو انتهت جلساتها'],
             ]);
         }
 

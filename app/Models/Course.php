@@ -112,4 +112,18 @@ class Course extends Model
     {
         return $this->hasMany(ClassSession::class);
     }
+
+    /**
+     * يوازي Package::isBookable() — الدورة تنتهي فعلياً بانتهاء end_date حتى لو
+     * بقيت status='active' (لا شيء يبدّل الحالة تلقائياً بمرور الوقت). لا شيء
+     * كان يمنع تسجيل طالب في دورة منتهية فعلياً قبل هذا.
+     */
+    public function isBookable(): bool
+    {
+        if ($this->status !== 'active') {
+            return false;
+        }
+
+        return $this->end_date === null || $this->end_date->toDateString() >= now()->toDateString();
+    }
 }
