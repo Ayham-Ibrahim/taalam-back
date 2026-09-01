@@ -154,10 +154,14 @@ class BigBlueButtonService
                 }
 
                 $meetingId = (string) $recording->meetingID;
-                $format = $recording->playback->format;
+                $format = null;
 
-                // presentation هو التنسيق القياسي المطلوب للعرض في المتصفح — إن
-                // توفّرت عدة تنسيقات (فيديو خام، صوت فقط...) نفضّله تحديداً.
+                // presentation هو التنسيق القياسي الوحيد المقبول للعرض في المتصفح.
+                // لا نتراجع لأي تنسيق آخر (video خام، notes...) إن لم يتوفر — بعضها
+                // (notes تحديداً) كثيراً ما يُخدَّم كملف PDF ثابت لا فيديو، فكان
+                // $format يبقى قائمة SimpleXML الخام لكل التنسيقات حين لا يوجد
+                // presentation، و(string) $format->url عليها يُرجع صامتاً رابط أول
+                // عنصر فيها بدل تجاهل التسجيل — يفتح المستخدم PDF ظانّاً أنه الفيديو.
                 foreach ($recording->playback->format as $candidate) {
                     if ((string) $candidate->type === 'presentation') {
                         $format = $candidate;
@@ -165,7 +169,7 @@ class BigBlueButtonService
                     }
                 }
 
-                if ($meetingId !== '' && (string) $format->url !== '') {
+                if ($format !== null && $meetingId !== '' && (string) $format->url !== '') {
                     $urls[$meetingId] = (string) $format->url;
                 }
             }

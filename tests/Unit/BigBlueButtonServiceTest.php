@@ -38,6 +38,29 @@ class BigBlueButtonServiceTest extends TestCase
         $this->assertSame(['meeting-a' => 'https://meet.example/presentation/rec-1'], $urls);
     }
 
+    /**
+     * سبب البلاغ: "زر مشاهدة الجلسة يحمّل PDF بدل فتح الفيديو" — تسجيل نُشر
+     * فعلاً لكن بلا أي تنسيق playback من نوع presentation (مثال واقعي: BBB
+     * ينشئ فقط تنسيق notes حين تُستخدم اللوحة المشتركة، وكثيراً ما يُخدَّم
+     * كملف PDF ثابت). $format كان يبقى قائمة SimpleXML الخام لكل التنسيقات
+     * حين لا يوجد presentation، و(string) $format->url على قائمة SimpleXML
+     * يُرجع صامتاً رابط أول عنصر فيها — فيُحفظ رابط PDF/فيديو خام في
+     * recording_url دون أي تحذير، ويفتحه الفرونت إند كرابط تنزيل مباشر.
+     */
+    public function test_it_skips_a_recording_when_no_presentation_format_is_available(): void
+    {
+        $xml = '<response><returncode>SUCCESS</returncode><recordings>'
+            .'<recording><recordID>rec-4</recordID><meetingID>meeting-d</meetingID><published>true</published>'
+            .'<playback><format><type>notes</type><url>https://meet.example/notes/rec-4.pdf</url></format></playback>'
+            .'</recording></recordings></response>';
+
+        Http::fake(['*getRecordings*' => Http::response($xml, 200)]);
+
+        $urls = app(BigBlueButtonService::class)->getRecordingUrls(['meeting-d']);
+
+        $this->assertSame([], $urls);
+    }
+
     public function test_it_skips_a_recording_that_is_not_published_yet(): void
     {
         $xml = '<response><returncode>SUCCESS</returncode><recordings>'
