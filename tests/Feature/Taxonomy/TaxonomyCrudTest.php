@@ -78,6 +78,37 @@ class TaxonomyCrudTest extends TestCase
         $this->assertContains('برمجة', collect($list->json('data'))->pluck('name_ar')->all());
     }
 
+    /**
+     * education_type إلزامي على subjects في القاعدة (عمود enum بلا nullable)،
+     * تماماً مثل stages — يجب أن ترجع رسالة عربية واضحة، لا رسالة Laravel
+     * الإنجليزية الافتراضية (لا يوجد lang/ar في هذا المشروع).
+     */
+    public function test_creating_a_subject_without_education_type_is_rejected_with_an_arabic_message(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $token = $admin->createToken('test')->plainTextToken;
+
+        $response = $this->withHeader('Authorization', "Bearer {$token}")
+            ->postJson('/api/taxonomy/subjects', ['code' => 'math', 'name_ar' => 'رياضيات']);
+
+        $response->assertStatus(422)
+            ->assertJsonPath('errors.education_type.0', 'نوع التعليم مطلوب');
+        $this->assertDatabaseMissing('subjects', ['code' => 'math']);
+    }
+
+    public function test_admin_can_create_a_subject_with_education_type(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $token = $admin->createToken('test')->plainTextToken;
+
+        $response = $this->withHeader('Authorization', "Bearer {$token}")
+            ->postJson('/api/taxonomy/subjects', [
+                'code' => 'math', 'name_ar' => 'رياضيات', 'education_type' => 'school',
+            ]);
+
+        $response->assertStatus(201)->assertJsonPath('data.education_type', 'school');
+    }
+
     public function test_unknown_taxonomy_type_returns_404(): void
     {
         $response = $this->getJson('/api/taxonomy/unknown-type');

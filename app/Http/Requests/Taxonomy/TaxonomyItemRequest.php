@@ -65,4 +65,23 @@ class TaxonomyItemRequest extends FormRequest
             default => [],
         };
     }
+
+    /**
+     * لا يوجد lang/ar في هذا المشروع (APP_LOCALE=en) — بلا messages() صريحة
+     * هنا تصل الرسائل بالإنجليزية الكاملة ("The education type field is
+     * required.")؛ attributes() وحدها لا تكفي لأنها تستبدل :attribute فقط
+     * داخل قالب الرسالة الإنجليزي نفسه ("The نوع التعليم field...") بدل
+     * ترجمته كاملاً.
+     */
+    public function messages(): array
+    {
+        return [
+            'code.required' => 'الرمز مطلوب',
+            'code.unique' => 'هذا الرمز مستخدَم بالفعل',
+            'name_ar.required' => 'الاسم بالعربية مطلوب',
+            'education_type.required' => 'نوع التعليم مطلوب',
+            'education_type.in' => 'نوع التعليم غير صالح',
+            'country.max' => 'اسم الدولة طويل جداً',
+        ];
+    }
 }
