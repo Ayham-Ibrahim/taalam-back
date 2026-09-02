@@ -26,7 +26,7 @@ class StudentImported extends Notification implements ShouldQueue
             ->subject('Your Taalam Account Is Ready')
             ->greeting("Hello {$notifiable->name},")
             ->line('Our team has created a student account for you on Taalam.')
-            ->action('Activate Your Account', url('/invitations/'.$this->invitation->token))
+            ->action('Activate Your Account', frontend_url('/invitations/'.$this->invitation->token))
             ->line('This activation link expires soon — please activate your account as soon as possible.');
     }
 

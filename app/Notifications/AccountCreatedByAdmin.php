@@ -37,7 +37,7 @@ class AccountCreatedByAdmin extends Notification implements ShouldQueue
             ->line("Our team has created a {$roleLabel} account for you on Taalam. Here are your login details:")
             ->line("**Email:** {$notifiable->email}")
             ->line("**Password:** {$this->plainPassword}")
-            ->action('Log In to Taalam', url('/login'))
+            ->action('Log In to Taalam', frontend_url('/login'))
             ->line('For your security, we recommend changing your password after your first login.');
     }
 }

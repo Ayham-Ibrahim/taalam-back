@@ -45,7 +45,7 @@ class VerificationDocumentRejected extends Notification implements ShouldQueue
             ->line("Your \"{$typeLabel}\" document was declined during review.")
             ->line('Reason: '.$this->document->rejection_reason)
             ->line('Please log in to your account and upload a new copy of this document so we can review it again.')
-            ->action('Go to Your Profile', url('/complete-profile'));
+            ->action('Go to Your Profile', frontend_url('/complete-profile'));
     }
 
     public function toArray($notifiable): array

@@ -32,7 +32,7 @@ class PasswordResetByAdmin extends Notification implements ShouldQueue
             ->line('An administrator has reset your account password. Here are your new login details:')
             ->line("**Email:** {$notifiable->email}")
             ->line("**Password:** {$this->plainPassword}")
-            ->action('Log In to Taalam', url('/login'))
+            ->action('Log In to Taalam', frontend_url('/login'))
             ->line('For your security, we recommend changing your password after logging in.');
     }
 }

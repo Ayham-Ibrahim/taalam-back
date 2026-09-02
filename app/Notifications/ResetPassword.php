@@ -27,8 +27,7 @@ class ResetPassword extends Notification implements ShouldQueue
 
     public function toMail($notifiable): MailMessage
     {
-        $url = rtrim((string) config('app.frontend_url'), '/')
-            .'/reset-password?token='.$this->token.'&email='.urlencode($notifiable->email);
+        $url = frontend_url('/reset-password?token='.$this->token.'&email='.urlencode($notifiable->email));
 
         return (new MailMessage)
             ->subject('Reset Your Taalam Password')

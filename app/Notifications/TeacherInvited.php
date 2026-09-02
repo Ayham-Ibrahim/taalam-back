@@ -26,7 +26,7 @@ class TeacherInvited extends Notification implements ShouldQueue
             ->subject("You're Invited to Join Taalam as a Teacher")
             ->greeting("Hello {$notifiable->name},")
             ->line("You've been invited to join Taalam as a teacher.")
-            ->action('Activate Your Account', url('/invitations/'.$this->invitation->token))
+            ->action('Activate Your Account', frontend_url('/invitations/'.$this->invitation->token))
             ->line('This invitation link expires soon — please activate your account as soon as possible.');
     }
 
