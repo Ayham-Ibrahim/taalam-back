@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Admin\AdminDashboardController;
 use App\Http\Controllers\Admin\AuditLogController;
+use App\Http\Controllers\Admin\NotificationLogController;
 use App\Http\Controllers\Admin\ImportBatchController;
 use App\Http\Controllers\Admin\SettingsController;
 use App\Http\Controllers\Auth\AuthController;
@@ -208,6 +209,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('admin/settings', [SettingsController::class, 'index']);
     Route::put('admin/settings/{key}', [SettingsController::class, 'update']);
     Route::get('admin/audit-log', [AuditLogController::class, 'index']);
+    Route::get('admin/notification-logs', [NotificationLogController::class, 'index']);
 
     Route::get('import-batches', [ImportBatchController::class, 'index']);
     Route::get('import-batches/{importBatch}', [ImportBatchController::class, 'show']);
