@@ -32,9 +32,9 @@ class TeacherService
     /**
      * RULE-01: لا تسجيل ذاتي للمعلمين — الأدمن فقط ينشئ الحساب ويدعو صاحبه لتفعيله.
      */
-    public function invite(array $data, User $admin): Teacher
+    public function invite(array $data, User $admin, ?int $notificationDelaySeconds = null): Teacher
     {
-        return DB::transaction(function () use ($data, $admin) {
+        return DB::transaction(function () use ($data, $admin, $notificationDelaySeconds) {
             $user = User::create([
                 'name' => $data['name'],
                 'email' => $data['email'],
@@ -56,7 +56,7 @@ class TeacherService
                 'expires_at' => now()->addHours((int) $this->settings->get('invitation_link_expiry_hours', 48)),
             ]);
 
-            $this->notifications->send($user, new TeacherInvited($invitation), 'teacher.invited');
+            $this->notifications->send($user, new TeacherInvited($invitation), 'teacher.invited', $notificationDelaySeconds);
 
             $this->audit('teacher.invited', $teacher, [], [
                 'teacher_type' => $teacher->teacher_type,

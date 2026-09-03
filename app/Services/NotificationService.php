@@ -14,9 +14,30 @@ use Illuminate\Support\Facades\Notification as NotificationFacade;
  */
 class NotificationService
 {
-    public function send(mixed $notifiable, Notification $notification, string $event): void
+    public function send(mixed $notifiable, Notification $notification, string $event, ?int $delaySeconds = null): void
     {
-        $notifiable->notify($this->prepare($notifiable, $notification, $event));
+        $notification = $this->prepare($notifiable, $notification, $event);
+
+        if ($delaySeconds !== null && method_exists($notification, 'delay')) {
+            $notification->delay($delaySeconds);
+        }
+
+        $notifiable->notify($notification);
+    }
+
+    /**
+     * التأخير المتدرّج (بالثواني) لعنصر ترتيبه $index ضمن استيراد جماعي —
+     * يوزّع أي حجم استيراد على دفعات بحجم bulk_notification_rate_per_minute
+     * لكل دقيقة، بدل دفع كل بريده الترحيبي دفعة واحدة فور اكتمال الاستيراد
+     * (استيراد 1500+ سجل كان يدفع كل هذا العدد للطابور فوراً، فيعالجها الـ
+     * worker بأقصى سرعته الفعلية بلا أي سيطرة — قد يتجاوز حدود مزوّد البريد
+     * لأي استيراد أكبر مستقبلاً). راجع StudentImportService/TeacherImportService.
+     */
+    public function bulkDelaySeconds(int $index): int
+    {
+        $ratePerMinute = max(1, (int) config('queue.bulk_notification_rate_per_minute', 20));
+
+        return intdiv($index, $ratePerMinute) * 60;
     }
 
     /**

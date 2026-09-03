@@ -99,6 +99,48 @@ class StudentImportTest extends TestCase
     }
 
     /**
+     * قبل هذا الإصلاح: كل بريد ترحيب لكل صف مستورَد يُدفع للطابور بلا أي
+     * تأخير — استيراد 1500+ سجل يدفع كل هذا العدد فوراً، فيعالجها الـ worker
+     * بأقصى سرعته الفعلية بلا أي سيطرة على معدل الإرسال الفعلي لمزوّد البريد.
+     */
+    public function test_notifications_for_rows_beyond_the_per_minute_rate_are_delayed(): void
+    {
+        Notification::fake();
+        Storage::fake('local');
+        config(['queue.bulk_notification_rate_per_minute' => 2]);
+
+        $admin = $this->createAdmin()[0];
+
+        $csv = <<<'CSV'
+        name,email
+        طالب واحد,rate.one@example.com
+        طالب اثنان,rate.two@example.com
+        طالب ثلاثة,rate.three@example.com
+        CSV;
+
+        $batch = $this->storeBatch($admin, $csv);
+
+        app(StudentImportService::class)->processBatch($batch);
+
+        $delayFor = function (string $email) {
+            $user = User::where('email', $email)->firstOrFail();
+            $delay = null;
+            Notification::assertSentTo($user, \App\Notifications\StudentImported::class, function ($notification) use (&$delay) {
+                $delay = $notification->delay;
+
+                return true;
+            });
+
+            return $delay;
+        };
+
+        // بمعدل 2/دقيقة: أول عنصرين بلا تأخير، الثالث يبدأ الدقيقة التالية (60 ثانية)
+        $this->assertTrue(in_array($delayFor('rate.one@example.com'), [null, 0], true));
+        $this->assertTrue(in_array($delayFor('rate.two@example.com'), [null, 0], true));
+        $this->assertSame(60, $delayFor('rate.three@example.com'));
+    }
+
+    /**
      * الحالة الحقيقية التي دفعت لهذا التعديل: ملفات استيراد فعلية (قوائم
      * شركاء خارجيين) لا تحمل أي تصنيف أكاديمي إطلاقاً — فقط اسم، إيميل،
      * وأحياناً هاتف/مدينة/بلد. كانت تُرفَض جميعها سابقاً بسبب education_type

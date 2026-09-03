@@ -27,6 +27,7 @@ class TeacherImportService
     public function __construct(
         private readonly SettingsService $settings,
         private readonly TeacherService $teacherService,
+        private readonly NotificationService $notifications,
     ) {}
 
     public function processBatch(ImportBatch $batch): void
@@ -59,7 +60,7 @@ class TeacherImportService
 
             try {
                 $data = $this->validateRow($rowArray);
-                $teacher = $this->teacherService->invite($data, $admin);
+                $teacher = $this->teacherService->invite($data, $admin, $this->notifications->bulkDelaySeconds($imported));
                 $this->applyExtraFields($teacher, $data);
                 $imported++;
             } catch (ValidationException $e) {

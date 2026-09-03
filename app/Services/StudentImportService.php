@@ -64,7 +64,7 @@ class StudentImportService
             $rowNumber = $index + 2; // +1 للفهرسة من صفر، +1 لصف العناوين
 
             try {
-                $this->importRow($row->toArray(), $admin);
+                $this->importRow($row->toArray(), $admin, $imported);
                 $imported++;
             } catch (ValidationException $e) {
                 $errors[] = [
@@ -90,11 +90,11 @@ class StudentImportService
         ]);
     }
 
-    private function importRow(array $row, User $admin): void
+    private function importRow(array $row, User $admin, int $notificationIndex): void
     {
         $data = $this->validateRow($row);
 
-        DB::transaction(function () use ($data, $admin) {
+        DB::transaction(function () use ($data, $admin, $notificationIndex) {
             $user = User::create([
                 'name' => $data['name'],
                 'email' => $data['email'],
@@ -132,7 +132,12 @@ class StudentImportService
                 'expires_at' => now()->addHours((int) $this->settings->get('invitation_link_expiry_hours', 48)),
             ]);
 
-            $this->notifications->send($user, new StudentImported($invitation), 'student.imported');
+            $this->notifications->send(
+                $user,
+                new StudentImported($invitation),
+                'student.imported',
+                $this->notifications->bulkDelaySeconds($notificationIndex),
+            );
         });
     }
 
