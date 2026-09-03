@@ -13,6 +13,8 @@ use App\Models\Student;
 use App\Models\University;
 use App\Models\User;
 use App\Notifications\StudentImported;
+use App\Rules\EmailHasMailExchangeRecord;
+use App\Rules\NotSpreadsheetFormula;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
@@ -174,22 +176,22 @@ class StudentImportService
         ];
 
         $validator = Validator::make($normalized, [
-            'name' => ['required', 'string', 'max:150'],
-            'email' => ['required', 'email', 'max:150', 'unique:users,email'],
+            'name' => ['required', 'string', 'max:150', new NotSpreadsheetFormula],
+            'email' => ['required', 'email', 'max:150', 'unique:users,email', new EmailHasMailExchangeRecord],
             'phone' => ['nullable', 'string', 'max:25', 'unique:users,phone'],
-            'city' => ['nullable', 'string', 'max:100'],
-            'country' => ['nullable', 'string', 'max:100'],
+            'city' => ['nullable', 'string', 'max:100', new NotSpreadsheetFormula],
+            'country' => ['nullable', 'string', 'max:100', new NotSpreadsheetFormula],
             'education_type' => ['nullable', Rule::in(['school', 'university', 'training'])],
             'curriculum_code' => ['nullable', 'string'],
             'stage_code' => ['nullable', 'string'],
             'grade' => ['nullable', 'integer', 'min:1', 'max:12'],
-            'university_name' => ['nullable', 'string'],
-            'major_name' => ['nullable', 'string'],
+            'university_name' => ['nullable', 'string', new NotSpreadsheetFormula],
+            'major_name' => ['nullable', 'string', new NotSpreadsheetFormula],
             'academic_level' => ['nullable', Rule::in(['diploma', 'bachelor', 'master'])],
             'course_field_code' => ['nullable', 'string'],
             'level' => ['nullable', Rule::in(['beginner', 'intermediate', 'advanced'])],
             'birth_date' => ['nullable', 'date'],
-            'guardian_name' => ['nullable', 'string', 'max:150'],
+            'guardian_name' => ['nullable', 'string', 'max:150', new NotSpreadsheetFormula],
             'guardian_phone' => ['nullable', 'string', 'max:25'],
         ]);
 

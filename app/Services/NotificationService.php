@@ -14,11 +14,13 @@ use Illuminate\Support\Facades\Notification as NotificationFacade;
  */
 class NotificationService
 {
+    public function __construct(private readonly SettingsService $settings) {}
+
     public function send(mixed $notifiable, Notification $notification, string $event, ?int $delaySeconds = null): void
     {
         $notification = $this->prepare($notifiable, $notification, $event);
 
-        if ($delaySeconds !== null && method_exists($notification, 'delay')) {
+        if ($delaySeconds !== null && $delaySeconds > 0 && method_exists($notification, 'delay')) {
             $notification->delay($delaySeconds);
         }
 
@@ -26,18 +28,20 @@ class NotificationService
     }
 
     /**
-     * التأخير المتدرّج (بالثواني) لعنصر ترتيبه $index ضمن استيراد جماعي —
-     * يوزّع أي حجم استيراد على دفعات بحجم bulk_notification_rate_per_minute
-     * لكل دقيقة، بدل دفع كل بريده الترحيبي دفعة واحدة فور اكتمال الاستيراد
-     * (استيراد 1500+ سجل كان يدفع كل هذا العدد للطابور فوراً، فيعالجها الـ
-     * worker بأقصى سرعته الفعلية بلا أي سيطرة — قد يتجاوز حدود مزوّد البريد
-     * لأي استيراد أكبر مستقبلاً). راجع StudentImportService/TeacherImportService.
+     * تأخير خطّي (بالثواني) لعنصر ترتيبه $index ضمن استيراد جماعي — كل عنصر
+     * يبعد عن سابقه bulk_notification_stagger_seconds ثانية (إعداد قابل
+     * للتعديل من لوحة الأدمن، نفس نمط student_import_max_rows)، فيوزَّع أي
+     * حجم استيراد عبر ساعات بدل دفعة واحدة فورية. الحادثة الحقيقية التي دفعت
+     * لهذا: استيراد 1500+ سجل دفع كل بريده الترحيبي للطابور فوراً، فعالجه
+     * الـ worker بأقصى سرعته الفعلية خلال ساعة واحدة — نمط burst كبير من
+     * دومين واحد فعّل حماية Mailtrap تلقائياً وعلّق الحساب (bounce rate).
+     * راجع StudentImportService/TeacherImportService لموقع الاستخدام.
      */
     public function bulkDelaySeconds(int $index): int
     {
-        $ratePerMinute = max(1, (int) config('queue.bulk_notification_rate_per_minute', 20));
+        $staggerSeconds = max(0, (int) $this->settings->get('bulk_notification_stagger_seconds', 8));
 
-        return intdiv($index, $ratePerMinute) * 60;
+        return $index * $staggerSeconds;
     }
 
     /**

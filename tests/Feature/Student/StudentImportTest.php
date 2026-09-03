@@ -107,7 +107,14 @@ class StudentImportTest extends TestCase
     {
         Notification::fake();
         Storage::fake('local');
-        config(['queue.bulk_notification_rate_per_minute' => 2]);
+        \App\Models\Setting::create([
+            'key' => 'bulk_notification_stagger_seconds',
+            'value' => '30',
+            'type' => 'integer',
+            'group' => 'accounts',
+            'label_ar' => 'تأخير الاستيراد الجماعي',
+            'is_editable' => true,
+        ]);
 
         $admin = $this->createAdmin()[0];
 
@@ -134,10 +141,47 @@ class StudentImportTest extends TestCase
             return $delay;
         };
 
-        // بمعدل 2/دقيقة: أول عنصرين بلا تأخير، الثالث يبدأ الدقيقة التالية (60 ثانية)
+        // تأخير 30 ثانية بين كل عنصر وسابقه: 0، 30، 60
         $this->assertTrue(in_array($delayFor('rate.one@example.com'), [null, 0], true));
-        $this->assertTrue(in_array($delayFor('rate.two@example.com'), [null, 0], true));
+        $this->assertSame(30, $delayFor('rate.two@example.com'));
         $this->assertSame(60, $delayFor('rate.three@example.com'));
+    }
+
+    /**
+     * الحادثة الحقيقية التي دفعت لهذا: ملف استيراد فعلي فيه 1523 من 1542 صف
+     * (98.8٪) بعمود name = صيغة إكسل غير محسوبة (=PROPER(...))، وصفوف أخرى
+     * بدومين بريد لا وجود له (خطأ إملائي) — كلها مرّت واستوردت بصمت سابقاً،
+     * فسبّب Hard Bounce مضموناً لكل الأخيرة وأدى لتعليق حساب Mailtrap.
+     */
+    public function test_a_row_with_an_unevaluated_spreadsheet_formula_or_a_nonexistent_email_domain_is_rejected(): void
+    {
+        Notification::fake();
+        Storage::fake('local');
+
+        $admin = $this->createAdmin()[0];
+
+        $csv = <<<'CSV'
+        name,email
+        =PROPER(C20&" "&D20),formula.import@example.com
+        طالب دومين وهمي,typo.import@this-domain-certainly-does-not-exist-98765.invalid
+        طالب صحيح,valid.formula-check@example.com
+        CSV;
+
+        $batch = $this->storeBatch($admin, $csv);
+
+        app(StudentImportService::class)->processBatch($batch);
+        $batch->refresh();
+
+        $this->assertSame('completed', $batch->status);
+        $this->assertSame(1, $batch->imported_count);
+        $this->assertSame(2, $batch->failed_count);
+
+        $this->assertArrayHasKey('name', $batch->errors[0]['errors']);
+        $this->assertArrayHasKey('email', $batch->errors[1]['errors']);
+
+        $this->assertDatabaseMissing('users', ['email' => 'formula.import@example.com']);
+        $this->assertDatabaseMissing('users', ['email' => 'typo.import@this-domain-certainly-does-not-exist-98765.invalid']);
+        $this->assertDatabaseHas('users', ['email' => 'valid.formula-check@example.com']);
     }
 
     /**

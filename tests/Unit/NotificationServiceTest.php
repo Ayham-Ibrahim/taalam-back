@@ -2,45 +2,59 @@
 
 namespace Tests\Unit;
 
+use App\Models\Setting;
 use App\Services\NotificationService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 /**
- * bulkDelaySeconds() يوزّع أي حجم استيراد على دفعات بحجم
- * bulk_notification_rate_per_minute لكل دقيقة — راجع StudentImportService/
- * TeacherImportService لموقع الاستخدام الفعلي، وسبب وجوده أصلاً في
- * NotificationServiceTest أعلاه (استيراد 1500+ سجل كان يدفع كل بريده
- * الترحيبي للطابور فوراً بلا أي سيطرة).
+ * bulkDelaySeconds() يوزّع أي حجم استيراد جماعي عبر ساعات بدل دفعة واحدة
+ * فورية — راجع StudentImportService/TeacherImportService لموقع الاستخدام
+ * الفعلي، وسبب وجوده أصلاً في NotificationServiceTest أعلاه (استيراد 1500+
+ * سجل دفع كل بريده الترحيبي للطابور فوراً، فعالجه الـ worker بأقصى سرعته
+ * الفعلية — نمط burst من دومين واحد فعّل حماية Mailtrap تلقائياً وعلّق الحساب).
  */
 class NotificationServiceTest extends TestCase
 {
-    public function test_the_first_batch_of_items_has_no_delay(): void
+    use RefreshDatabase;
+
+    public function test_the_delay_is_linear_by_the_configured_stagger_seconds(): void
     {
-        config(['queue.bulk_notification_rate_per_minute' => 20]);
+        $this->setStagger(5);
         $service = app(NotificationService::class);
 
         $this->assertSame(0, $service->bulkDelaySeconds(0));
-        $this->assertSame(0, $service->bulkDelaySeconds(19));
+        $this->assertSame(5, $service->bulkDelaySeconds(1));
+        $this->assertSame(50, $service->bulkDelaySeconds(10));
+        // العنصر رقم 1541 (آخر عنصر في استيراد 1542 سجلاً) بتأخير 5 ثوانٍ لكل عنصر
+        $this->assertSame(1541 * 5, $service->bulkDelaySeconds(1541));
     }
 
-    public function test_each_subsequent_batch_of_rate_items_adds_one_more_minute(): void
+    public function test_falls_back_to_the_default_stagger_when_unconfigured(): void
     {
-        config(['queue.bulk_notification_rate_per_minute' => 20]);
         $service = app(NotificationService::class);
 
-        $this->assertSame(60, $service->bulkDelaySeconds(20));
-        $this->assertSame(60, $service->bulkDelaySeconds(39));
-        $this->assertSame(120, $service->bulkDelaySeconds(40));
-        // العنصر رقم 1541 (آخر عنصر في استيراد 1542 سجلاً) بمعدل 20/دقيقة
-        $this->assertSame(77 * 60, $service->bulkDelaySeconds(1541));
+        // القيمة الافتراضية المزروعة في SettingsSeeder (8 ثوانٍ) عند عدم وجود الإعداد إطلاقاً
+        $this->assertSame(8, $service->bulkDelaySeconds(1));
     }
 
-    public function test_a_rate_of_zero_or_negative_is_treated_as_one_per_minute_not_a_division_error(): void
+    public function test_a_negative_configured_stagger_is_treated_as_zero_not_a_negative_delay(): void
     {
-        config(['queue.bulk_notification_rate_per_minute' => 0]);
+        $this->setStagger(-5);
         $service = app(NotificationService::class);
 
-        $this->assertSame(0, $service->bulkDelaySeconds(0));
-        $this->assertSame(60, $service->bulkDelaySeconds(1));
+        $this->assertSame(0, $service->bulkDelaySeconds(10));
+    }
+
+    private function setStagger(int $seconds): void
+    {
+        Setting::create([
+            'key' => 'bulk_notification_stagger_seconds',
+            'value' => (string) $seconds,
+            'type' => 'integer',
+            'group' => 'accounts',
+            'label_ar' => 'تأخير الاستيراد الجماعي',
+            'is_editable' => true,
+        ]);
     }
 }

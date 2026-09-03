@@ -6,6 +6,8 @@ use App\Imports\TeachersImport;
 use App\Models\ImportBatch;
 use App\Models\Teacher;
 use App\Models\User;
+use App\Rules\EmailHasMailExchangeRecord;
+use App\Rules\NotSpreadsheetFormula;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -110,8 +112,8 @@ class TeacherImportService
         ];
 
         $validator = Validator::make($normalized, [
-            'name' => ['required', 'string', 'max:150'],
-            'email' => ['required', 'email', 'max:150', 'unique:users,email'],
+            'name' => ['required', 'string', 'max:150', new NotSpreadsheetFormula],
+            'email' => ['required', 'email', 'max:150', 'unique:users,email', new EmailHasMailExchangeRecord],
             'phone' => ['nullable', 'string', 'max:25', 'unique:users,phone'],
             'whatsapp' => ['nullable', 'string', 'max:25'],
             'gender' => ['nullable', Rule::in(['male', 'female'])],

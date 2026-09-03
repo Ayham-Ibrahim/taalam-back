@@ -132,6 +132,39 @@ class TeacherImportTest extends TestCase
         $this->assertStringContainsString('نوع المنهج: MOE, IG', $teacher->bio);
     }
 
+    /**
+     * يوازي الاختبار المطابق في StudentImportTest — نفس الحادثة الحقيقية،
+     * تنطبق على استيراد المعلمين بنفس القواعد المشتركة (NotSpreadsheetFormula/
+     * EmailHasMailExchangeRecord).
+     */
+    public function test_a_row_with_an_unevaluated_spreadsheet_formula_or_a_nonexistent_email_domain_is_rejected(): void
+    {
+        Notification::fake();
+        Storage::fake('local');
+
+        $admin = $this->createAdmin()[0];
+
+        $csv = <<<'CSV'
+        name,email,teacher_type
+        =PROPER(C20&" "&D20),formula.teacher.import@example.com,school
+        معلم دومين وهمي,typo.teacher.import@this-domain-certainly-does-not-exist-98765.invalid,school
+        معلم صحيح,valid.teacher.formula-check@example.com,school
+        CSV;
+
+        $batch = $this->storeBatch($admin, $csv);
+
+        app(TeacherImportService::class)->processBatch($batch);
+        $batch->refresh();
+
+        $this->assertSame('completed', $batch->status);
+        $this->assertSame(1, $batch->imported_count);
+        $this->assertSame(2, $batch->failed_count);
+
+        $this->assertDatabaseMissing('users', ['email' => 'formula.teacher.import@example.com']);
+        $this->assertDatabaseMissing('users', ['email' => 'typo.teacher.import@this-domain-certainly-does-not-exist-98765.invalid']);
+        $this->assertDatabaseHas('users', ['email' => 'valid.teacher.formula-check@example.com']);
+    }
+
     public function test_processing_marks_the_batch_failed_when_row_count_exceeds_max_setting(): void
     {
         Storage::fake('local');

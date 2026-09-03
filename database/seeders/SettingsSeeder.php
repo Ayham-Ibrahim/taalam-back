@@ -235,6 +235,14 @@ class SettingsSeeder extends Seeder
                 'group' => 'accounts',
                 'label_ar' => 'أقصى عدد صفوف في استيراد المعلمين',
             ],
+            [
+                'key' => 'bulk_notification_stagger_seconds',
+                'value' => '8',
+                'type' => 'integer',
+                'group' => 'accounts',
+                'label_ar' => 'تأخير كل بريد ترحيب عن سابقه في الاستيراد الجماعي (ثانية)',
+                'description' => 'يمنع دفع آلاف رسائل الترحيب دفعة واحدة عند استيراد كبير — يحمي حساب مزوّد البريد من إيقاف تلقائي بسبب نمط إرسال مفاجئ',
+            ],
 
             // ═══════ خوارزمية الترتيب ═══════
             [
