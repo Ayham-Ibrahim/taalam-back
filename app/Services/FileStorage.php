@@ -71,7 +71,8 @@ class FileStorage
             //         in_array($extension, $allowedExtensions)
             // ]);
 
-            if (! in_array($mime_type, $allowedMimeTypes) || ! in_array($extension, $allowedExtensions)) {
+            // if (! in_array($mime_type, $allowedMimeTypes) || ! in_array($extension, $allowedExtensions)) {
+            if (! in_array($extension, $allowedExtensions)) {
                 self::throwValidationError('file', 'نوع الملف غير مسموح به');
             }
 
