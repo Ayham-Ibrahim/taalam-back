@@ -28,6 +28,7 @@ use App\Http\Controllers\TaxonomyController;
 use App\Http\Controllers\Teacher\BadgeController;
 use App\Http\Controllers\Teacher\TeacherController;
 use App\Http\Controllers\Teacher\TeacherImportController;
+use App\Http\Controllers\Teacher\TeacherVideoController;
 use App\Http\Controllers\Teacher\VerificationDocumentController;
 use App\Http\Controllers\TeacherSearchController;
 use Illuminate\Support\Facades\Route;
@@ -104,6 +105,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('verification-documents/{document}/approve', [VerificationDocumentController::class, 'approve']);
     Route::post('verification-documents/{document}/reject', [VerificationDocumentController::class, 'reject']);
     Route::post('verification-documents/{document}/download-url', [VerificationDocumentController::class, 'downloadUrl']);
+
+    Route::middleware('throttle:uploads')->post('teachers/{teacher}/avatar', [TeacherController::class, 'uploadAvatar']);
+    Route::delete('teachers/{teacher}/avatar', [TeacherController::class, 'deleteAvatar']);
+    Route::post('teachers/{teacher}/videos', [TeacherVideoController::class, 'store']);
+    Route::delete('teacher-videos/{video}', [TeacherVideoController::class, 'destroy']);
 
     Route::get('badges', [BadgeController::class, 'index']);
     Route::post('teachers/{teacher}/badges', [BadgeController::class, 'grant']);

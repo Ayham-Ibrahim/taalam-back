@@ -10,6 +10,7 @@ use App\Http\Requests\Teacher\InviteTeacherRequest;
 use App\Http\Requests\Teacher\RejectTeacherRequest;
 use App\Http\Requests\Teacher\SuspendTeacherRequest;
 use App\Http\Requests\Teacher\UpdateTeacherProfileRequest;
+use App\Http\Requests\Teacher\UploadTeacherAvatarRequest;
 use App\Http\Resources\Teacher\AdminTeacherResource;
 use App\Http\Resources\Teacher\PublicTeacherResource;
 use App\Http\Resources\Verification\BadgeAwardResource;
@@ -17,12 +18,16 @@ use App\Http\Resources\Verification\BadgeResource;
 use App\Http\Resources\Verification\VerificationDocumentResource;
 use App\Models\Badge;
 use App\Models\Teacher;
+use App\Services\AuthService;
 use App\Services\TeacherService;
 use Illuminate\Http\Request;
 
 class TeacherController extends Controller
 {
-    public function __construct(private readonly TeacherService $teacherService) {}
+    public function __construct(
+        private readonly TeacherService $teacherService,
+        private readonly AuthService $authService,
+    ) {}
 
     public function index(Request $request)
     {
@@ -103,7 +108,7 @@ class TeacherController extends Controller
             abort(404);
         }
 
-        $teacher->load(['user:id,name,avatar_path', 'subjects', 'curricula', 'languages']);
+        $teacher->load(['user:id,name,avatar_path', 'subjects', 'curricula', 'languages', 'videos']);
         if ($isManager) {
             // الأحدث أولاً — قد يرفع المعلم أكثر من وثيقة لنفس النوع بعد رفض
             // سابق؛ الواجهة تعرض أول تطابق لكل نوع فقط، فيجب أن يكون الأحدث.
@@ -141,6 +146,7 @@ class TeacherController extends Controller
             'subjects',
             'curricula',
             'languages',
+            'videos',
         ]);
 
         return $this->success([
@@ -156,6 +162,29 @@ class TeacherController extends Controller
         $teacher = $this->teacherService->updateProfile($teacher, $request->validated());
 
         return $this->success($teacher, 'تم تحديث الملف الشخصي بنجاح');
+    }
+
+    /**
+     * يسمح للأدمن برفع/حذف صورة معلم نيابة عنه — نفس AuthService المستخدَم
+     * في ProfileController::uploadAvatar لكن على مستخدم مستهدَف صراحة بدل
+     * المستخدم الحالي (updateAvatar()/deleteAvatar() يقبلان $user منذ البداية).
+     */
+    public function uploadAvatar(UploadTeacherAvatarRequest $request, Teacher $teacher)
+    {
+        $teacher->loadMissing('user');
+        $this->authService->updateAvatar($teacher->user, $request->file('avatar'));
+
+        return $this->success($teacher->fresh('user'), 'تم تحديث صورة المعلم بنجاح');
+    }
+
+    public function deleteAvatar(Teacher $teacher)
+    {
+        $this->authorize('update', $teacher);
+
+        $teacher->loadMissing('user');
+        $this->authService->deleteAvatar($teacher->user);
+
+        return $this->success($teacher->fresh('user'), 'تم حذف صورة المعلم بنجاح');
     }
 
     /** الأدمن يعيد تعيين كلمة مرور معلم مباشرة — بلا حاجة لمعرفة القديمة، ترسَل الجديدة بالبريد (يوازي StudentController::resetPassword) */

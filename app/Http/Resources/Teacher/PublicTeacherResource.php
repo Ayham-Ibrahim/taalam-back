@@ -27,6 +27,10 @@ class PublicTeacherResource extends JsonResource
             'logo_path' => $this->logo_path,
             'intro_video_path' => $this->intro_video_path,
             'intro_video_seconds' => $this->intro_video_seconds,
+            'intro_youtube_id' => $this->intro_youtube_id,
+            'videos' => $this->whenLoaded('videos', fn () => $this->videos->map(fn ($v) => [
+                'id' => $v->id, 'youtube_id' => $v->youtube_id, 'title' => $v->title,
+            ])),
             'user' => [
                 'id' => $this->user->id,
                 'name' => $this->user->name,

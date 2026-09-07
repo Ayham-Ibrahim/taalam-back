@@ -483,6 +483,74 @@ class TeacherInviteVerifyFlowTest extends TestCase
     }
 
     /**
+     * الأدمن يمكنه إكمال ملف المعلم كاملاً وتوثيقه دون انتظاره — يغطي معلماً
+     * دُعي أو استُورد عبر الإكسل ولم يُكمل ملفه بنفسه، فيتولى الأدمن ذلك نيابة
+     * عنه عبر المسارات ذاتها تماماً (TeacherPolicy::update كانت مفتوحة أصلاً
+     * للأدمن؛ submitForVerification و VerificationDocumentPolicy::create
+     * وُسِّعتا لهذا السيناريو تحديداً). سجل الوثائق (document.uploaded) يوثّق
+     * الأدمن كفاعل فعلي — بلا حاجة لعمود uploaded_by إضافي.
+     */
+    public function test_admin_can_complete_a_teachers_profile_upload_documents_and_submit_for_verification_on_their_behalf(): void
+    {
+        Notification::fake();
+        Storage::fake('local');
+
+        $admin = User::factory()->admin()->create();
+        $adminToken = $admin->createToken('t')->plainTextToken;
+        $teacherUser = User::factory()->teacher()->create();
+        $teacher = Teacher::create(['user_id' => $teacherUser->id, 'teacher_type' => 'school', 'status' => 'active_unverified']);
+
+        $subject = Subject::create(['code' => 'math-admin', 'name_ar' => 'رياضيات', 'education_type' => 'school']);
+        $curriculum = Curriculum::create(['code' => 'national-admin', 'name_ar' => 'وطني']);
+        $language = Language::create(['code' => 'ar-admin', 'name_ar' => 'العربية']);
+
+        $update = $this->as($adminToken)->putJson("/api/teachers/{$teacher->id}", [
+            'bio' => 'أكمل الأدمن هذا الملف نيابة عن المعلم',
+            'subject_ids' => [$subject->id],
+            'curriculum_ids' => [$curriculum->id],
+            'language_ids' => [$language->id],
+        ]);
+        $update->assertStatus(200);
+        $this->assertDatabaseHas('teacher_subject', ['teacher_id' => $teacher->id, 'subject_id' => $subject->id]);
+
+        foreach (['identity', 'academic', 'experience'] as $type) {
+            $upload = $this->as($adminToken)->post("/api/teachers/{$teacher->id}/verification-documents", [
+                'type' => $type,
+                'file' => UploadedFile::fake()->create("{$type}.pdf", 50, 'application/pdf'),
+            ]);
+            $upload->assertStatus(201);
+            $this->as($adminToken)->postJson("/api/verification-documents/{$upload->json('data.id')}/approve")->assertStatus(200);
+        }
+        $this->assertDatabaseHas('audit_logs', ['action' => 'document.uploaded', 'user_id' => $admin->id]);
+
+        $submit = $this->as($adminToken)->postJson("/api/teachers/{$teacher->id}/submit-for-verification");
+        $submit->assertStatus(200);
+        $this->assertDatabaseHas('teachers', ['id' => $teacher->id, 'status' => 'pending_verification']);
+
+        $approve = $this->as($adminToken)->postJson("/api/teachers/{$teacher->id}/approve");
+        $approve->assertStatus(200)->assertJsonPath('data.status', 'verified');
+    }
+
+    /** التوسيع للأدمن يجب ألا يفتح المسار لأي معلم آخر غير صاحب الحساب */
+    public function test_a_different_teacher_still_cannot_upload_documents_or_submit_for_verification_on_behalf_of_another_teacher(): void
+    {
+        [$teacher] = $this->createTeacherReadyForReviewWithoutApprovingDocuments();
+
+        $intruderUser = User::factory()->teacher()->create();
+        Teacher::create(['user_id' => $intruderUser->id, 'teacher_type' => 'school', 'status' => 'active_unverified']);
+        $intruderToken = $intruderUser->createToken('t')->plainTextToken;
+
+        $upload = $this->as($intruderToken)->post("/api/teachers/{$teacher->id}/verification-documents", [
+            'type' => 'identity',
+            'file' => UploadedFile::fake()->create('identity.pdf', 50, 'application/pdf'),
+        ]);
+        $upload->assertStatus(403);
+
+        $submit = $this->as($intruderToken)->postJson("/api/teachers/{$teacher->id}/submit-for-verification");
+        $submit->assertStatus(403);
+    }
+
+    /**
      * @return array{0: Teacher, 1: string, 2: string}
      */
     private function createTeacherReadyForReview(): array

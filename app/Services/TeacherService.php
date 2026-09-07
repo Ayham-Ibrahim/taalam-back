@@ -7,6 +7,7 @@ use App\Models\Booking;
 use App\Models\ClassSession;
 use App\Models\Enrollment;
 use App\Models\Teacher;
+use App\Models\TeacherVideo;
 use App\Models\User;
 use App\Models\VerificationDocument;
 use App\Notifications\AccountCreatedByAdmin;
@@ -182,6 +183,33 @@ class TeacherService
         }
 
         return $teacher->fresh(['subjects', 'curricula', 'languages']);
+    }
+
+    /** يُرفَض بعد الحد الأقصى (Teacher::MAX_VIDEOS) — لا حذف تلقائي للأقدم، على المعلم/الأدمن حذف واحد أولاً */
+    public function addVideo(Teacher $teacher, array $data): TeacherVideo
+    {
+        if ($teacher->videos()->count() >= Teacher::MAX_VIDEOS) {
+            throw ValidationException::withMessages([
+                'videos' => ['لا يمكن إضافة أكثر من '.Teacher::MAX_VIDEOS.' فيديوهات — احذف فيديواً قديماً أولاً.'],
+            ]);
+        }
+
+        $video = $teacher->videos()->create([
+            'youtube_id' => $data['youtube_id'],
+            'title' => $data['title'] ?? null,
+            'sort_order' => ($teacher->videos()->max('sort_order') ?? -1) + 1,
+        ]);
+
+        $this->audit('teacher.video_added', $video, [], ['youtube_id' => $video->youtube_id]);
+
+        return $video;
+    }
+
+    public function removeVideo(TeacherVideo $video): void
+    {
+        $this->audit('teacher.video_removed', $video, ['youtube_id' => $video->youtube_id], []);
+
+        $video->delete();
     }
 
     public function submitForVerification(Teacher $teacher): Teacher

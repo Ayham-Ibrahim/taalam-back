@@ -41,7 +41,7 @@ class TeacherPolicy
 
     public function submitForVerification(User $user, Teacher $teacher): bool
     {
-        return $user->id === $teacher->user_id;
+        return $user->isAdmin() || $user->id === $teacher->user_id;
     }
 
     public function approve(User $user): bool

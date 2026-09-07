@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Teacher;
 
+use App\Rules\ValidYoutubeVideo;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -12,12 +13,24 @@ class UpdateTeacherProfileRequest extends FormRequest
         return $this->user()->can('update', $this->route('teacher'));
     }
 
+    /** يطبّع أي صيغة رابط يوتيوب مقبولة إلى معرّف الفيديو النظيف قبل التحقق — فيُخزَّن دائماً نظيفاً لا كرابط خام */
+    protected function prepareForValidation(): void
+    {
+        if ($this->filled('intro_youtube_id')) {
+            $extracted = ValidYoutubeVideo::extractId($this->input('intro_youtube_id'));
+            if ($extracted !== null) {
+                $this->merge(['intro_youtube_id' => $extracted]);
+            }
+        }
+    }
+
     public function rules(): array
     {
         $isTrainingCenter = $this->route('teacher')?->isTrainingCenter();
 
         return [
             'bio' => ['nullable', 'string', 'max:500'],
+            'intro_youtube_id' => ['nullable', new ValidYoutubeVideo],
             'qualification' => ['nullable', Rule::in(['bachelor', 'master', 'phd', 'professional_cert', 'diploma'])],
             'experience_years' => ['nullable', Rule::in(['under_1', '1_3', '3_5', 'over_5'])],
             'age_groups' => ['nullable', 'array', 'max:20'],

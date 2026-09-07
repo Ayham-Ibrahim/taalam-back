@@ -20,7 +20,7 @@ class VerificationDocumentPolicy
 
     public function create(User $user, Teacher $teacher): bool
     {
-        return $user->loadMissing('teacher')->teacher?->id === $teacher->id;
+        return $user->isAdmin() || $user->loadMissing('teacher')->teacher?->id === $teacher->id;
     }
 
     public function review(User $user): bool

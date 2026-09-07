@@ -12,6 +12,9 @@ class Teacher extends Model
     /** لا يكتمل التسجيل بدونها — إثبات هوية، شهادة أكاديمية، وشهادة/إثبات خبرة */
     public const REQUIRED_DOCUMENT_TYPES = ['identity', 'academic', 'experience'];
 
+    /** حد تعسفي معقول يمنع نمواً غير محدود لقائمة الفيديوهات — سهل التعديل لاحقاً إن لزم */
+    public const MAX_VIDEOS = 6;
+
     protected $fillable = [
         'user_id',
         'teacher_type',
@@ -20,6 +23,7 @@ class Teacher extends Model
         'bio',
         'intro_video_path',
         'intro_video_seconds',
+        'intro_youtube_id',
         'display_name_en',
         'logo_path',
         'commercial_register',
@@ -79,6 +83,11 @@ class Teacher extends Model
     public function verificationDocuments()
     {
         return $this->hasMany(VerificationDocument::class);
+    }
+
+    public function videos()
+    {
+        return $this->hasMany(TeacherVideo::class)->orderBy('sort_order');
     }
 
     public function badgeAwards()
