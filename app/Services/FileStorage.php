@@ -27,10 +27,10 @@ class FileStorage
         try {
             $originalName = $file->getClientOriginalName();
 
-            // Check for double extensions in the file name
-            if (preg_match('/\.[^.]+\./', $originalName)) {
-                self::throwValidationError('file', 'ان الملف الذي ارسلته غير امن');
-            }
+            // // Check for double extensions in the file name
+            // if (preg_match('/\.[^.]+\./', $originalName)) {
+            //     self::throwValidationError('file', 'ان الملف الذي ارسلته غير امن');
+            // }
 
             switch ($suffix) {
                 case 'img':
