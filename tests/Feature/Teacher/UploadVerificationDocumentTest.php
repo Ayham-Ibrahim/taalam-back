@@ -11,14 +11,14 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 /**
- * وثائق التوثيق (هوية/شهادات/خبرة...) تُقبَل كصورة أو PDF فقط، وبحجم 15 ميغابايت
+ * وثائق التوثيق (هوية/شهادات/خبرة...) تُقبَل كصورة أو PDF فقط، وبحجم 50 ميغابايت
  * كحد أقصى — لا HTML ولا فيديو ولا سكربتات ولا أي نوع ملف آخر (RULE).
  */
 class UploadVerificationDocumentTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_pdf_document_up_to_15mb_is_accepted(): void
+    public function test_pdf_document_up_to_50mb_is_accepted(): void
     {
         Storage::fake('local');
 
@@ -26,7 +26,7 @@ class UploadVerificationDocumentTest extends TestCase
 
         $response = $this->as($token)->post("/api/teachers/{$teacher->id}/verification-documents", [
             'type' => 'identity',
-            'file' => UploadedFile::fake()->create('identity.pdf', 15360, 'application/pdf'),
+            'file' => UploadedFile::fake()->create('identity.pdf', 51200, 'application/pdf'),
         ]);
 
         $response->assertStatus(201);
@@ -51,7 +51,7 @@ class UploadVerificationDocumentTest extends TestCase
      * صريحة في UploadVerificationDocumentRequest كانت هذه الرسالة تصل
      * بالإنجليزية الافتراضية من Laravel صمتاً، لا برسالة عربية واضحة.
      */
-    public function test_document_over_15mb_is_rejected(): void
+    public function test_document_over_50mb_is_rejected(): void
     {
         Storage::fake('local');
 
@@ -59,11 +59,11 @@ class UploadVerificationDocumentTest extends TestCase
 
         $response = $this->as($token)->post("/api/teachers/{$teacher->id}/verification-documents", [
             'type' => 'identity',
-            'file' => UploadedFile::fake()->create('identity.pdf', 15361, 'application/pdf'),
+            'file' => UploadedFile::fake()->create('identity.pdf', 51201, 'application/pdf'),
         ]);
 
         $response->assertStatus(422)
-            ->assertJsonPath('errors.file.0', 'حجم الملف أكبر من الحد المسموح (15 ميغابايت كحد أقصى)');
+            ->assertJsonPath('errors.file.0', 'حجم الملف أكبر من الحد المسموح (50 ميغابايت كحد أقصى)');
         $this->assertDatabaseCount('verification_documents', 0);
     }
 

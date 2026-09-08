@@ -48,7 +48,7 @@ class AvatarUploadTest extends TestCase
      * لا يوجد lang/ar في هذا المشروع (APP_LOCALE=en) — بلا messages() عربية
      * صريحة كانت هذه الرسالة تصل بالإنجليزية الافتراضية من Laravel.
      */
-    public function test_avatar_over_15mb_is_rejected_with_an_arabic_message(): void
+    public function test_avatar_over_50mb_is_rejected_with_an_arabic_message(): void
     {
         Storage::fake('public');
 
@@ -56,11 +56,11 @@ class AvatarUploadTest extends TestCase
         $token = $user->createToken('t')->plainTextToken;
 
         $response = $this->as($token)->post('/api/me/avatar', [
-            'avatar' => UploadedFile::fake()->image('avatar.jpg', 500, 500)->size(15361),
+            'avatar' => UploadedFile::fake()->image('avatar.jpg', 500, 500)->size(51201),
         ]);
 
         $response->assertStatus(422)
-            ->assertJsonPath('errors.avatar.0', 'حجم الصورة أكبر من الحد المسموح (15 ميغابايت كحد أقصى)');
+            ->assertJsonPath('errors.avatar.0', 'حجم الصورة أكبر من الحد المسموح (50 ميغابايت كحد أقصى)');
         $this->assertNull($user->fresh()->avatar_path);
     }
 

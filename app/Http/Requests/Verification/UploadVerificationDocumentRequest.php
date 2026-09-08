@@ -17,13 +17,12 @@ class UploadVerificationDocumentRequest extends FormRequest
     {
         return [
             'type' => ['required', Rule::in(['identity', 'academic', 'experience', 'professional', 'security', 'commercial'])],
-            // صورة أو PDF فقط، 15 ميغابايت كحد أقصى — يمنع رفع HTML/فيديوهات/سكربتات
+            // صورة أو PDF فقط، 50 ميغابايت كحد أقصى — يمنع رفع HTML/فيديوهات/سكربتات
             // كوثائق توثيق. الفحص الفعلي الحاسم يبقى في FileStorage::storeFile()
             // (يفحص المحتوى الفعلي لا الامتداد المُدَّعى فقط)؛ هذا الفحص هنا يرفض
-            // الطلب مبكراً برسالة واضحة بدل الوصول لطبقة التخزين أصلاً. الحد
-            // رُفع من 5 إلى 15 — صور كاميرا الهاتف الحديثة (غالبية صور وثائق
-            // المعلمين) غالباً 4-12 ميغابايت، كان الحد السابق يرفض كثيراً منها بصمت.
-            'file' => ['required', 'file', 'mimes:jpeg,jpg,png,pdf', 'max:15360'],
+            // الطلب مبكراً برسالة واضحة بدل الوصول لطبقة التخزين أصلاً. الحد يتوافق
+            // مع حد PHP الفعلي في public/.user.ini (كلا الحدّين يجب أن يتطابقا).
+            'file' => ['required', 'file', 'mimes:jpeg,jpg,png,pdf', 'max:51200'],
         ];
     }
 
@@ -40,7 +39,7 @@ class UploadVerificationDocumentRequest extends FormRequest
             'file.required' => 'يرجى اختيار ملف',
             'file.file' => 'الملف المُرسَل غير صالح',
             'file.mimes' => 'صيغة الملف غير مدعومة — يُسمح فقط بصورة (JPG/PNG) أو PDF',
-            'file.max' => 'حجم الملف أكبر من الحد المسموح (15 ميغابايت كحد أقصى)',
+            'file.max' => 'حجم الملف أكبر من الحد المسموح (50 ميغابايت كحد أقصى)',
         ];
     }
 }
