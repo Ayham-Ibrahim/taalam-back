@@ -5,6 +5,7 @@ namespace Tests\Feature\Student;
 use App\Jobs\ProcessStudentImportJob;
 use App\Models\ImportBatch;
 use App\Models\User;
+use App\Notifications\AccountCreatedByAdmin;
 use App\Services\SettingsService;
 use App\Services\StudentImportService;
 use Database\Seeders\SettingsSeeder;
@@ -96,6 +97,13 @@ class StudentImportTest extends TestCase
 
         $this->assertDatabaseHas('users', ['email' => 'valid.import@example.com']);
         $this->assertDatabaseMissing('users', ['email' => 'missing.name@example.com']);
+
+        // كلمة مرور فعلية تصل فوراً — بلا دعوة برابط منتهي الصلاحية (يوازي
+        // إصلاح TeacherImportService المطابق تماماً).
+        $importedUser = User::where('email', 'valid.import@example.com')->firstOrFail();
+        $this->assertNotNull($importedUser->password);
+        $this->assertDatabaseMissing('account_invitations', ['user_id' => $importedUser->id]);
+        Notification::assertSentTo($importedUser, AccountCreatedByAdmin::class);
     }
 
     /**
@@ -132,7 +140,7 @@ class StudentImportTest extends TestCase
         $delayFor = function (string $email) {
             $user = User::where('email', $email)->firstOrFail();
             $delay = null;
-            Notification::assertSentTo($user, \App\Notifications\StudentImported::class, function ($notification) use (&$delay) {
+            Notification::assertSentTo($user, AccountCreatedByAdmin::class, function ($notification) use (&$delay) {
                 $delay = $notification->delay;
 
                 return true;

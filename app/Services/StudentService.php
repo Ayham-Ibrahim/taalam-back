@@ -17,11 +17,12 @@ class StudentService
 
     /**
      * الأدمن يضع البريد/كلمة المرور مباشرة — الحساب نشط فوراً بلا education_type
-     * (NULL = الملف الشخصي غير مكتمل، الطالب يُكمله بنفسه عند أول دخول).
+     * (NULL = الملف الشخصي غير مكتمل، الطالب يُكمله بنفسه عند أول دخول). بلا
+     * دعوة ولا رابط منتهي الصلاحية إطلاقاً — الطالب يدخل بكلمة المرور متى شاء.
      */
-    public function createByAdmin(array $data, User $admin): Student
+    public function createByAdmin(array $data, User $admin, ?int $notificationDelaySeconds = null): Student
     {
-        return DB::transaction(function () use ($data) {
+        return DB::transaction(function () use ($data, $notificationDelaySeconds) {
             $user = User::create([
                 'name' => $data['name'],
                 'email' => $data['email'],
@@ -35,7 +36,12 @@ class StudentService
                 'user_id' => $user->id,
             ]);
 
-            $this->notifications->send($user, new AccountCreatedByAdmin('student', $data['password']), 'student.account_created');
+            $this->notifications->send(
+                $user,
+                new AccountCreatedByAdmin('student', $data['password']),
+                'student.account_created',
+                $notificationDelaySeconds,
+            );
 
             $this->audit('student.account_created', $student, [], ['email' => $user->email]);
 
