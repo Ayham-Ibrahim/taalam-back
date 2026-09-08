@@ -69,13 +69,15 @@ class TeacherService
     }
 
     /**
-     * دخول فوري بلا خطوة قبول دعوة — الأدمن يضع كلمة المرور مباشرة، الحساب
+     * دخول فوري بلا خطوة قبول دعوة — الأدمن يضع كلمة المرور مباشرة (أو
+     * تُولَّد آلياً عند الاستيراد الجماعي، انظر TeacherImportService)، الحساب
      * نشط لحظياً بحالة active_unverified (نفس نقطة انطلاق acceptInvitation)
-     * فيرى المعلم عند أول دخول واجهة إكمال الملف + رفع الوثائق.
+     * فيرى المعلم عند أول دخول واجهة إكمال الملف + رفع الوثائق. بلا رابط دعوة
+     * منتهي الصلاحية إطلاقاً — كلمة المرور تصله بالبريد، يدخل متى شاء.
      */
-    public function createByAdmin(array $data, User $admin): Teacher
+    public function createByAdmin(array $data, User $admin, ?int $notificationDelaySeconds = null): Teacher
     {
-        return DB::transaction(function () use ($data, $admin) {
+        return DB::transaction(function () use ($data, $admin, $notificationDelaySeconds) {
             $user = User::create([
                 'name' => $data['name'],
                 'email' => $data['email'],
@@ -91,7 +93,12 @@ class TeacherService
                 'status' => 'active_unverified',
             ]);
 
-            $this->notifications->send($user, new AccountCreatedByAdmin('teacher', $data['password']), 'teacher.account_created');
+            $this->notifications->send(
+                $user,
+                new AccountCreatedByAdmin('teacher', $data['password']),
+                'teacher.account_created',
+                $notificationDelaySeconds,
+            );
 
             $this->audit('teacher.account_created', $teacher, [], [
                 'teacher_type' => $teacher->teacher_type,
@@ -145,7 +152,15 @@ class TeacherService
             $user->update(['password' => $password, 'is_active' => true]);
 
             $teacher = $user->teacher;
-            $teacher->update(['status' => 'active_unverified']);
+            // شرطي لا تعيين مباشر: الأدمن قد يكون أكمل ملف هذا المعلم بالكامل
+            // نيابة عنه وهو ما زال "invited" (submitForVerification تقبل هذه
+            // الحالة أيضاً الآن)، فتقدَّم حتى pending_verification أو verified
+            // قبل أن يقبل المعلم دعوته أصلاً. تعيين غير شرطي هنا كان يُرجِعه
+            // دائماً إلى active_unverified عند قبوله لاحقاً، ماحياً أي تقدُّم
+            // أحرزه الأدمن بصمت.
+            if ($teacher->status === 'invited') {
+                $teacher->update(['status' => 'active_unverified']);
+            }
 
             $invitation->update(['accepted_at' => now()]);
 
@@ -212,9 +227,16 @@ class TeacherService
         $video->delete();
     }
 
+    /**
+     * "invited" مقبولة هنا أيضاً — لا فقط "active_unverified" — كي يستطيع
+     * الأدمن إكمال ملف معلم مستورَد/مدعوّ لم يقبل دعوته بعد (لا كلمة مرور له
+     * أصلاً، فلا طريق له لقبولها والوصول لحالة active_unverified بنفسه) وإرسال
+     * طلب توثيقه نيابة عنه مباشرة؛ يقبل هو الدعوة لاحقاً بلا أي تأثير على ما
+     * أنجزه الأدمن (انظر تعليق acceptInvitation() أدناه).
+     */
     public function submitForVerification(Teacher $teacher): Teacher
     {
-        if ($teacher->status !== 'active_unverified') {
+        if (! in_array($teacher->status, ['invited', 'active_unverified'], true)) {
             throw ValidationException::withMessages([
                 'status' => ['لا يمكن إرسال طلب التوثيق من هذه الحالة'],
             ]);
