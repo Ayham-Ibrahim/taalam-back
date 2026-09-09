@@ -7,6 +7,8 @@ use App\Models\Booking;
 use App\Models\ClassSession;
 use App\Models\Enrollment;
 use App\Models\Teacher;
+use App\Models\TeacherExperience;
+use App\Models\TeacherFaq;
 use App\Models\TeacherVideo;
 use App\Models\User;
 use App\Models\VerificationDocument;
@@ -225,6 +227,59 @@ class TeacherService
         $this->audit('teacher.video_removed', $video, ['youtube_id' => $video->youtube_id], []);
 
         $video->delete();
+    }
+
+    /** يُرفَض بعد الحد الأقصى (Teacher::MAX_FAQS) — نفس منطق addVideo() تماماً */
+    public function addFaq(Teacher $teacher, array $data): TeacherFaq
+    {
+        if ($teacher->faqs()->count() >= Teacher::MAX_FAQS) {
+            throw ValidationException::withMessages([
+                'faqs' => ['لا يمكن إضافة أكثر من '.Teacher::MAX_FAQS.' أسئلة — احذف سؤالاً قديماً أولاً.'],
+            ]);
+        }
+
+        $faq = $teacher->faqs()->create([
+            'question' => $data['question'],
+            'answer' => $data['answer'],
+            'sort_order' => ($teacher->faqs()->max('sort_order') ?? -1) + 1,
+        ]);
+
+        $this->audit('teacher.faq_added', $faq, [], ['question' => $faq->question]);
+
+        return $faq;
+    }
+
+    public function removeFaq(TeacherFaq $faq): void
+    {
+        $this->audit('teacher.faq_removed', $faq, ['question' => $faq->question], []);
+
+        $faq->delete();
+    }
+
+    public function addExperience(Teacher $teacher, array $data): TeacherExperience
+    {
+        if ($teacher->experiences()->count() >= Teacher::MAX_EXPERIENCES) {
+            throw ValidationException::withMessages([
+                'experiences' => ['لا يمكن إضافة أكثر من '.Teacher::MAX_EXPERIENCES.' خبرات — احذف خبرة قديمة أولاً.'],
+            ]);
+        }
+
+        $experience = $teacher->experiences()->create([
+            'title' => $data['title'],
+            'period' => $data['period'],
+            'sort_order' => ($teacher->experiences()->max('sort_order') ?? -1) + 1,
+        ]);
+
+        $this->audit('teacher.experience_added', $experience, [], ['title' => $experience->title]);
+
+        return $experience;
+    }
+
+    public function removeExperience(TeacherExperience $experience): void
+    {
+        $this->audit('teacher.experience_removed', $experience, ['title' => $experience->title], []);
+
+        $experience->delete();
     }
 
     /**

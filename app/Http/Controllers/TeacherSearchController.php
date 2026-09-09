@@ -47,11 +47,21 @@ class TeacherSearchController extends Controller
             ->when($filters['language_id'] ?? null, function ($q, $languageId) {
                 $q->whereHas('languages', fn ($lq) => $lq->where('languages.id', $languageId));
             })
-            ->when($filters['min_price'] ?? null, function ($q, $minPrice) {
-                $q->whereHas('packages', fn ($pq) => $pq->bookable()->where('student_price', '>=', $minPrice));
-            })
-            ->when($filters['max_price'] ?? null, function ($q, $maxPrice) {
-                $q->whereHas('packages', fn ($pq) => $pq->bookable()->where('student_price', '<=', $maxPrice));
+            // فحص واحد مشترك للحدَّين معاً — لا نداءين مستقلَّين (كانا سابقاً
+            // منفصلَين: EXISTS باقة ≥ الحد الأدنى، وEXISTS باقة ≤ الحد الأقصى،
+            // بلا اشتراط أن تكون نفس الباقة). ذلك كان يُطابق معلماً بالخطأ لديه
+            // باقة رخيصة جداً وأخرى غالية جداً كلتاهما خارج النطاق المطلوب، طالما
+            // إحداهما فوق الحد الأدنى والأخرى تحت الحد الأقصى بمعزل عن بعضهما.
+            ->when(($filters['min_price'] ?? null) !== null || ($filters['max_price'] ?? null) !== null, function ($q) use ($filters) {
+                $q->whereHas('packages', function ($pq) use ($filters) {
+                    $pq->bookable();
+                    if (($filters['min_price'] ?? null) !== null) {
+                        $pq->where('student_price', '>=', $filters['min_price']);
+                    }
+                    if (($filters['max_price'] ?? null) !== null) {
+                        $pq->where('student_price', '<=', $filters['max_price']);
+                    }
+                });
             })
             ->with('user:id,name,avatar_path')
             ->orderByDesc('ranking_score')

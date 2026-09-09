@@ -15,6 +15,12 @@ class Teacher extends Model
     /** حد تعسفي معقول يمنع نمواً غير محدود لقائمة الفيديوهات — سهل التعديل لاحقاً إن لزم */
     public const MAX_VIDEOS = 6;
 
+    /** نفس منطق MAX_VIDEOS تماماً — يمنع قائمة أسئلة شائعة غير منتهية */
+    public const MAX_FAQS = 10;
+
+    /** نفس المنطق أيضاً — سجل خبرات سابقة يديره المعلم بنفسه (عنوان + فترة نصية) */
+    public const MAX_EXPERIENCES = 10;
+
     protected $fillable = [
         'user_id',
         'teacher_type',
@@ -90,9 +96,25 @@ class Teacher extends Model
         return $this->hasMany(TeacherVideo::class)->orderBy('sort_order');
     }
 
+    public function faqs()
+    {
+        return $this->hasMany(TeacherFaq::class)->orderBy('sort_order');
+    }
+
+    public function experiences()
+    {
+        return $this->hasMany(TeacherExperience::class)->orderBy('sort_order');
+    }
+
     public function badgeAwards()
     {
         return $this->hasMany(BadgeAward::class);
+    }
+
+    /** الشارات الفعّالة حالياً فقط (غير ملغاة) — هذا ما يُعرَض علناً بملف المعلم. */
+    public function activeBadgeAwards()
+    {
+        return $this->badgeAwards()->whereNull('revoked_at')->with('badge')->orderBy('granted_at');
     }
 
     public function packages()

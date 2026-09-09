@@ -27,6 +27,8 @@ use App\Http\Controllers\Student\StudentImportController;
 use App\Http\Controllers\TaxonomyController;
 use App\Http\Controllers\Teacher\BadgeController;
 use App\Http\Controllers\Teacher\TeacherController;
+use App\Http\Controllers\Teacher\TeacherExperienceController;
+use App\Http\Controllers\Teacher\TeacherFaqController;
 use App\Http\Controllers\Teacher\TeacherImportController;
 use App\Http\Controllers\Teacher\TeacherVideoController;
 use App\Http\Controllers\Teacher\VerificationDocumentController;
@@ -110,6 +112,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('teachers/{teacher}/avatar', [TeacherController::class, 'deleteAvatar']);
     Route::post('teachers/{teacher}/videos', [TeacherVideoController::class, 'store']);
     Route::delete('teacher-videos/{video}', [TeacherVideoController::class, 'destroy']);
+    Route::post('teachers/{teacher}/faqs', [TeacherFaqController::class, 'store']);
+    Route::delete('teacher-faqs/{faq}', [TeacherFaqController::class, 'destroy']);
+    Route::post('teachers/{teacher}/experiences', [TeacherExperienceController::class, 'store']);
+    Route::delete('teacher-experiences/{experience}', [TeacherExperienceController::class, 'destroy']);
 
     Route::get('badges', [BadgeController::class, 'index']);
     Route::post('teachers/{teacher}/badges', [BadgeController::class, 'grant']);

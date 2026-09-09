@@ -31,6 +31,18 @@ class PublicTeacherResource extends JsonResource
             'videos' => $this->whenLoaded('videos', fn () => $this->videos->map(fn ($v) => [
                 'id' => $v->id, 'youtube_id' => $v->youtube_id, 'title' => $v->title,
             ])),
+            'faqs' => $this->whenLoaded('faqs', fn () => $this->faqs->map(fn ($f) => [
+                'id' => $f->id, 'question' => $f->question, 'answer' => $f->answer,
+            ])),
+            'experiences' => $this->whenLoaded('experiences', fn () => $this->experiences->map(fn ($e) => [
+                'id' => $e->id, 'title' => $e->title, 'period' => $e->period,
+            ])),
+            'badges' => $this->whenLoaded('activeBadgeAwards', fn () => $this->activeBadgeAwards->map(fn ($award) => [
+                'award_id' => $award->id,
+                'code' => $award->badge->code,
+                'name_ar' => $award->badge->name_ar,
+                'icon' => $award->badge->icon,
+            ])),
             'user' => [
                 'id' => $this->user->id,
                 'name' => $this->user->name,

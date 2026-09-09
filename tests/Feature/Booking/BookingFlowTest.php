@@ -24,6 +24,12 @@ class BookingFlowTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+        parent::tearDown();
+    }
+
     public function test_individual_booking_request_and_approval_creates_sessions_and_payment(): void
     {
         [$teacher] = $this->createVerifiedTeacher();
@@ -353,19 +359,30 @@ class BookingFlowTest extends TestCase
         $today = Carbon::today();
         $package->schedules()->create(['day_of_week' => $today->dayOfWeek]);
 
+        // الطلب يُنشأ بموعد صالح (لحظات قليلة في المستقبل) — BookingService يرفض
+        // الآن أي موعد ماضٍ فعلاً عند الإنشاء نفسه (assertSlotsNotInPast)، فلا يمكن
+        // تمرير موعد ماضٍ مباشرة هنا. بدلاً من ذلك نُقدّم الساعة فعلياً بعد الإنشاء
+        // حتى يصبح هذا الموعد قد مضى وقته قبل أن يوافق المعلم.
         $request = $this->as($studentToken)->postJson("/api/packages/{$package->id}/bookings/individual", [
             // أقرب موعد (اليوم) هو الماضي بالفعل — لحظة انتهاء الطلب تُحسَب من
             // أقرب جلسة، لا من كل الجلسات، فهذا وحده كافٍ لإبطال الطلب كاملاً
-            'slots' => $this->weeklySlots($today, 4, now()->subHour()->format('H:i')),
+            'slots' => $this->weeklySlots($today, 4, now()->addMinutes(5)->format('H:i')),
         ]);
         $request->assertStatus(201);
 
         $bookingId = $request->json('data.id');
 
+        Carbon::setTestNow(now()->addHour());
+
         $approve = $this->as($teacherToken)->postJson("/api/bookings/{$bookingId}/approve");
 
+        // BookingController::approveRequest يستدعي expireStalePendingTeacherConfirmations()
+        // (كنس جماعي) قبل استدعاء approveIndividualRequest نفسها، فيسبقها دوماً لتحويل
+        // هذا الحجز إلى expired أولاً — عندها يجد approveIndividualRequest الحجز خارج حالة
+        // "بانتظار الموافقة" أصلاً فيرمي رسالتها العامة، لا رسالة "انتهى الوقت" المحدَّدة
+        // (تلك تظهر فقط لو استُدعيت الخدمة مباشرة دون مرور الطلب بالكنس الجماعي أولاً).
         $approve->assertStatus(422)
-            ->assertJsonPath('errors.status.0', 'انتهى وقت الجلسة المقترحة دون موافقة المعلم.');
+            ->assertJsonPath('errors.status.0', 'هذا الطلب لم يعد بانتظار الموافقة');
 
         $this->assertDatabaseHas('bookings', [
             'id' => $bookingId,
@@ -532,9 +549,12 @@ class BookingFlowTest extends TestCase
         return [$teacher, $token];
     }
 
-    private function createStudent(): Student
+    private function createStudent(string $timezone = 'UTC'): Student
     {
-        $user = User::factory()->student()->create();
+        // users.timezone الافتراضية بقاعدة البيانات هي 'Asia/Riyadh' (UTC+3) لا UTC —
+        // نضبطها صراحةً هنا كي تبقى حسابات الوقت بهذا الملف (نص "H:i" يُقارَن مباشرة
+        // بساعة السيرفر) متوقَّعة، بدل انزياحها ٣ ساعات ضمناً.
+        $user = User::factory()->student()->create(['timezone' => $timezone]);
 
         return Student::create(['user_id' => $user->id, 'education_type' => 'school']);
     }

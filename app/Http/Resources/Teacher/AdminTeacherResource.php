@@ -41,6 +41,12 @@ class AdminTeacherResource extends JsonResource
             'videos' => $this->whenLoaded('videos', fn () => $this->videos->map(fn ($v) => [
                 'id' => $v->id, 'youtubeId' => $v->youtube_id, 'title' => $v->title,
             ])),
+            'faqs' => $this->whenLoaded('faqs', fn () => $this->faqs->map(fn ($f) => [
+                'id' => $f->id, 'question' => $f->question, 'answer' => $f->answer,
+            ])),
+            'experiences' => $this->whenLoaded('experiences', fn () => $this->experiences->map(fn ($e) => [
+                'id' => $e->id, 'title' => $e->title, 'period' => $e->period,
+            ])),
             'subjects' => $this->whenLoaded('subjects', fn () => $this->subjects->map(fn ($s) => ['id' => $s->id, 'name' => $s->name_ar])),
             'curricula' => $this->whenLoaded('curricula', fn () => $this->curricula->map(fn ($c) => ['id' => $c->id, 'name' => $c->name_ar])),
             'languages' => $this->whenLoaded('languages', fn () => $this->languages->map(fn ($l) => ['id' => $l->id, 'name' => $l->name_ar])),
