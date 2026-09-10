@@ -4,12 +4,14 @@ namespace Database\Seeders;
 
 use App\Models\Badge;
 use App\Models\BadgeAward;
+use App\Models\Booking;
 use App\Models\ClassSession;
 use App\Models\Curriculum;
 use App\Models\Language;
 use App\Models\Package;
 use App\Models\PackageSchedule;
 use App\Models\Review;
+use App\Models\SessionAttendee;
 use App\Models\Stage;
 use App\Models\Student;
 use App\Models\Subject;
@@ -172,13 +174,15 @@ class DemoAccountsSeeder extends Seeder
             );
         }
 
-        // شارات تجريبية لعرض صف الشارات في ترويسة الملف
-        foreach (['reviewed_credentials', 'background_checked', 'featured'] as $code) {
+        // شارات تجريبية لعرض صف الشارات في ترويسة الملف — بالترتيب المعروض
+        // (يمين→يسار): مؤهلات مراجعة، فحص أمني، معلم مميز، مركز معتمد
+        $badgeCodes = ['reviewed_credentials', 'background_checked', 'featured', 'accredited_center'];
+        foreach ($badgeCodes as $i => $code) {
             $badge = Badge::where('code', $code)->first();
             if ($badge) {
                 BadgeAward::updateOrCreate(
                     ['teacher_id' => $teacher->id, 'badge_id' => $badge->id],
-                    ['granted_by' => null, 'granted_at' => now(), 'revoked_at' => null],
+                    ['granted_by' => null, 'granted_at' => now()->addSeconds($i), 'revoked_at' => null],
                 );
             }
         }
@@ -231,7 +235,7 @@ class DemoAccountsSeeder extends Seeder
             ['email' => 'student@taalam.test'],
             ['name' => 'طالب تجريبي', 'role' => 'student', 'email_verified_at' => now(), 'password' => bcrypt('password')],
         );
-        Student::updateOrCreate(
+        $student = Student::updateOrCreate(
             ['user_id' => $studentUser->id],
             [
                 'education_type' => 'school',
@@ -240,6 +244,50 @@ class DemoAccountsSeeder extends Seeder
                 'grade' => 10,
             ],
         );
+
+        // جلسة مكتملة حضرها الطالب التجريبي مع المعلم التجريبي، بلا تقييم بعد —
+        // تظهر في /dashboard/student/reviews كـ"بانتظار التقييم" فيستطيع الطالب
+        // إدخال تقييمه فعلياً (POST /class-sessions/{session}/reviews).
+        $demoBooking = Booking::firstOrCreate(
+            ['student_id' => $student->id, 'teacher_id' => $teacher->id, 'package_id' => $groupPackage->id],
+            [
+                'reference' => 'BK-DEMO-0001',
+                'amount_paid' => 480,
+                'teacher_amount' => 400,
+                'platform_amount' => 80,
+                'margin_percent_snapshot' => 20,
+                'currency' => 'USD',
+                'sessions_total' => 8,
+                'sessions_used' => 1,
+                'sessions_remaining' => 7,
+                'status' => 'active',
+                'policy_accepted_at' => now()->subDays(10),
+                'confirmed_at' => now()->subDays(10),
+            ],
+        );
+        // جلستان مكتملتان — يبقى دائماً ما لا يقل عن واحدة بلا تقييم لتجربة الإدخال
+        foreach ([1 => 3, 2 => 1] as $seq => $daysAgo) {
+            $s = ClassSession::firstOrCreate(
+                ['booking_id' => $demoBooking->id, 'sequence_no' => $seq],
+                [
+                    'teacher_id' => $teacher->id,
+                    'scheduled_at' => now()->subDays($daysAgo)->setTime(17, 0),
+                    'ended_at' => now()->subDays($daysAgo)->setTime(18, 0),
+                    'duration_min' => 60,
+                    'status' => 'completed',
+                ],
+            );
+            SessionAttendee::firstOrCreate(
+                ['class_session_id' => $s->id, 'student_id' => $student->id],
+                [
+                    'booking_id' => $demoBooking->id,
+                    'attendance' => 'present',
+                    'joined_at' => now()->subDays($daysAgo)->setTime(17, 0),
+                    'left_at' => now()->subDays($daysAgo)->setTime(18, 0),
+                    'duration_minutes' => 60,
+                ],
+            );
+        }
 
         $this->command?->info('Demo accounts ready (password: "password"):');
         $this->command?->table(['role', 'email'], [

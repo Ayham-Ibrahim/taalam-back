@@ -2,8 +2,8 @@
 
 use App\Http\Controllers\Admin\AdminDashboardController;
 use App\Http\Controllers\Admin\AuditLogController;
-use App\Http\Controllers\Admin\NotificationLogController;
 use App\Http\Controllers\Admin\ImportBatchController;
+use App\Http\Controllers\Admin\NotificationLogController;
 use App\Http\Controllers\Admin\SettingsController;
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\Booking\BookingController;
@@ -80,6 +80,7 @@ Route::get('teachers/{teacher}', [TeacherController::class, 'show']);
 Route::get('teachers/{teacher}/packages', [PackageController::class, 'indexForTeacher']);
 Route::get('teachers/{teacher}/courses', [CourseController::class, 'indexForTeacher']);
 Route::get('teachers/{teacher}/reviews', [ReviewController::class, 'indexForTeacher']);
+Route::get('teachers/{teacher}/rating-summary', [ReviewController::class, 'ratingSummaryForTeacher']);
 
 // إحصائيات الصفحة الرئيسية وخيارات فلاتر البحث — بلا مصادقة عمداً
 Route::get('meta/stats', [MetaController::class, 'stats']);

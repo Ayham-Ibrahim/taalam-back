@@ -59,6 +59,36 @@ class ReviewController extends Controller
         return $this->paginate($reviews);
     }
 
+    /**
+     * ملخص تقييم المعلم للعرض العام — متوسط دقيق + توزيع النجوم كنِسب مئوية،
+     * محسوب مباشرة من قاعدة البيانات (GROUP BY rating) لا من عيّنة الصفحة
+     * الأولى. rating_avg/reviews_count المخزَّنان على المعلم يحدَّثان تلقائياً
+     * عبر ReviewObserver عند كل إنشاء/تعديل/إخفاء تقييم.
+     */
+    public function ratingSummaryForTeacher(Teacher $teacher)
+    {
+        $counts = Review::where('teacher_id', $teacher->id)
+            ->where('is_hidden', false)
+            ->selectRaw('rating, COUNT(*) as total')
+            ->groupBy('rating')
+            ->pluck('total', 'rating');
+
+        $total = (int) $counts->sum();
+        $sum = collect(range(1, 5))->sum(fn ($star) => $star * (int) ($counts[$star] ?? 0));
+
+        $distribution = [];
+        foreach (range(1, 5) as $star) {
+            $starCount = (int) ($counts[$star] ?? 0);
+            $distribution[$star] = $total > 0 ? (int) round($starCount / $total * 100) : 0;
+        }
+
+        return $this->success([
+            'average' => $total > 0 ? round($sum / $total, 1) : 0,
+            'total' => $total,
+            'distribution' => $distribution,
+        ]);
+    }
+
     public function store(CreateReviewRequest $request, ClassSession $session)
     {
         $student = $request->user()->loadMissing('student')->student;
