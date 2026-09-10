@@ -35,6 +35,7 @@ class AdminTeacherResource extends JsonResource
             'experienceYears' => $this->experience_years,
             'ageGroups' => $this->age_groups,
             'teachingMethods' => $this->teaching_methods,
+            'examPrep' => $this->exam_prep,
             'displayNameEn' => $this->display_name_en,
             'commercialRegister' => $this->commercial_register,
             'introYoutubeId' => $this->intro_youtube_id,

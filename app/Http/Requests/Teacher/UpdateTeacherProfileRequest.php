@@ -37,6 +37,8 @@ class UpdateTeacherProfileRequest extends FormRequest
             'age_groups.*' => ['string', 'max:50'],
             'teaching_methods' => ['nullable', 'array', 'max:20'],
             'teaching_methods.*' => ['string', 'max:50'],
+            'exam_prep' => ['nullable', 'array', 'max:20'],
+            'exam_prep.*' => ['string', 'max:50'],
             'max_daily_sessions' => ['nullable', 'integer', 'min:1', 'max:24'],
 
             // أحرف فقط (بلا أرقام) — نفس قاعدة حقول الاسم الأخرى، على مستوى

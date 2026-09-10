@@ -38,6 +38,7 @@ class Teacher extends Model
         'city',
         'age_groups',
         'teaching_methods',
+        'exam_prep',
         'timezone',
         'max_daily_sessions',
         'status',
@@ -53,6 +54,7 @@ class Teacher extends Model
         return [
             'age_groups' => 'array',
             'teaching_methods' => 'array',
+            'exam_prep' => 'array',
             'verified_at' => 'datetime',
             'rating_avg' => 'decimal:2',
             'completion_rate' => 'decimal:2',

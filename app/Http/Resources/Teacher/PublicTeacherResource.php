@@ -24,6 +24,7 @@ class PublicTeacherResource extends JsonResource
             'experience_years' => $this->experience_years,
             'age_groups' => $this->age_groups,
             'teaching_methods' => $this->teaching_methods,
+            'exam_prep' => $this->exam_prep,
             'logo_path' => $this->logo_path,
             'intro_video_path' => $this->intro_video_path,
             'intro_video_seconds' => $this->intro_video_seconds,

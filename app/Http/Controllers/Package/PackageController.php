@@ -79,7 +79,7 @@ class PackageController extends Controller
         $packages = Package::query()
             ->where('teacher_id', $teacher->id)
             ->where('status', 'active')
-            ->with(['subject:id,name_ar', 'stages', 'schedules'])
+            ->with(['subject:id,name_ar', 'curricula:id,name_ar', 'stages', 'schedules'])
             ->latest()
             ->paginate(20);
 

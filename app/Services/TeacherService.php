@@ -508,9 +508,10 @@ class TeacherService
      */
     public function getStats(Teacher $teacher): array
     {
-        $teachingMinutes = ClassSession::where('teacher_id', $teacher->id)
-            ->where('status', 'completed')
-            ->sum('duration_min');
+        $completedSessions = ClassSession::where('teacher_id', $teacher->id)
+            ->where('status', 'completed');
+        $teachingMinutes = (clone $completedSessions)->sum('duration_min');
+        $completedSessionsCount = $completedSessions->count();
 
         $studentIds = Booking::where('teacher_id', $teacher->id)->whereNotNull('student_id')->pluck('student_id')
             ->merge(Enrollment::where('teacher_id', $teacher->id)->whereNotNull('student_id')->pluck('student_id'))
@@ -520,7 +521,15 @@ class TeacherService
             'rating_avg' => (float) $teacher->rating_avg,
             'reviews_count' => $teacher->reviews_count,
             'teaching_hours' => round($teachingMinutes / 60, 1),
+            'completed_sessions' => $completedSessionsCount,
             'total_students' => $studentIds->count(),
+            // نسبة الرضا المعروضة في ترويسة الملف العام: نسبة إتمام الحصص إن
+            // توفّرت، وإلا فمشتقّة من متوسط التقييم (تقييم/5). null إن لا هذا ولا ذاك.
+            'satisfaction_rate' => match (true) {
+                (float) $teacher->completion_rate > 0 => (int) round((float) $teacher->completion_rate),
+                (float) $teacher->rating_avg > 0 => (int) round(((float) $teacher->rating_avg / 5) * 100),
+                default => null,
+            },
         ];
     }
 }

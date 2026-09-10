@@ -2,12 +2,19 @@
 
 namespace Database\Seeders;
 
+use App\Models\Badge;
+use App\Models\BadgeAward;
+use App\Models\ClassSession;
 use App\Models\Curriculum;
 use App\Models\Language;
+use App\Models\Package;
+use App\Models\PackageSchedule;
+use App\Models\Review;
 use App\Models\Stage;
 use App\Models\Student;
 use App\Models\Subject;
 use App\Models\Teacher;
+use App\Models\TeacherExperience;
 use App\Models\User;
 use Illuminate\Database\Seeder;
 
@@ -19,6 +26,10 @@ class DemoAccountsSeeder extends Seeder
 {
     public function run(): void
     {
+        // صف الشارات في ترويسة الملف يحتاج كتالوج الشارات موجوداً حتى لو
+        // شُغِّل هذا السيدر وحده (خارج DatabaseSeeder)
+        $this->callOnce(BadgeSeeder::class);
+
         $curriculum = Curriculum::firstOrCreate(
             ['code' => 'national'],
             ['name_ar' => 'المنهج الوطني', 'name_en' => 'National', 'sort_order' => 1, 'is_active' => true],
@@ -35,9 +46,31 @@ class DemoAccountsSeeder extends Seeder
         );
         $subject->stages()->syncWithoutDetaching([$stage->id]);
 
+        $extraSubjects = collect([
+            ['code' => 'physics', 'name_ar' => 'فيزياء', 'name_en' => 'Physics'],
+            ['code' => 'chemistry', 'name_ar' => 'كيمياء', 'name_en' => 'Chemistry'],
+        ])->map(fn ($s, $i) => Subject::firstOrCreate(
+            ['code' => $s['code']],
+            $s + ['education_type' => 'school', 'sort_order' => $i + 2, 'is_active' => true],
+        ));
+
+        $curricula = collect([
+            ['code' => 'british', 'name_ar' => 'بريطاني', 'name_en' => 'British'],
+            ['code' => 'american', 'name_ar' => 'أمريكي', 'name_en' => 'American'],
+            ['code' => 'igcse', 'name_ar' => 'IGCSE', 'name_en' => 'IGCSE'],
+            ['code' => 'a_level', 'name_ar' => 'A-Level', 'name_en' => 'A-Level'],
+        ])->map(fn ($c, $i) => Curriculum::firstOrCreate(
+            ['code' => $c['code']],
+            $c + ['sort_order' => $i + 2, 'is_active' => true],
+        ));
+
         $language = Language::firstOrCreate(
             ['code' => 'ar'],
             ['name_ar' => 'العربية', 'is_active' => true],
+        );
+        $languageEn = Language::firstOrCreate(
+            ['code' => 'en'],
+            ['name_ar' => 'الإنجليزية', 'is_active' => true],
         );
 
         // ═══════ أدمن ═══════
@@ -57,14 +90,122 @@ class DemoAccountsSeeder extends Seeder
                 'teacher_type' => 'school',
                 'status' => 'verified',
                 'verified_at' => now(),
-                'bio' => 'معلم رياضيات بخبرة أكثر من 5 سنوات',
+                'bio' => 'معلم رياضيات متخصص في مناهج Cambridge وEdexcel وIB واختبارات IELTS/TOEFL، بخبرة أكثر من ثماني سنوات في تدريس الطلاب من مختلف المراحل الدراسية. أومن أن كل طالب قادر على تحقيق التفوق عند توفير الأسلوب المناسب والبيئة الداعمة، لذلك أركز على تبسيط المفاهيم وبناء أساسيات قوية قبل الانتقال إلى المسائل المتقدمة، مع متابعة فردية لكل طالب وتقارير دورية لولي الأمر.',
                 'qualification' => 'bachelor',
                 'experience_years' => 'over_5',
+                'city' => 'الأردن - عمّان - حي الطويل',
+                'teaching_methods' => ['شرح مباشر', 'حل واجبات', 'تدريب امتحانات'],
+                'exam_prep' => ['SAT', 'ACT', 'IB', 'IGCSE'],
+                'intro_youtube_id' => 'M7lc1UVf-VE',
+                'intro_video_seconds' => 86,
             ],
         );
-        $teacher->subjects()->syncWithoutDetaching([$subject->id]);
-        $teacher->curricula()->syncWithoutDetaching([$curriculum->id]);
-        $teacher->languages()->syncWithoutDetaching([$language->id]);
+        // نسبة الرضا في ترويسة الملف مشتقة من هذا العمود (غير قابل للتعبئة الجماعية)
+        $teacher->forceFill(['completion_rate' => 92])->save();
+        $teacher->subjects()->syncWithoutDetaching(
+            $extraSubjects->pluck('id')->push($subject->id)->all(),
+        );
+        $teacher->curricula()->syncWithoutDetaching(
+            $curricula->pluck('id')->push($curriculum->id)->all(),
+        );
+        $teacher->languages()->syncWithoutDetaching([$language->id, $languageEn->id]);
+
+        // مراحل دراسية إضافية + باقة جماعية نشطة حتى يظهر خيارا "فردية/جماعية"
+        // في قسم "نوع الجلسة" (مُشتَق من باقات المعلم القابلة للحجز)
+        $primary = Stage::firstOrCreate(
+            ['code' => 'primary'],
+            ['name_ar' => 'المرحلة الابتدائية', 'education_type' => 'school', 'sort_order' => 0, 'is_active' => true],
+        );
+        $groupPackage = Package::firstOrCreate(
+            ['teacher_id' => $teacher->id, 'title' => 'باقة المجموعة المكثفة'],
+            [
+                'subject_id' => $subject->id,
+                'session_format' => 'group',
+                'capacity' => 6,
+                'sessions_count' => 8,
+                'session_duration_min' => 60,
+                'validity_days' => 60,
+                'teacher_price' => 400,
+                'platform_margin_percent' => 20,
+                'student_price' => 480,
+                'platform_revenue' => 80,
+                'currency' => 'USD',
+                'status' => 'active',
+                'approved_at' => now(),
+            ],
+        );
+        $groupPackage->stages()->syncWithoutDetaching([$stage->id, $primary->id]);
+        PackageSchedule::firstOrCreate(
+            ['package_id' => $groupPackage->id, 'date' => now()->addWeek()->toDateString()],
+            ['start_time' => '17:00', 'end_time' => '18:00', 'day_of_week' => now()->addWeek()->dayOfWeek],
+        );
+        $groupPackage->update(['enrolled_count' => 3]);
+
+        // جلسات مكتملة تجريبية لإحصائية "الجلسات المكتملة" في الترويسة
+        $completedCount = ClassSession::where('teacher_id', $teacher->id)->where('status', 'completed')->count();
+        for ($i = $completedCount; $i < 48; $i++) {
+            ClassSession::create([
+                'teacher_id' => $teacher->id,
+                'sequence_no' => 1,
+                'scheduled_at' => now()->subDays($i + 2)->setTime(17, 0),
+                'duration_min' => 60,
+                'status' => 'completed',
+            ]);
+        }
+
+        // مناهج تجريبية على كل باقات المعلم النشطة — تظهر كوسوم في بطاقة الباقة
+        $curriculumIds = $curricula->pluck('id')->take(2)->all();
+        Package::where('teacher_id', $teacher->id)->where('status', 'active')->each(
+            fn (Package $p) => $p->curricula()->syncWithoutDetaching($curriculumIds),
+        );
+
+        // خبرات سابقة تجريبية لقسم "الخبرات السابقة"
+        $experiences = [
+            ['title' => 'مدرس في مدارس خاصة في دبي', 'period' => '2019 - 2022', 'sort_order' => 1],
+            ['title' => 'مدرس في أكاديمية تعليمية', 'period' => '2022 - الآن', 'sort_order' => 2],
+            ['title' => 'خبرة في مناهج British / American / IB', 'period' => '', 'sort_order' => 3],
+        ];
+        foreach ($experiences as $exp) {
+            TeacherExperience::updateOrCreate(
+                ['teacher_id' => $teacher->id, 'title' => $exp['title']],
+                ['period' => $exp['period'], 'sort_order' => $exp['sort_order']],
+            );
+        }
+
+        // شارات تجريبية لعرض صف الشارات في ترويسة الملف
+        foreach (['reviewed_credentials', 'background_checked', 'featured'] as $code) {
+            $badge = Badge::where('code', $code)->first();
+            if ($badge) {
+                BadgeAward::updateOrCreate(
+                    ['teacher_id' => $teacher->id, 'badge_id' => $badge->id],
+                    ['granted_by' => null, 'granted_at' => now(), 'revoked_at' => null],
+                );
+            }
+        }
+
+        // تقييمات تجريبية لقسم "التقييم" (المتوسط ≈ 4.5)
+        $demoReviews = [
+            ['name' => 'سعيد صالح', 'rating' => 5, 'comment' => 'دروس منظمة جداً ومفيدة، لقد استفدت كثيراً، شكراً للمنصة وللمدرس.'],
+            ['name' => 'ليلى الأحمد', 'rating' => 5, 'comment' => 'شرح واضح وأسلوب صبور، تحسّن مستوى ابني في الرياضيات بشكل ملحوظ.'],
+            ['name' => 'محمد كريم', 'rating' => 5, 'comment' => 'أفضل مدرس تعاملت معه، يعطي أمثلة عملية ويتابع الواجبات أولاً بأول.'],
+            ['name' => 'هدى ناصر', 'rating' => 4, 'comment' => 'تجربة جيدة جداً، فقط أتمنى توفير مواعيد إضافية في نهاية الأسبوع.'],
+            ['name' => 'خالد عمر', 'rating' => 4, 'comment' => 'مدرس متمكن من المادة وملتزم بالمواعيد، أنصح به.'],
+            ['name' => 'ريم فؤاد', 'rating' => 4, 'comment' => 'استفدت من الحصص التحضيرية للامتحانات، الشرح مبسّط ومركّز.'],
+        ];
+        foreach ($demoReviews as $i => $rev) {
+            $revUser = User::updateOrCreate(
+                ['email' => 'reviewer'.($i + 1).'@taalam.test'],
+                ['name' => $rev['name'], 'role' => 'student', 'email_verified_at' => now(), 'password' => bcrypt('password')],
+            );
+            $revStudent = Student::updateOrCreate(
+                ['user_id' => $revUser->id],
+                ['education_type' => 'school', 'curriculum_id' => $curriculum->id, 'stage_id' => $stage->id, 'grade' => 11],
+            );
+            Review::updateOrCreate(
+                ['student_id' => $revStudent->id, 'teacher_id' => $teacher->id, 'class_session_id' => null],
+                ['rating' => $rev['rating'], 'comment' => $rev['comment'], 'is_hidden' => false],
+            );
+        }
 
         // ═══════ مركز تدريبي ═══════
         $centerUser = User::updateOrCreate(
