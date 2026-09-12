@@ -21,10 +21,14 @@ class StudentPolicy
         return $user->isAdmin();
     }
 
-    /** إكمال الملف الشخصي بعد أول دخول — الطالب نفسه فقط */
+    /**
+     * إكمال/تعديل الملف الشخصي — الطالب نفسه، أو الأدمن نيابةً عنه (يوازي
+     * TeacherPolicy::update تماماً؛ يتيح للأدمن إكمال بيانات طالب لم يُكملها
+     * بعد أو تصحيح بياناته لاحقاً، دون انتظاره).
+     */
     public function update(User $user, Student $student): bool
     {
-        return $user->id === $student->user_id;
+        return $user->isAdmin() || $user->id === $student->user_id;
     }
 
     /** الأدمن فقط يعيد تعيين كلمة مرور طالب مباشرة (بلا حاجة لكلمة المرور الحالية) */

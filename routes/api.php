@@ -218,6 +218,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('students/{student}', [StudentController::class, 'show']);
     Route::put('students/{student}', [StudentController::class, 'update']);
     Route::put('students/{student}/password', [StudentController::class, 'resetPassword']);
+    Route::middleware('throttle:uploads')->post('students/{student}/avatar', [StudentController::class, 'uploadAvatar']);
+    Route::delete('students/{student}/avatar', [StudentController::class, 'deleteAvatar']);
 
     Route::get('admin/settings', [SettingsController::class, 'index']);
     Route::put('admin/settings/{key}', [SettingsController::class, 'update']);
