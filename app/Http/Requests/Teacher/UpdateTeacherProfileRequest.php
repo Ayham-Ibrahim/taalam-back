@@ -30,6 +30,9 @@ class UpdateTeacherProfileRequest extends FormRequest
 
         return [
             'bio' => ['nullable', 'string', 'max:500'],
+            'teaching_philosophy_quote' => ['nullable', 'string', 'max:200'],
+            'teaching_philosophy_text' => ['nullable', 'string', 'max:600'],
+            'thank_you_message' => ['nullable', 'string', 'max:600'],
             'intro_youtube_id' => ['nullable', new ValidYoutubeVideo],
             'qualification' => ['nullable', Rule::in(['bachelor', 'master', 'phd', 'professional_cert', 'diploma'])],
             'experience_years' => ['nullable', Rule::in(['under_1', '1_3', '3_5', 'over_5'])],
