@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\Teacher\SearchTeachersRequest;
+use App\Models\ClassSession;
+use App\Models\Package;
 use App\Models\Teacher;
 
 /**
@@ -17,7 +19,7 @@ class TeacherSearchController extends Controller
         $filters = $request->validated();
 
         $teachers = Teacher::query()
-            ->select(['id', 'user_id', 'teacher_type', 'bio', 'city', 'rating_avg', 'reviews_count', 'ranking_score', 'profile_completeness'])
+            ->select(['id', 'user_id', 'teacher_type', 'bio', 'city', 'qualification', 'experience_years', 'rating_avg', 'reviews_count', 'ranking_score', 'profile_completeness'])
             ->where('status', 'verified')
             ->when($filters['teacher_type'] ?? null, fn ($q, $type) => $q->where('teacher_type', $type))
             ->when($filters['city'] ?? null, fn ($q, $city) => $q->where('city', $city))
@@ -66,6 +68,30 @@ class TeacherSearchController extends Controller
             ->with('user:id,name,avatar_path')
             ->orderByDesc('ranking_score')
             ->paginate($request->integer('per_page', 20));
+
+        // مقاعد بطاقة نتائج البحث الخفيفة تحتاج "الجلسات المكتملة" و"المراحل
+        // الدراسية" أيضاً — بدفعتين مجمّعتين لكل صفحة (بلا N+1) بدل استدعاء
+        // TeacherService::getStats الكامل لكل معلم على حدة.
+        $teacherIds = collect($teachers->items())->pluck('id');
+
+        $completedCounts = ClassSession::whereIn('teacher_id', $teacherIds)
+            ->where('status', 'completed')
+            ->selectRaw('teacher_id, COUNT(*) as cnt')
+            ->groupBy('teacher_id')
+            ->pluck('cnt', 'teacher_id');
+
+        $stagesByTeacher = Package::query()
+            ->whereIn('teacher_id', $teacherIds)
+            ->bookable()
+            ->with('stages:id,name_ar')
+            ->get(['id', 'teacher_id'])
+            ->groupBy('teacher_id')
+            ->map(fn ($packages) => $packages->pluck('stages')->flatten()->pluck('name_ar')->unique()->values());
+
+        foreach ($teachers->items() as $teacher) {
+            $teacher->setAttribute('completed_sessions', (int) ($completedCounts->get($teacher->id) ?? 0));
+            $teacher->setAttribute('stages', $stagesByTeacher->get($teacher->id, collect())->values());
+        }
 
         return $this->paginate($teachers);
     }
