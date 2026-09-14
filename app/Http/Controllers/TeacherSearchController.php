@@ -3,7 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\Teacher\SearchTeachersRequest;
+use App\Models\AvailabilitySlot;
+use App\Models\Booking;
 use App\Models\ClassSession;
+use App\Models\Enrollment;
 use App\Models\Package;
 use App\Models\Teacher;
 
@@ -65,13 +68,19 @@ class TeacherSearchController extends Controller
                     }
                 });
             })
-            ->with('user:id,name,avatar_path')
+            ->with([
+                'user:id,name,avatar_path',
+                'subjects:id,name_ar',
+                'curricula:id,name_ar',
+                'languages:id,name_ar,code',
+            ])
             ->orderByDesc('ranking_score')
             ->paginate($request->integer('per_page', 20));
 
-        // مقاعد بطاقة نتائج البحث الخفيفة تحتاج "الجلسات المكتملة" و"المراحل
-        // الدراسية" أيضاً — بدفعتين مجمّعتين لكل صفحة (بلا N+1) بدل استدعاء
-        // TeacherService::getStats الكامل لكل معلم على حدة.
+        // مقاعد بطاقة نتائج البحث الخفيفة تحتاج بيانات إضافية مجمَّعة لكل
+        // صفحة (بلا N+1) بدل استدعاء TeacherService::getStats الكامل لكل
+        // معلم على حدة: الجلسات المكتملة، المراحل الدراسية (من باقاته الفعلية
+        // القابلة للحجز)، عدد الطلاب الفريدين، مدى السعر، وتوفّر اليوم.
         $teacherIds = collect($teachers->items())->pluck('id');
 
         $completedCounts = ClassSession::whereIn('teacher_id', $teacherIds)
@@ -88,9 +97,34 @@ class TeacherSearchController extends Controller
             ->groupBy('teacher_id')
             ->map(fn ($packages) => $packages->pluck('stages')->flatten()->pluck('name_ar')->unique()->values());
 
+        $priceRangeByTeacher = Package::query()
+            ->whereIn('teacher_id', $teacherIds)
+            ->bookable()
+            ->selectRaw('teacher_id, MIN(student_price) as min_price, MAX(student_price) as max_price')
+            ->groupBy('teacher_id')
+            ->get()
+            ->keyBy('teacher_id');
+
+        $studentIdsByTeacher = Booking::whereIn('teacher_id', $teacherIds)
+            ->whereNotNull('student_id')
+            ->get(['teacher_id', 'student_id'])
+            ->merge(Enrollment::whereIn('teacher_id', $teacherIds)->whereNotNull('student_id')->get(['teacher_id', 'student_id']))
+            ->groupBy('teacher_id')
+            ->map(fn ($rows) => $rows->pluck('student_id')->unique()->count());
+
+        $availableTodayTeacherIds = AvailabilitySlot::whereIn('teacher_id', $teacherIds)
+            ->where('day_of_week', now()->dayOfWeek)
+            ->pluck('teacher_id')
+            ->unique();
+
         foreach ($teachers->items() as $teacher) {
             $teacher->setAttribute('completed_sessions', (int) ($completedCounts->get($teacher->id) ?? 0));
             $teacher->setAttribute('stages', $stagesByTeacher->get($teacher->id, collect())->values());
+            $teacher->setAttribute('total_students', (int) ($studentIdsByTeacher->get($teacher->id) ?? 0));
+            $priceRange = $priceRangeByTeacher->get($teacher->id);
+            $teacher->setAttribute('min_price', $priceRange?->min_price);
+            $teacher->setAttribute('max_price', $priceRange?->max_price);
+            $teacher->setAttribute('available_today', $availableTodayTeacherIds->contains($teacher->id));
         }
 
         return $this->paginate($teachers);
