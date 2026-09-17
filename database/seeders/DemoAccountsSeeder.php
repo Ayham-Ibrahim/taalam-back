@@ -17,6 +17,7 @@ use App\Models\Student;
 use App\Models\Subject;
 use App\Models\Teacher;
 use App\Models\TeacherExperience;
+use App\Models\TeacherFaq;
 use App\Models\User;
 use Illuminate\Database\Seeder;
 
@@ -173,6 +174,20 @@ class DemoAccountsSeeder extends Seeder
             TeacherExperience::updateOrCreate(
                 ['teacher_id' => $teacher->id, 'title' => $exp['title']],
                 ['period' => $exp['period'], 'sort_order' => $exp['sort_order']],
+            );
+        }
+
+        // أسئلة شائعة تجريبية لقسم "الأسئلة الشائعة" في الملف العام
+        $faqs = [
+            ['question' => 'هل الحصص مباشرة أم مسجّلة؟', 'answer' => 'جميع الحصص مباشرة (Live) عبر منصة الفيديو الخاصة بنا، مع إمكانية الحصول على تسجيل الحصة عند الطلب.', 'sort_order' => 1],
+            ['question' => 'كيف يتم الدفع وهل يمكن الاسترجاع؟', 'answer' => 'الدفع إلكتروني وآمن عبر المنصة عند حجز الباقة. يمكن استرجاع المبلغ عن الحصص غير المستخدمة وفق سياسة الاسترجاع المعتمدة.', 'sort_order' => 2],
+            ['question' => 'هل يمكن تغيير موعد الحصة؟', 'answer' => 'نعم، يمكن للطالب طلب إعادة جدولة الحصة قبل موعدها بوقت كافٍ من خلال لوحة التحكم الخاصة به.', 'sort_order' => 3],
+            ['question' => 'ما هي المراحل الدراسية التي تدرّسها؟', 'answer' => 'أدرّس طلاب المرحلة الابتدائية والثانوية، وفق مناهج Cambridge وEdexcel وIB، بالإضافة إلى التحضير لاختبارات IELTS وTOEFL.', 'sort_order' => 4],
+        ];
+        foreach ($faqs as $faq) {
+            TeacherFaq::updateOrCreate(
+                ['teacher_id' => $teacher->id, 'question' => $faq['question']],
+                ['answer' => $faq['answer'], 'sort_order' => $faq['sort_order']],
             );
         }
 
