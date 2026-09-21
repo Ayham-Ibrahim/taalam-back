@@ -39,7 +39,8 @@ class PublicTeacherResource extends JsonResource
                 'id' => $f->id, 'question' => $f->question, 'answer' => $f->answer,
             ])),
             'experiences' => $this->whenLoaded('experiences', fn () => $this->experiences->map(fn ($e) => [
-                'id' => $e->id, 'title' => $e->title, 'period' => $e->period,
+                'id' => $e->id, 'title' => $e->title, 'company' => $e->company,
+                'period' => $e->period, 'location' => $e->location, 'description' => $e->description,
             ])),
             'badges' => $this->whenLoaded('activeBadgeAwards', fn () => $this->activeBadgeAwards->map(fn ($award) => [
                 'award_id' => $award->id,

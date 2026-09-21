@@ -116,6 +116,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('teachers/{teacher}/faqs', [TeacherFaqController::class, 'store']);
     Route::delete('teacher-faqs/{faq}', [TeacherFaqController::class, 'destroy']);
     Route::post('teachers/{teacher}/experiences', [TeacherExperienceController::class, 'store']);
+    Route::put('teacher-experiences/{experience}', [TeacherExperienceController::class, 'update']);
     Route::delete('teacher-experiences/{experience}', [TeacherExperienceController::class, 'destroy']);
 
     Route::get('badges', [BadgeController::class, 'index']);

@@ -266,11 +266,31 @@ class TeacherService
 
         $experience = $teacher->experiences()->create([
             'title' => $data['title'],
+            'company' => $data['company'] ?? null,
             'period' => $data['period'],
+            'location' => $data['location'] ?? null,
+            'description' => $data['description'] ?? null,
             'sort_order' => ($teacher->experiences()->max('sort_order') ?? -1) + 1,
         ]);
 
         $this->audit('teacher.experience_added', $experience, [], ['title' => $experience->title]);
+
+        return $experience;
+    }
+
+    public function updateExperience(TeacherExperience $experience, array $data): TeacherExperience
+    {
+        $before = ['title' => $experience->title];
+
+        $experience->update([
+            'title' => $data['title'],
+            'company' => $data['company'] ?? null,
+            'period' => $data['period'],
+            'location' => $data['location'] ?? null,
+            'description' => $data['description'] ?? null,
+        ]);
+
+        $this->audit('teacher.experience_updated', $experience, $before, ['title' => $experience->title]);
 
         return $experience;
     }

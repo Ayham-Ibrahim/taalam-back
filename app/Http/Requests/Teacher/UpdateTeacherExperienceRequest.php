@@ -4,11 +4,11 @@ namespace App\Http\Requests\Teacher;
 
 use Illuminate\Foundation\Http\FormRequest;
 
-class AddTeacherExperienceRequest extends FormRequest
+class UpdateTeacherExperienceRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        return $this->user()->can('update', $this->route('teacher'));
+        return $this->user()->can('update', $this->route('experience')->teacher);
     }
 
     public function rules(): array

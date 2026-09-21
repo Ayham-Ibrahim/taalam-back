@@ -10,7 +10,10 @@ class TeacherExperience extends Model
     protected $fillable = [
         'teacher_id',
         'title',
+        'company',
         'period',
+        'location',
+        'description',
         'sort_order',
     ];
 
