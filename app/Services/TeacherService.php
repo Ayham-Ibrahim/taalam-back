@@ -181,8 +181,16 @@ class TeacherService
         $subjectIds = $data['subject_ids'] ?? null;
         $curriculumIds = $data['curriculum_ids'] ?? null;
         $languageIds = $data['language_ids'] ?? null;
+        $name = $data['name'] ?? null;
 
-        unset($data['subject_ids'], $data['curriculum_ids'], $data['language_ids']);
+        unset($data['subject_ids'], $data['curriculum_ids'], $data['language_ids'], $data['name']);
+
+        // name يعيش على users لا teachers — Teacher::$fillable لا يتضمّنه أصلاً،
+        // فمررناه عبر fill() كان سيُتجاهَل بصمت دون أي تحديث فعلي.
+        if ($name !== null && $name !== '') {
+            $teacher->loadMissing('user');
+            $teacher->user->update(['name' => $name]);
+        }
 
         $teacher->fill($data);
         $teacher->save();
@@ -199,7 +207,7 @@ class TeacherService
             $teacher->languages()->sync($languageIds);
         }
 
-        return $teacher->fresh(['subjects', 'curricula', 'languages']);
+        return $teacher->fresh(['subjects', 'curricula', 'languages', 'user']);
     }
 
     /** يُرفَض بعد الحد الأقصى (Teacher::MAX_VIDEOS) — لا حذف تلقائي للأقدم، على المعلم/الأدمن حذف واحد أولاً */

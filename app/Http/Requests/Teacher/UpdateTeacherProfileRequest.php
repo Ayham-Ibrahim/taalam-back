@@ -29,6 +29,7 @@ class UpdateTeacherProfileRequest extends FormRequest
         $isTrainingCenter = $this->route('teacher')?->isTrainingCenter();
 
         return [
+            'name' => ['nullable', 'string', 'max:150'],
             'bio' => ['nullable', 'string', 'max:500'],
             'teaching_philosophy_quote' => ['nullable', 'string', 'max:200'],
             'teaching_philosophy_text' => ['nullable', 'string', 'max:600'],
