@@ -53,7 +53,7 @@ class CourseApprovalFlowTest extends TestCase
         $approve->assertStatus(200)
             ->assertJsonPath('data.status', 'active')
             ->assertJsonPath('data.platform_margin_percent', 50)
-            ->assertJsonPath('data.student_price', 300)
+            ->assertJsonPath('data.student_price', 200)
             ->assertJsonPath('data.platform_revenue', 100);
 
         $this->assertDatabaseHas('courses', [
@@ -61,7 +61,7 @@ class CourseApprovalFlowTest extends TestCase
             'status' => 'active',
             'provider_price' => 200,
             'platform_margin_percent' => 50,
-            'student_price' => 300,
+            'student_price' => 200,
             'platform_revenue' => 100,
         ]);
         $this->assertDatabaseHas('audit_logs', ['action' => 'course.approved']);
@@ -84,7 +84,7 @@ class CourseApprovalFlowTest extends TestCase
         ]);
         $editAttempt->assertStatus(422);
 
-        $this->assertDatabaseHas('courses', ['id' => $courseId, 'provider_price' => 200, 'student_price' => 300]);
+        $this->assertDatabaseHas('courses', ['id' => $courseId, 'provider_price' => 200, 'student_price' => 200]);
     }
 
     public function test_admin_can_reject_pending_course_with_reason(): void

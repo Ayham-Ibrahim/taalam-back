@@ -9,12 +9,12 @@ class PayoutPolicy
 {
     public function viewAny(User $user): bool
     {
-        return $user->isAdmin() || $user->isTeacher();
+        return $user->isFinance() || $user->isTeacher();
     }
 
     public function view(User $user, Payout $payout): bool
     {
-        return $user->isAdmin() || $user->loadMissing('teacher')->teacher?->id === $payout->teacher_id;
+        return $user->isFinance() || $user->loadMissing('teacher')->teacher?->id === $payout->teacher_id;
     }
 
     public function generate(User $user): bool
@@ -24,16 +24,16 @@ class PayoutPolicy
 
     public function approve(User $user): bool
     {
-        return $user->isAdmin();
+        return $user->isFinance();
     }
 
     public function markPaid(User $user): bool
     {
-        return $user->isAdmin();
+        return $user->isFinance();
     }
 
     public function export(User $user): bool
     {
-        return $user->isAdmin();
+        return $user->isFinance();
     }
 }

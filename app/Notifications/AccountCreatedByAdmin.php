@@ -29,7 +29,11 @@ class AccountCreatedByAdmin extends Notification implements ShouldQueue
 
     public function toMail($notifiable): MailMessage
     {
-        $roleLabel = $this->role === 'teacher' ? 'teacher' : 'student';
+        $roleLabel = match ($this->role) {
+            'teacher' => 'teacher',
+            'accountant' => 'accountant',
+            default => 'student',
+        };
 
         return (new MailMessage)
             ->subject('Your Taalam Account Has Been Created')

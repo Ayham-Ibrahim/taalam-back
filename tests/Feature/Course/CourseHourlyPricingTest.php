@@ -41,20 +41,20 @@ class CourseHourlyPricingTest extends TestCase
 
         [, $adminToken] = $this->createAdmin();
 
-        // 50 سعر الساعة × 20 ساعة = 1000 قبل الهامش، ثم ×1.5 = 1500 للطالب
+        // 50 سعر الساعة × 20 ساعة = 1000 يدفعها الطالب كما هي، والمنصة تخصم 50% منها (500)
         $approve = $this->as($adminToken)->postJson("/api/courses/{$courseId}/approve", [
             'platform_margin_percent' => 50,
         ]);
 
         $approve->assertStatus(200)
-            ->assertJsonPath('data.student_price', 1500)
+            ->assertJsonPath('data.student_price', 1000)
             ->assertJsonPath('data.platform_revenue', 500);
 
         $this->assertDatabaseHas('courses', [
             'id' => $courseId,
             'provider_price' => 50,
             'pricing_mode' => 'hourly',
-            'student_price' => 1500,
+            'student_price' => 1000,
             'platform_revenue' => 500,
         ]);
     }

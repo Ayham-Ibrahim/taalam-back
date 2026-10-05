@@ -9,12 +9,12 @@ class BookingPolicy
 {
     public function viewAny(User $user): bool
     {
-        return $user->isAdmin() || $user->isStudent() || $user->isTeacher();
+        return $user->isFinance() || $user->isStudent() || $user->isTeacher();
     }
 
     public function view(User $user, Booking $booking): bool
     {
-        return $user->isAdmin()
+        return $user->isFinance()
             || $user->loadMissing('student')->student?->id === $booking->student_id
             || $user->loadMissing('teacher')->teacher?->id === $booking->teacher_id;
     }

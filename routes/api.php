@@ -27,6 +27,7 @@ use App\Http\Controllers\Student\StudentImportController;
 use App\Http\Controllers\TaxonomyController;
 use App\Http\Controllers\Teacher\BadgeController;
 use App\Http\Controllers\Teacher\TeacherController;
+use App\Http\Controllers\Accountant\AccountantController;
 use App\Http\Controllers\Teacher\TeacherExperienceController;
 use App\Http\Controllers\Teacher\TeacherFaqController;
 use App\Http\Controllers\Teacher\TeacherImportController;
@@ -187,6 +188,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // ترتيب مقصود: export مسار حرفي ثابت — يجب تسجيله قبل payouts/{payout} كي
     // لا يحاول Route Model Binding مطابقة "export" كأنه معرّف مستحقات رقمي.
+    Route::post('accountants', [AccountantController::class, 'store']);
     Route::get('payouts/export', [PayoutController::class, 'export']);
     Route::get('payouts', [PayoutController::class, 'index']);
     Route::get('payouts/{payout}', [PayoutController::class, 'show']);

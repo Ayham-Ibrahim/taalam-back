@@ -51,10 +51,11 @@ class BookingFlowTest extends TestCase
 
         $booking = app(BookingService::class)->approveIndividualRequest($requested, $teacherUser);
 
-        // teacher_price=100 سعر الساعة/الجلسة الواحدة × 4 جلسات = 400 قبل الهامش، ثم ×1.6 = 640 للطالب
+        // teacher_price=100 سعر الساعة/الجلسة الواحدة × 4 جلسات = 400 يدفعها الطالب كما هي،
+        // والمنصة تخصم 60% منها (240)، فيستلم المعلم الصافي 160
         $this->assertSame('pending_payment', $booking->status);
-        $this->assertEquals(640.0, (float) $booking->amount_paid);
-        $this->assertEquals(400.0, (float) $booking->teacher_amount);
+        $this->assertEquals(400.0, (float) $booking->amount_paid);
+        $this->assertEquals(160.0, (float) $booking->teacher_amount);
         $this->assertEquals(240.0, (float) $booking->platform_amount);
         $this->assertEquals(60.0, (float) $booking->margin_percent_snapshot);
         $this->assertSame(4, $booking->sessions_total);
@@ -83,7 +84,7 @@ class BookingFlowTest extends TestCase
             'booking_id' => $booking->id,
             'status' => 'pending',
             'method' => 'stripe',
-            'amount' => 640,
+            'amount' => 400,
         ]);
 
         // الباقة لم تُحجز نهائياً بعد (لم يُؤكَّد الدفع) — لا زيادة على enrolled_count

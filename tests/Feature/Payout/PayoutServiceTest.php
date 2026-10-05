@@ -32,10 +32,10 @@ class PayoutServiceTest extends TestCase
 
         $payout = app(PayoutService::class)->generateForPeriod($teacher, now()->subDay(), now()->addDay());
 
-        // teacher_price سعر الساعة/الجلسة الواحدة مباشرة — teacher_amount الكلي = 100×4 ÷ 4 جلسات = 100 لكل جلسة
-        $this->assertEquals(100.0, (float) $payout->gross_amount);
+        // teacher_price سعر الساعة/الجلسة الواحدة = 100، والمنصة تخصم 60% منه، فصافي المعلم لكل جلسة = 40
+        $this->assertEquals(40.0, (float) $payout->gross_amount);
         $this->assertSame(1, $payout->sessions_count);
-        $this->assertDatabaseHas('payout_items', ['payout_id' => $payout->id, 'class_session_id' => $session->id, 'amount' => 100]);
+        $this->assertDatabaseHas('payout_items', ['payout_id' => $payout->id, 'class_session_id' => $session->id, 'amount' => 40]);
     }
 
     /**
@@ -76,7 +76,7 @@ class PayoutServiceTest extends TestCase
             'teacher_id' => $teacher->id,
             'package_id' => $package->id,
             'amount_paid' => $computed['student_price'],
-            'teacher_amount' => $computed['provider_total'],
+            'teacher_amount' => $computed['provider_net'],
             'platform_amount' => $computed['platform_revenue'],
             'margin_percent_snapshot' => 60,
             'sessions_total' => 1,
@@ -108,7 +108,7 @@ class PayoutServiceTest extends TestCase
 
         $payout = app(PayoutService::class)->generateForPeriod($teacher, now()->subDay(), now()->addDay());
 
-        $this->assertEquals(100.0, (float) $payout->gross_amount);
+        $this->assertEquals(40.0, (float) $payout->gross_amount);
     }
 
     public function test_payout_excludes_sessions_already_paid_in_a_previous_payout(): void
@@ -273,7 +273,7 @@ class PayoutServiceTest extends TestCase
             'teacher_id' => $teacher->id,
             'package_id' => $package->id,
             'amount_paid' => $computed['student_price'],
-            'teacher_amount' => $computed['provider_total'],
+            'teacher_amount' => $computed['provider_net'],
             'platform_amount' => $computed['platform_revenue'],
             'margin_percent_snapshot' => 60,
             'sessions_total' => $sessionsTotal,

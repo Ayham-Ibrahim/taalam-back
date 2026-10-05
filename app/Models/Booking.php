@@ -125,7 +125,7 @@ class Booking extends Model
      */
     public function scopeVisibleTo(Builder $query, User $user): Builder
     {
-        if ($user->isAdmin()) {
+        if ($user->isFinance()) {
             return $query;
         }
 

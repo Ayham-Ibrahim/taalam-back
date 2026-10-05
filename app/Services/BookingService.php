@@ -550,8 +550,8 @@ class BookingService
             'teacher_id' => $package->teacher_id,
             'package_id' => $package->id,
             'amount_paid' => $package->student_price,
-            // teacher_price سعر الساعة الواحدة — مستحق المعلم الكلي = ×sessions_count (PricingService::calculateStudentPrice نفس الصيغة)
-            'teacher_amount' => round($package->teacher_price * $package->sessions_count, 2),
+            // صافي المعلم = ما دفعه الطالب − حصة المنصة (الهامش يُخصم من سعر المعلم، لا يُضاف فوقه)
+            'teacher_amount' => round($package->student_price - $package->platform_revenue, 2),
             'platform_amount' => $package->platform_revenue,
             'margin_percent_snapshot' => $package->platform_margin_percent,
             'currency' => $package->currency,

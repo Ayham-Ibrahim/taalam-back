@@ -50,11 +50,11 @@ class PackageApprovalFlowTest extends TestCase
             'platform_margin_percent' => 60,
         ]);
 
-        // teacher_price=100 سعر الساعة/الجلسة الواحدة × 8 جلسات = 800 قبل الهامش، ثم ×1.6 = 1280 للطالب
+        // teacher_price=100 سعر الساعة/الجلسة الواحدة × 8 جلسات = 800 يدفعها الطالب كما هي، والمنصة تخصم 60% (480)
         $approve->assertStatus(200)
             ->assertJsonPath('data.status', 'active')
             ->assertJsonPath('data.platform_margin_percent', 60)
-            ->assertJsonPath('data.student_price', 1280)
+            ->assertJsonPath('data.student_price', 800)
             ->assertJsonPath('data.platform_revenue', 480);
 
         $this->assertDatabaseHas('packages', [
@@ -62,7 +62,7 @@ class PackageApprovalFlowTest extends TestCase
             'status' => 'active',
             'teacher_price' => 100,
             'platform_margin_percent' => 60,
-            'student_price' => 1280,
+            'student_price' => 800,
             'platform_revenue' => 480,
         ]);
         $this->assertDatabaseHas('audit_logs', ['action' => 'package.approved']);
@@ -78,7 +78,7 @@ class PackageApprovalFlowTest extends TestCase
         ]);
         $editAttempt->assertStatus(422);
 
-        $this->assertDatabaseHas('packages', ['id' => $packageId, 'teacher_price' => 100, 'student_price' => 1280]);
+        $this->assertDatabaseHas('packages', ['id' => $packageId, 'teacher_price' => 100, 'student_price' => 800]);
     }
 
     public function test_admin_can_reject_pending_package_with_reason(): void

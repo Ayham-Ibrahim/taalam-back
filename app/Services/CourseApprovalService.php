@@ -25,7 +25,7 @@ class CourseApprovalService
         }
 
         $min = (float) $this->settings->get('min_platform_margin_percent', 0);
-        $max = (float) $this->settings->get('max_platform_margin_percent', 1000);
+        $max = (float) $this->settings->get('max_platform_margin_percent', 100);
 
         if ($marginPercent < $min || $marginPercent > $max) {
             throw ValidationException::withMessages([

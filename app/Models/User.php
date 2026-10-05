@@ -86,6 +86,17 @@ class User extends Authenticatable
         return $this->role === 'student';
     }
 
+    public function isAccountant(): bool
+    {
+        return $this->role === 'accountant';
+    }
+
+    /** الأدمن أو المحاسب — كل ما هو مالي (المستحقات، الحجوزات/المدفوعات) */
+    public function isFinance(): bool
+    {
+        return $this->isAdmin() || $this->isAccountant();
+    }
+
     /**
      * تجاوز الإشعار الافتراضي (Illuminate\Auth\Notifications\ResetPassword) —
      * ذاك يبني رابطاً لمسار ويب Blade باسم "password.reset" غير موجود إطلاقاً

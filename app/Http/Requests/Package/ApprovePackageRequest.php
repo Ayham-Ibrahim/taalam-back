@@ -16,7 +16,7 @@ class ApprovePackageRequest extends FormRequest
     {
         return [
             // الحد الفعلي القابل للتعديل عبر الإعدادات — هذا سقف دفاعي ثابت فقط (PackageApprovalService هو المرجع الحقيقي)
-            'platform_margin_percent' => ['required', 'numeric', 'min:0', 'max:1000'],
+            'platform_margin_percent' => ['required', 'numeric', 'min:0', 'max:100'],
         ];
     }
 }

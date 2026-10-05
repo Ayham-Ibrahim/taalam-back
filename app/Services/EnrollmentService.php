@@ -169,10 +169,8 @@ class EnrollmentService
             'course_id' => $course->id,
             'teacher_id' => $course->teacher_id,
             'amount_paid' => $course->student_price,
-            // hourly: provider_price سعر الساعة — الإجمالي المستحق للمركز = ×total_hours. total: provider_price هو الإجمالي أصلاً
-            'provider_amount' => $course->pricing_mode === 'hourly'
-                ? round($course->provider_price * $course->total_hours, 2)
-                : $course->provider_price,
+            // صافي المركز = ما دفعه الطالب − حصة المنصة (الهامش يُخصم من سعر المركز، لا يُضاف فوقه)
+            'provider_amount' => round($course->student_price - $course->platform_revenue, 2),
             'platform_amount' => $course->platform_revenue,
             'margin_percent_snapshot' => $course->platform_margin_percent,
             'currency' => $course->currency,

@@ -38,7 +38,7 @@ class PayoutEndpointTest extends TestCase
         $list->assertJsonPath('data.0.providerName', $teacherUser->name);
         $list->assertJsonPath('data.0.providerType', 'school');
         $list->assertJsonPath('data.0.sessionsCount', 1);
-        $list->assertJsonPath('data.0.totalAmount', 100);
+        $list->assertJsonPath('data.0.totalAmount', 40);
         $list->assertJsonPath('data.0.status', 'pending');
     }
 
@@ -134,6 +134,24 @@ class PayoutEndpointTest extends TestCase
             ->assertStatus(403);
     }
 
+    /** عمود "المادة" في ملف الإكسل يعرض المواد التي أعطاها المعلم في فترة المستحقات */
+    public function test_export_row_lists_the_subjects_the_teacher_taught_in_the_period(): void
+    {
+        $teacherUser = User::factory()->teacher()->create();
+        $teacher = Teacher::create(['user_id' => $teacherUser->id, 'teacher_type' => 'school', 'status' => 'verified']);
+        $this->createCompletedPackageSession($teacher, teacherPrice: 100, sessionsTotal: 4);
+
+        $payout = app(\App\Services\PayoutService::class)
+            ->generateForPeriod($teacher, now()->subDay(), now()->addDay());
+
+        $row = (new \App\Exports\PayoutsExport)->query()->where('id', $payout->id)->get()
+            ->map(fn ($p) => (new \App\Exports\PayoutsExport)->map($p))
+            ->first();
+
+        $this->assertSame('مادة', $row[2]);
+        $this->assertCount(14, $row);
+    }
+
     public function test_mark_paid_requires_a_transfer_reference_and_succeeds_when_provided(): void
     {
         $admin = User::factory()->admin()->create();
@@ -190,7 +208,7 @@ class PayoutEndpointTest extends TestCase
             'teacher_id' => $teacher->id,
             'package_id' => $package->id,
             'amount_paid' => $computed['student_price'],
-            'teacher_amount' => $computed['provider_total'],
+            'teacher_amount' => $computed['provider_net'],
             'platform_amount' => $computed['platform_revenue'],
             'margin_percent_snapshot' => 60,
             'sessions_total' => $sessionsTotal,
