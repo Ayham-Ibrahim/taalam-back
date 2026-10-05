@@ -11,7 +11,8 @@ class Coupon extends Model
         'package_id',
         'teacher_id',
         'created_by',
-        'discount_percent',
+        'discount_type',
+        'discount_value',
         'max_redemptions',
         'redeemed_count',
         'expires_at',
@@ -21,10 +22,15 @@ class Coupon extends Model
     protected function casts(): array
     {
         return [
-            'discount_percent' => 'decimal:2',
+            'discount_value' => 'decimal:2',
             'expires_at' => 'datetime',
             'is_active' => 'boolean',
         ];
+    }
+
+    public function isPercent(): bool
+    {
+        return $this->discount_type === 'percent';
     }
 
     public function package()

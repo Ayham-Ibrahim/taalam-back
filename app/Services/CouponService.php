@@ -18,7 +18,8 @@ class CouponService
             'package_id' => $package->id,
             'teacher_id' => $package->teacher_id,
             'created_by' => $creator->id,
-            'discount_percent' => $data['discount_percent'],
+            'discount_type' => $data['discount_type'],
+            'discount_value' => $data['discount_value'],
             'max_redemptions' => $data['max_redemptions'] ?? null,
             'redeemed_count' => 0,
             'expires_at' => $data['expires_at'] ?? null,
@@ -29,7 +30,7 @@ class CouponService
     public function update(Coupon $coupon, array $data): Coupon
     {
         $coupon->update(array_intersect_key($data, array_flip([
-            'discount_percent', 'max_redemptions', 'expires_at', 'is_active',
+            'discount_type', 'discount_value', 'max_redemptions', 'expires_at', 'is_active',
         ])));
 
         return $coupon->fresh();
@@ -61,8 +62,11 @@ class CouponService
         $coupon->increment('redeemed_count');
 
         $teacherAmount = round($package->student_price - $package->platform_revenue, 2);
-        $discountAmount = round((float) $package->student_price * (float) $coupon->discount_percent / 100, 2);
-        // مضمونة ≥ 0 لأن discount_percent ≤ platform_margin_percent دائماً (مفروض وقت إنشاء الكوبون)
+        $discountAmount = $coupon->isPercent()
+            ? round((float) $package->student_price * (float) $coupon->discount_value / 100, 2)
+            : round((float) $coupon->discount_value, 2);
+        // مضمونة ≥ 0 لأن الخصم (نسبةً أو مبلغاً) لا يتجاوز platform_revenue دائماً
+        // (مفروض وقت إنشاء/تعديل الكوبون — راجع CreateCouponRequest/UpdateCouponRequest)
         $platformAmount = max(0, round($package->platform_revenue - $discountAmount, 2));
 
         return [

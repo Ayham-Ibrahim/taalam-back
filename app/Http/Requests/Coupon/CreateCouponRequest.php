@@ -19,16 +19,17 @@ class CreateCouponRequest extends FormRequest
         return [
             // اختياري — يُولَّد تلقائياً إن تُرك فارغاً (BookingService uses the same Str::random convention)
             'code' => ['nullable', 'string', 'min:4', 'max:20', 'regex:/^[A-Za-z0-9_-]+$/', Rule::unique('coupons', 'code')],
-            'discount_percent' => ['required', 'numeric', 'min:0.01', 'max:100'],
+            'discount_type' => ['required', Rule::in(['percent', 'fixed'])],
+            'discount_value' => ['required', 'numeric', 'min:0.01'],
             'max_redemptions' => ['nullable', 'integer', 'min:1'],
             'expires_at' => ['nullable', 'date', 'after:now'],
         ];
     }
 
     /**
-     * السقف الفعلي: لا يمكن لخصم الكوبون أن يتجاوز هامش المنصة على هذه الباقة —
-     * هكذا يُقتطع الخصم من حصة المنصة فقط ولا يمس مستحق المعلم أبداً (راجع
-     * تعليق migration إنشاء جدول coupons لتفصيل السبب الكامل).
+     * السقف الفعلي: لا يمكن لخصم الكوبون (نسبةً أو مبلغاً) أن يتجاوز هامش
+     * المنصة على هذه الباقة — هكذا يُقتطع الخصم من حصة المنصة فقط ولا يمس
+     * مستحق المعلم أبداً (راجع تعليق migration إنشاء جدول coupons للتفصيل).
      */
     public function withValidator(Validator $validator): void
     {
@@ -45,12 +46,27 @@ class CreateCouponRequest extends FormRequest
                 return;
             }
 
-            $discount = (float) $this->input('discount_percent');
+            if (! $this->filled('discount_type') || ! $this->filled('discount_value')) {
+                return;
+            }
 
-            if ($discount > (float) $package->platform_margin_percent) {
+            $value = (float) $this->input('discount_value');
+
+            if ($this->input('discount_type') === 'percent') {
+                if ($value > (float) $package->platform_margin_percent) {
+                    $validator->errors()->add(
+                        'discount_value',
+                        "نسبة الخصم لا يمكن أن تتجاوز هامش المنصة على هذه الباقة ({$package->platform_margin_percent}%).",
+                    );
+                }
+
+                return;
+            }
+
+            if ($value > (float) $package->platform_revenue) {
                 $validator->errors()->add(
-                    'discount_percent',
-                    "نسبة الخصم لا يمكن أن تتجاوز هامش المنصة على هذه الباقة ({$package->platform_margin_percent}%).",
+                    'discount_value',
+                    "قيمة الخصم لا يمكن أن تتجاوز حصة المنصة من هذه الباقة ({$package->platform_revenue} {$package->currency}).",
                 );
             }
         });
