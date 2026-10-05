@@ -82,6 +82,7 @@ class BookingController extends Controller
             $student,
             $package,
             $request->validated('slots'),
+            $request->validated('coupon_code'),
         );
 
         return $this->success($booking, 'تم إرسال طلب الحجز، بانتظار موافقة المعلم', 201);
@@ -132,9 +133,11 @@ class BookingController extends Controller
     {
         $this->authorize('create', Booking::class);
 
+        $couponCode = $request->validate(['coupon_code' => ['nullable', 'string', 'max:30']])['coupon_code'] ?? null;
+
         $student = $request->user()->loadMissing('student')->student;
 
-        $booking = $this->bookingService->joinGroupPackage($student, $package);
+        $booking = $this->bookingService->joinGroupPackage($student, $package, $couponCode);
         $checkoutUrl = $this->paymentService->createCheckoutSessionForBooking($booking);
 
         return $this->success([
@@ -167,6 +170,7 @@ class BookingController extends Controller
             $request->user(),
             $request->validated('reason'),
             $request->validated('slots'),
+            $request->validated('coupon_code'),
         );
 
         return $this->success($booking, 'تم إنشاء الحجز اليدوي بنجاح', 201);

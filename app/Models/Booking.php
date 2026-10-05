@@ -19,9 +19,11 @@ class Booking extends Model
         'student_id',
         'teacher_id',
         'package_id',
+        'coupon_id',
         'amount_paid',
         'teacher_amount',
         'platform_amount',
+        'discount_amount',
         'margin_percent_snapshot',
         'currency',
         'sessions_total',
@@ -51,6 +53,7 @@ class Booking extends Model
             'amount_paid' => 'decimal:2',
             'teacher_amount' => 'decimal:2',
             'platform_amount' => 'decimal:2',
+            'discount_amount' => 'decimal:2',
             'margin_percent_snapshot' => 'decimal:2',
             'expires_at' => 'date',
             'frozen_until' => 'date',
@@ -77,6 +80,11 @@ class Booking extends Model
     public function package()
     {
         return $this->belongsTo(Package::class);
+    }
+
+    public function coupon()
+    {
+        return $this->belongsTo(Coupon::class);
     }
 
     public function admin()

@@ -13,6 +13,7 @@ use App\Models\Review;
 use App\Models\Stage;
 use App\Models\Subject;
 use App\Models\University;
+use App\Models\User;
 use App\Observers\CourseObserver;
 use App\Observers\PackageObserver;
 use App\Observers\ReviewObserver;
@@ -51,6 +52,9 @@ class AppServiceProvider extends ServiceProvider
         foreach ([Curriculum::class, Stage::class, Subject::class, University::class, Major::class, CourseField::class, Language::class] as $model) {
             Gate::policy($model, TaxonomyPolicy::class);
         }
+
+        // تقرير "كل مدرس: عدد الحصص والعائد" — لا نموذج Eloquent مخصّص له كي يستحق Policy كاملة
+        Gate::define('view-finance-reports', fn (User $user) => $user->isFinance());
 
         Event::listen(NotificationSent::class, UpdateNotificationLogStatus::class);
 

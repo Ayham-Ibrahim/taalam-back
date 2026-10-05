@@ -95,6 +95,11 @@ class Package extends Model
         return $this->hasMany(Booking::class);
     }
 
+    public function coupons()
+    {
+        return $this->hasMany(Coupon::class);
+    }
+
     public function isIndividual(): bool
     {
         return $this->session_format === 'individual';

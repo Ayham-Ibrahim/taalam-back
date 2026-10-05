@@ -9,6 +9,7 @@ use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\Booking\BookingController;
 use App\Http\Controllers\Booking\EnrollmentController;
 use App\Http\Controllers\Complaint\ComplaintController;
+use App\Http\Controllers\Coupon\CouponController;
 use App\Http\Controllers\Course\CourseController;
 use App\Http\Controllers\FavoriteController;
 use App\Http\Controllers\MetaController;
@@ -18,6 +19,7 @@ use App\Http\Controllers\Package\PackageController;
 use App\Http\Controllers\Payment\PaymentWebhookController;
 use App\Http\Controllers\Payout\PayoutController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\Report\TeacherSessionsReportController;
 use App\Http\Controllers\Reschedule\RescheduleRequestController;
 use App\Http\Controllers\Review\ReviewController;
 use App\Http\Controllers\Session\ClassSessionController;
@@ -134,6 +136,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('packages/{package}/approve', [PackageController::class, 'approve']);
     Route::post('packages/{package}/reject', [PackageController::class, 'reject']);
 
+    Route::get('packages/{package}/coupons', [CouponController::class, 'index']);
+    Route::post('packages/{package}/coupons', [CouponController::class, 'store']);
+    Route::put('coupons/{coupon}', [CouponController::class, 'update']);
+    Route::delete('coupons/{coupon}', [CouponController::class, 'destroy']);
+
     Route::get('teachers/{teacher}/availability-slots', [AvailabilityController::class, 'indexSlots']);
     Route::post('teachers/{teacher}/availability-slots', [AvailabilityController::class, 'storeSlot']);
     Route::delete('teachers/{teacher}/availability-slots/{slot}', [AvailabilityController::class, 'destroySlot']);
@@ -196,6 +203,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('teachers/{teacher}/payouts/generate', [PayoutController::class, 'generate']);
     Route::post('payouts/{payout}/approve', [PayoutController::class, 'approve']);
     Route::post('payouts/{payout}/mark-paid', [PayoutController::class, 'markPaid']);
+
+    // ترتيب مقصود: export قبل أي مسار بمعرّف لاحقاً لنفس السابقة أعلاه (export/{id})
+    Route::get('reports/teacher-sessions/export', [TeacherSessionsReportController::class, 'export']);
+    Route::get('reports/teacher-sessions', [TeacherSessionsReportController::class, 'index']);
 
     Route::get('me/reviews', [ReviewController::class, 'myReviews']);
     Route::get('reviews', [ReviewController::class, 'index']);

@@ -27,6 +27,7 @@ class BookingService
     public function __construct(
         private readonly SettingsService $settings,
         private readonly ScheduleConflictService $conflicts,
+        private readonly CouponService $coupons,
     ) {}
 
     /**
@@ -37,7 +38,7 @@ class BookingService
      * لا جلسات ولا دفع بعد؛ الحجز يبقى pending_teacher_confirmation حتى يوافق
      * المعلم صراحةً (approveIndividualRequest) أو يرفضه (rejectIndividualRequest).
      */
-    public function requestIndividualBooking(Student $student, Package $package, array $slots): Booking
+    public function requestIndividualBooking(Student $student, Package $package, array $slots, ?string $couponCode = null): Booking
     {
         $this->assertPackageBookable($package);
 
@@ -67,18 +68,22 @@ class BookingService
         $this->assertSlotsDontOverlapEachOther($anchors, $durationMinutes);
         $this->conflicts->assertNoConflict($student, $package->teacher_id, $anchors, $durationMinutes);
 
-        return $this->createBookingRecord($student, $package, [
-            'status' => 'pending_teacher_confirmation',
-            // العمودان القديمان يبقيان مملوءين بأول جلسة فقط (توافقاً مع أي كود
-            // لم يُحدَّث بعد) — requested_slots هو مصدر الحقيقة الكامل والوحيد.
-            'requested_date' => $slots[0]['date'],
-            'requested_start_time' => $slots[0]['start_time'],
-            'requested_slots' => $slots,
-            // تُحفَظ الآن كي نستطيع لاحقاً (عند موافقة المعلم) تحويل هذا الوقت الخام
-            // بدقة إلى UTC حسب منطقة الطالب الفعلية وقت الطلب، لا افتراض UTC ساذج.
-            'requested_timezone' => $timezone,
-            'hold_expires_at' => null,
-        ]);
+        // معاملة لازمة الآن حتى بلا دفع بعد: حجز الكوبون (lockForUpdate + increment)
+        // يجب أن يُلغى تلقائياً (rollback) لو فشل أي فحص لاحق قبل إنشاء الحجز نفسه.
+        return DB::transaction(function () use ($student, $package, $slots, $timezone, $couponCode) {
+            return $this->createBookingRecord($student, $package, array_merge([
+                'status' => 'pending_teacher_confirmation',
+                // العمودان القديمان يبقيان مملوءين بأول جلسة فقط (توافقاً مع أي كود
+                // لم يُحدَّث بعد) — requested_slots هو مصدر الحقيقة الكامل والوحيد.
+                'requested_date' => $slots[0]['date'],
+                'requested_start_time' => $slots[0]['start_time'],
+                'requested_slots' => $slots,
+                // تُحفَظ الآن كي نستطيع لاحقاً (عند موافقة المعلم) تحويل هذا الوقت الخام
+                // بدقة إلى UTC حسب منطقة الطالب الفعلية وقت الطلب، لا افتراض UTC ساذج.
+                'requested_timezone' => $timezone,
+                'hold_expires_at' => null,
+            ], $this->resolveCouponOverrides($couponCode, $package)));
+        });
     }
 
     /**
@@ -155,6 +160,9 @@ class BookingService
             'cancellation_reason' => $reason,
         ]);
 
+        // لا دفع حدث على طلب مرفوض — أي استخدام كوبون حُجز عند تقديم الطلب يُعاد فوراً
+        $this->coupons->release($booking->coupon_id);
+
         $this->audit('booking.request_rejected', $booking, [], [], $reason, $teacher->id);
 
         return $booking;
@@ -192,10 +200,20 @@ class BookingService
      */
     public function expireStalePendingPayments(): int
     {
+        $staleCouponIds = Booking::where('status', 'pending_payment')
+            ->whereNotNull('hold_expires_at')
+            ->where('hold_expires_at', '<', now())
+            ->whereNotNull('coupon_id')
+            ->pluck('coupon_id')
+            ->all();
+
         $expired = Booking::where('status', 'pending_payment')
             ->whereNotNull('hold_expires_at')
             ->where('hold_expires_at', '<', now())
             ->update(['status' => 'expired', 'cancelled_at' => now()]);
+
+        // لا دفع اكتمل لهذه الحجوزات — أي كوبونات حُجزت عند إنشائها تُعاد دفعة واحدة
+        $this->coupons->releaseMany($staleCouponIds);
 
         // enrollments.status لا تملك قيمة 'expired' — أقرب حالة متاحة لدفع لم يكتمل هي 'cancelled'
         Enrollment::where('status', 'pending_payment')
@@ -221,6 +239,8 @@ class BookingService
             'cancelled_at' => now(),
             'cancellation_reason' => self::EXPIRED_PENDING_TEACHER_CONFIRMATION_REASON,
         ]);
+
+        $this->coupons->release($booking->coupon_id);
 
         $this->audit('booking.request_expired', $booking, ['status' => 'pending_teacher_confirmation'], ['status' => 'expired'], self::EXPIRED_PENDING_TEACHER_CONFIRMATION_REASON);
 
@@ -335,7 +355,7 @@ class BookingService
      * (بعدد sessions_count بدءاً من تاريخ package_schedules الذي حدده المعلم)،
      * وكل انضمام لاحق يُسجَّل كحاضر على نفس الجلسات الموجودة.
      */
-    public function joinGroupPackage(Student $student, Package $package): Booking
+    public function joinGroupPackage(Student $student, Package $package, ?string $couponCode = null): Booking
     {
         $this->assertPackageBookable($package);
 
@@ -356,8 +376,8 @@ class BookingService
         // طلاباً آخرين من الانضمام، فالفحص مقيَّد بـ student_id+package_id معاً.
         $this->assertNoOpenBookingForPackage($student, $package);
 
-        return DB::transaction(function () use ($student, $package) {
-            $booking = $this->createBookingRecord($student, $package);
+        return DB::transaction(function () use ($student, $package, $couponCode) {
+            $booking = $this->createBookingRecord($student, $package, $this->resolveCouponOverrides($couponCode, $package));
 
             // sessionsFor() قد تكون هذه أول عملية انضمام (تُنشئ جلسات المجموعة
             // فعلياً) أو انضماماً لاحقاً (تُعيد الموجودة) — إما حال، الجلسات نفسها
@@ -388,7 +408,7 @@ class BookingService
      *   المتاحة، تماماً كطلب الطالب لكن مؤكَّد فوراً.
      * created_by_admin_id و manual_reason إلزاميان (مفروضان أيضاً عبر chk_bookings_manual).
      */
-    public function createManualBooking(Student $student, Package $package, User $admin, string $reason, ?array $slots = null): Booking
+    public function createManualBooking(Student $student, Package $package, User $admin, string $reason, ?array $slots = null, ?string $couponCode = null): Booking
     {
         $this->assertPackageBookable($package);
 
@@ -409,15 +429,15 @@ class BookingService
         // منع الطالب من امتلاك أكثر من اشتراك قائم بنفس الباقة بصرف النظر عمّن ينشئه.
         $this->assertNoOpenBookingForPackage($student, $package);
 
-        return DB::transaction(function () use ($student, $package, $admin, $reason, $slots) {
-            $booking = $this->createBookingRecord($student, $package, [
+        return DB::transaction(function () use ($student, $package, $admin, $reason, $slots, $couponCode) {
+            $booking = $this->createBookingRecord($student, $package, array_merge([
                 'is_manual' => true,
                 'created_by_admin_id' => $admin->id,
                 'manual_reason' => $reason,
                 'status' => 'confirmed',
                 'confirmed_at' => now(),
                 'hold_expires_at' => null,
-            ]);
+            ], $this->resolveCouponOverrides($couponCode, $package)));
 
             // الحجز اليدوي مؤكَّد فوراً بلا مرحلة موافقة وسيطة، فهو الفرصة
             // الوحيدة لمنع التعارض هنا — لا فرق عن الحجز الذاتي من ناحية
@@ -562,6 +582,32 @@ class BookingService
             'status' => 'pending_payment',
             'hold_expires_at' => now()->addMinutes((int) $this->settings->get('booking_payment_hold_minutes', 15)),
         ], $overrides));
+    }
+
+    /**
+     * بلا كود، تُعاد مصفوفة فارغة فلا يتغيّر شيء في createBookingRecord. بكود،
+     * تحجز استخدام الكوبون فوراً (CouponService::validateAndReserve، داخل نفس
+     * معاملة إنشاء الحجز الحالية) وتُرجع القيم المعدَّلة لتجاوز القيم الافتراضية
+     * المشتقة من الباقة مباشرة. الفشل (كود غير صالح/منتهٍ/مستنفَد) يرمي
+     * ValidationException فيُلغي المعاملة كلها تلقائياً — لا حجز بلا كود صالح.
+     *
+     * @return array<string, mixed>
+     */
+    private function resolveCouponOverrides(?string $couponCode, Package $package): array
+    {
+        if (! $couponCode) {
+            return [];
+        }
+
+        $result = $this->coupons->validateAndReserve($couponCode, $package);
+
+        return [
+            'coupon_id' => $result['coupon']->id,
+            'discount_amount' => $result['discountAmount'],
+            'amount_paid' => $result['amountPaid'],
+            'teacher_amount' => $result['teacherAmount'],
+            'platform_amount' => $result['platformAmount'],
+        ];
     }
 
     private function registerAttendee(ClassSession $session, Student $student, Booking $booking): SessionAttendee

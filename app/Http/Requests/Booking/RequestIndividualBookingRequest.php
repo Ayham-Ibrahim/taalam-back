@@ -30,6 +30,9 @@ class RequestIndividualBookingRequest extends FormRequest
             // على اللحظة الكاملة بعد تحويلها لتوقيت الطالب الفعلي.
             'slots.*.date' => ['required', 'date'],
             'slots.*.start_time' => ['required', 'date_format:H:i'],
+            // التحقق الفعلي من صلاحية الكود لهذه الباقة يتم في CouponService —
+            // هنا فقط شكل الحقل، تماماً مثل slots أعلاه.
+            'coupon_code' => ['nullable', 'string', 'max:30'],
         ];
     }
 }
