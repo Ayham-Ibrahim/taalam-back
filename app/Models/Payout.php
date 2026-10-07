@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 class Payout extends Model
 {
     protected $attributes = [
-        'currency' => 'USD',
+        'currency' => 'AED',
     ];
 
     protected $fillable = [

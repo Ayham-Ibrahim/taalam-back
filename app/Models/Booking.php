@@ -11,7 +11,7 @@ class Booking extends Model
     use SoftDeletes;
 
     protected $attributes = [
-        'currency' => 'USD',
+        'currency' => 'AED',
     ];
 
     protected $fillable = [

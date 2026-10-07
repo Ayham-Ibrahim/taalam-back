@@ -10,7 +10,7 @@ class Course extends Model
     use SoftDeletes;
 
     protected $attributes = [
-        'currency' => 'USD',
+        'currency' => 'AED',
         'session_duration_min' => 60,
     ];
 

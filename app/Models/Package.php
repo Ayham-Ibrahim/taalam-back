@@ -16,7 +16,7 @@ class Package extends Model
      * ما يكسر أي كود يقرأ $model->currency في نفس الطلب (كخدمات الحجز).
      */
     protected $attributes = [
-        'currency' => 'USD',
+        'currency' => 'AED',
         'session_duration_min' => 60,
     ];
 

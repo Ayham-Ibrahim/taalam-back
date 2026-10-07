@@ -39,7 +39,7 @@ class SettingsSeeder extends Seeder
             ],
             [
                 'key' => 'default_currency',
-                'value' => 'USD',
+                'value' => 'AED',
                 'type' => 'string',
                 'group' => 'pricing',
                 'label_ar' => 'العملة الافتراضية',
