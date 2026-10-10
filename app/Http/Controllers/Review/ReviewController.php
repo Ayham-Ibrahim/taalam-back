@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Review;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Review\CreateReviewRequest;
 use App\Http\Requests\Review\HideReviewRequest;
+use App\Http\Requests\Review\ImportTeacherReviewsRequest;
 use App\Http\Requests\Review\ReportReviewRequest;
 use App\Http\Requests\Review\RespondToReviewRequest;
 use App\Http\Requests\Review\UpdateReviewRequest;
@@ -13,12 +14,16 @@ use App\Http\Resources\Review\MyReviewResource;
 use App\Models\ClassSession;
 use App\Models\Review;
 use App\Models\Teacher;
+use App\Services\ReviewImportService;
 use App\Services\ReviewService;
 use Illuminate\Http\Request;
 
 class ReviewController extends Controller
 {
-    public function __construct(private readonly ReviewService $reviewService) {}
+    public function __construct(
+        private readonly ReviewService $reviewService,
+        private readonly ReviewImportService $reviewImportService,
+    ) {}
 
     /** تقييمات الطالب الحالي هو نفسه — يغذّي تبويب "التقييمات" بلوحة تحكم الطالب */
     public function myReviews(Request $request)
@@ -147,5 +152,38 @@ class ReviewController extends Controller
         $review = $this->reviewService->report($review, $request->validated('reason'));
 
         return $this->success($review, 'تم الإبلاغ عن التقييم');
+    }
+
+    /** الأدمن يرفع ملف Excel/CSV بتقييمات يدوية لمعلم — ميزة مؤقتة (راجع ReviewImportService) */
+    public function importForTeacher(ImportTeacherReviewsRequest $request, Teacher $teacher)
+    {
+        $result = $this->reviewImportService->importForTeacher($teacher, $request->file('file'), $request->user());
+
+        return $this->success($result, 'اكتمل الاستيراد');
+    }
+
+    /** التقييمات المُستورَدة يدوياً لهذا المعلم فقط — لعرضها/حذفها من لوحة الأدمن */
+    public function seededForTeacher(Request $request, Teacher $teacher)
+    {
+        $this->authorize('import', Review::class);
+
+        $reviews = Review::where('teacher_id', $teacher->id)
+            ->where('is_seeded', true)
+            ->latest()
+            ->get();
+
+        return $this->success(AdminReviewResource::collection($reviews));
+    }
+
+    /** حذف تقييم مُستورَد يدوياً فقط — لا يسمح بحذف تقييمات طلاب حقيقية إطلاقاً */
+    public function destroy(Request $request, Review $review)
+    {
+        $this->authorize('delete', Review::class);
+
+        abort_unless($review->is_seeded, 403, 'لا يمكن حذف تقييم حقيقي من هنا');
+
+        $review->delete();
+
+        return $this->success(null, 'تم حذف التقييم');
     }
 }

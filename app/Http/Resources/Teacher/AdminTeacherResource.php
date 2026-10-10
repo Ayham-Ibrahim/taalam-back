@@ -27,6 +27,8 @@ class AdminTeacherResource extends JsonResource
             'rawStatus' => $this->status,
             'canApprove' => $this->canApprove(),
             'approvalBlockedReason' => $this->approvalBlockedReason(),
+            'ratingAvg' => (float) $this->rating_avg,
+            'reviewsCount' => $this->reviews_count,
             'city' => $this->city,
             'address' => $this->address,
             'website' => $this->website,

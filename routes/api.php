@@ -216,6 +216,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('reviews/{review}/hide', [ReviewController::class, 'hide']);
     Route::post('reviews/{review}/unhide', [ReviewController::class, 'unhide']);
     Route::post('reviews/{review}/report', [ReviewController::class, 'report']);
+    Route::post('teachers/{teacher}/reviews/import', [ReviewController::class, 'importForTeacher']);
+    Route::get('teachers/{teacher}/reviews/seeded', [ReviewController::class, 'seededForTeacher']);
+    Route::delete('reviews/{review}', [ReviewController::class, 'destroy']);
 
     Route::get('favorites', [FavoriteController::class, 'index']);
     Route::post('favorites/teachers/{teacher}', [FavoriteController::class, 'toggleTeacher']);

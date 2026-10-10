@@ -11,7 +11,8 @@ class AdminReviewResource extends JsonResource
     {
         return [
             'id' => $this->id,
-            'student_name' => $this->whenLoaded('student', fn () => $this->student?->user?->name),
+            // الطالب الحقيقي إن وُجد (محمَّل مسبقاً)، وإلا reviewer_name المُدخَل يدوياً وقت الاستيراد
+            'student_name' => $this->reviewer_name ?? $this->whenLoaded('student', fn () => $this->student?->user?->name),
             'teacher_name' => $this->whenLoaded('teacher', fn () => $this->teacher?->user?->name),
             'rating' => $this->rating,
             'comment' => $this->comment,
@@ -20,6 +21,7 @@ class AdminReviewResource extends JsonResource
             'hidden_reason' => $this->hidden_reason,
             'is_reported' => $this->is_reported,
             'report_reason' => $this->report_reason,
+            'is_seeded' => (bool) $this->is_seeded,
             'created_at' => $this->created_at,
         ];
     }
