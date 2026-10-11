@@ -32,7 +32,7 @@ class SettingsSeeder extends Seeder
             ],
             [
                 'key' => 'max_platform_margin_percent',
-                'value' => '100',
+                'value' => '200',
                 'type' => 'decimal',
                 'group' => 'pricing',
                 'label_ar' => 'الحد الأقصى لنسبة المنصة (%)',

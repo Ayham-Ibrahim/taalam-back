@@ -38,7 +38,7 @@ class PayoutEndpointTest extends TestCase
         $list->assertJsonPath('data.0.providerName', $teacherUser->name);
         $list->assertJsonPath('data.0.providerType', 'school');
         $list->assertJsonPath('data.0.sessionsCount', 1);
-        $list->assertJsonPath('data.0.totalAmount', 40);
+        $list->assertJsonPath('data.0.totalAmount', 100);
         $list->assertJsonPath('data.0.status', 'pending');
     }
 

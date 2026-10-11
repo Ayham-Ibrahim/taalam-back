@@ -32,10 +32,10 @@ class PayoutServiceTest extends TestCase
 
         $payout = app(PayoutService::class)->generateForPeriod($teacher, now()->subDay(), now()->addDay());
 
-        // teacher_price سعر الساعة/الجلسة الواحدة = 100، والمنصة تخصم 60% منه، فصافي المعلم لكل جلسة = 40
-        $this->assertEquals(40.0, (float) $payout->gross_amount);
+        // teacher_price سعر الساعة/الجلسة الواحدة مباشرة — teacher_amount الكلي = 100×4 ÷ 4 جلسات = 100 لكل جلسة
+        $this->assertEquals(100.0, (float) $payout->gross_amount);
         $this->assertSame(1, $payout->sessions_count);
-        $this->assertDatabaseHas('payout_items', ['payout_id' => $payout->id, 'class_session_id' => $session->id, 'amount' => 40]);
+        $this->assertDatabaseHas('payout_items', ['payout_id' => $payout->id, 'class_session_id' => $session->id, 'amount' => 100]);
     }
 
     /**
@@ -108,7 +108,7 @@ class PayoutServiceTest extends TestCase
 
         $payout = app(PayoutService::class)->generateForPeriod($teacher, now()->subDay(), now()->addDay());
 
-        $this->assertEquals(40.0, (float) $payout->gross_amount);
+        $this->assertEquals(100.0, (float) $payout->gross_amount);
     }
 
     public function test_payout_excludes_sessions_already_paid_in_a_previous_payout(): void

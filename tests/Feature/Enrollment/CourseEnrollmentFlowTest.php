@@ -37,9 +37,9 @@ class CourseEnrollmentFlowTest extends TestCase
         $enrollment = app(EnrollmentService::class)->initiateEnrollment($student, $course);
 
         $this->assertSame('pending_payment', $enrollment->status);
-        // الطالب يدفع سعر المركز كما هو (200)، والمنصة تخصم 50% (100) فيستلم المركز الصافي 100
-        $this->assertEquals(200.0, (float) $enrollment->amount_paid);
-        $this->assertEquals(100.0, (float) $enrollment->provider_amount);
+        // provider_price=200 قبل الهامش، ثم ×1.5 = 300 للطالب، والمركز يستلم كامل سعره 200
+        $this->assertEquals(300.0, (float) $enrollment->amount_paid);
+        $this->assertEquals(200.0, (float) $enrollment->provider_amount);
         $this->assertEquals(100.0, (float) $enrollment->platform_amount);
 
         $this->assertEqualsWithDelta(
@@ -53,7 +53,7 @@ class CourseEnrollmentFlowTest extends TestCase
         $this->assertDatabaseHas('payments', [
             'enrollment_id' => $enrollment->id,
             'status' => 'pending',
-            'amount' => 200,
+            'amount' => 300,
         ]);
     }
 
