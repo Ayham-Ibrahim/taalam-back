@@ -51,7 +51,12 @@ class RescheduleService
         $this->conflicts->assertNoConflict($student, $session->teacher_id, [$newTime], $session->duration_min, [$session->id]);
     }
 
-    public function request(ClassSession $session, User $requester, string $requesterRole, Carbon $proposedAt, ?string $reason = null): RescheduleRequest
+    /**
+     * $proposedAt قد تكون null — "تبليغ غياب طارئ" بلا موعد بديل مقترح (المعلم/الطالب
+     * يعجز عن حضور الجلسة ويريد فقط إبلاغ الإدارة لتنسيق البديل لاحقاً عبر approve()
+     * بموعد بديل). عندها يصبح $reason إلزامياً دائماً (لا شيء آخر يشرح الطلب للأدمن).
+     */
+    public function request(ClassSession $session, User $requester, string $requesterRole, ?Carbon $proposedAt, ?string $reason = null): RescheduleRequest
     {
         if (in_array($session->status, ['completed', 'cancelled', 'no_show_student', 'no_show_teacher'], true)) {
             throw ValidationException::withMessages([
@@ -79,7 +84,14 @@ class RescheduleService
         }
 
         $this->assertSessionIsPaid($session, $requester, $requesterRole);
-        $this->assertNewTimeHasNoConflict($session, $proposedAt);
+
+        if ($proposedAt) {
+            $this->assertNewTimeHasNoConflict($session, $proposedAt);
+        } elseif (empty($reason)) {
+            throw ValidationException::withMessages([
+                'reason' => ['السبب إلزامي عند تبليغ غياب بلا موعد بديل مقترح'],
+            ]);
+        }
 
         $freeWindowHours = (int) $this->settings->get('reschedule_free_window_hours', 24);
         $hoursBeforeSession = max(0, now()->diffInHours($session->scheduled_at, false));
@@ -231,6 +243,15 @@ class RescheduleService
 
         $newTime = $alternativeAt ?? $rescheduleRequest->proposed_scheduled_at;
 
+        // طلب "تبليغ غياب" (proposed_scheduled_at فارغة أصلاً — لا موعد مقترح من
+        // صاحب الطلب) لا يملك شيئاً تُطبَّق الموافقة البسيطة عليه؛ الأدمن مُلزَم
+        // بتمرير $alternativeAt بعد تنسيقه فعلياً مع الطرفين خارج المنصة.
+        if (! $newTime) {
+            throw ValidationException::withMessages([
+                'alternative_scheduled_at' => ['هذا طلب تبليغ غياب بلا موعد مقترح — يجب تحديد موعد بديل للموافقة عليه'],
+            ]);
+        }
+
         $rescheduleRequest->loadMissing('session');
         $session = $rescheduleRequest->session;
 
@@ -257,15 +278,23 @@ class RescheduleService
             'new_scheduled_at' => $newTime->toDateTimeString(),
         ], $notes, $admin->id);
 
-        // صاحب الطلب (requester) — طالب أو معلم، أيهما أرسله فعلياً — هو من
-        // ينتظر القرار، بصرف النظر عمّن أنشأ الجلسة أصلاً.
-        if ($requester = $rescheduleRequest->loadMissing('requester')->requester) {
-            $this->notifications->send(
-                $requester,
-                new RescheduleRequestReviewed($rescheduleRequest->status, $newTime),
+        // يُبلَّغ الطرفان معاً — الطالب والمعلم — لا صاحب الطلب وحده: نفس سبب
+        // reject() بالضبط (الموعد الجديد يخص جدول الطرفين كليهما، لا صاحب الطلب
+        // فقط). قبل هذا الإصلاح كان الطرف الآخر (الذي لم يُرسل الطلب) لا يُبلَّغ
+        // إطلاقاً رغم أن جلسته هو أيضاً تغيّر موعدها فعلياً.
+        $rescheduleRequest->loadMissing(['session.teacher.user', 'session.booking.student.user']);
+
+        collect([
+            $rescheduleRequest->session?->teacher?->user,
+            $rescheduleRequest->session?->booking?->student?->user,
+        ])
+            ->filter()
+            ->unique('id')
+            ->each(fn (User $party) => $this->notifications->send(
+                $party,
+                new RescheduleRequestReviewed($rescheduleRequest->status, $newTime, adminNotes: $notes),
                 'reschedule.approved',
-            );
-        }
+            ));
 
         return $rescheduleRequest->fresh();
     }

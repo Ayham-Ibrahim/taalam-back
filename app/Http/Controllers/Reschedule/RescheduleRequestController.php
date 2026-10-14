@@ -55,15 +55,19 @@ class RescheduleRequestController extends Controller
         $user = $request->user();
         $role = $user->isStudent() ? 'student' : 'teacher';
 
+        $proposedAt = $request->validated('proposed_scheduled_at')
+            ? Carbon::parse($request->validated('proposed_scheduled_at'))
+            : null;
+
         $rescheduleRequest = $this->rescheduleService->request(
             $session,
             $user,
             $role,
-            Carbon::parse($request->validated('proposed_scheduled_at')),
+            $proposedAt,
             $request->validated('reason'),
         );
 
-        return $this->success($rescheduleRequest, 'تم إرسال طلب تغيير الموعد بانتظار مراجعة الأدمن', 201);
+        return $this->success($rescheduleRequest, 'تم إرسال الطلب بانتظار مراجعة الأدمن', 201);
     }
 
     public function approve(ApproveRescheduleRequestRequest $request, RescheduleRequest $rescheduleRequest)
