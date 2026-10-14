@@ -166,6 +166,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('bookings/{booking}/reject', [BookingController::class, 'rejectRequest']);
     Route::post('bookings/{booking}/checkout', [BookingController::class, 'checkout']);
     Route::get('bookings/{booking}/invoice', [BookingController::class, 'downloadInvoice']);
+    Route::delete('bookings/{booking}', [BookingController::class, 'destroy']);
 
     Route::get('enrollments', [EnrollmentController::class, 'index']);
     Route::get('enrollments/{enrollment}', [EnrollmentController::class, 'show']);

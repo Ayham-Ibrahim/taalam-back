@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Booking;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Booking\CreateManualBookingRequest;
+use App\Http\Requests\Booking\DeleteBookingRequest;
 use App\Http\Requests\Booking\RejectBookingRequest;
 use App\Http\Requests\Booking\RequestIndividualBookingRequest;
 use App\Models\Booking;
@@ -174,5 +175,13 @@ class BookingController extends Controller
         );
 
         return $this->success($booking, 'تم إنشاء الحجز اليدوي بنجاح', 201);
+    }
+
+    /** حذف إداري لحجز لم يُدفع ثمنه بعد فقط — BookingService::delete يرفض أي حجز مدفوع. */
+    public function destroy(DeleteBookingRequest $request, Booking $booking)
+    {
+        $this->bookingService->delete($booking, $request->user(), $request->validated('reason'));
+
+        return $this->success(null, 'تم حذف الحجز بنجاح');
     }
 }

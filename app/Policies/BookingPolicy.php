@@ -34,4 +34,10 @@ class BookingPolicy
     {
         return $user->isAdmin() || $user->loadMissing('teacher')->teacher?->id === $booking->teacher_id;
     }
+
+    /** حذف حجز غير مدفوع — إجراء إداري حصراً (BookingService::delete يرفض أي حجز مدفوع بصرف النظر عن هذا) */
+    public function delete(User $user): bool
+    {
+        return $user->isAdmin();
+    }
 }

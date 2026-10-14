@@ -168,6 +168,42 @@ class BookingService
         return $booking;
     }
 
+    /**
+     * حذف إداري لحجز لم يُدفع ثمنه بعد — لا استرداد مالي في هذا النظام أصلاً
+     * (راجع تعليق هجرة جدول payments)، فالحذف مسموح فقط طالما لا صف Payment
+     * بحالة paid مرتبط بهذا الحجز (Booking::hasPaidPayment). حجز مدفوع يُرفض
+     * حذفه نهائياً — لا مسار آخر لإلغائه حالياً.
+     *
+     * نفس نمط rejectIndividualRequest/expireStalePendingPayments تماماً: تحويل
+     * الحالة إلى cancelled أولاً (فتصبح الجلسات المرتبطة "غير قائمة" تلقائياً
+     * عبر ClassSession::constrainToLiveAttendee في كل مكان، دون حاجة لمسّها
+     * مباشرة)، ثم حذف ناعم (SoftDeletes) يُخفي السطر عن قوائم الحجوزات.
+     * لا يُعاد ضبط cancelled_at/السبب إن كان الحجز ملغى/منتهياً أصلاً — يُحافَظ
+     * على السبب الأصلي لإلغائه.
+     */
+    public function delete(Booking $booking, User $admin, ?string $reason): void
+    {
+        if ($booking->hasPaidPayment()) {
+            throw ValidationException::withMessages([
+                'status' => ['لا يمكن حذف حجز تم دفعه بالفعل'],
+            ]);
+        }
+
+        if (! in_array($booking->status, ['cancelled', 'expired'], true)) {
+            $booking->update([
+                'status' => 'cancelled',
+                'cancelled_at' => now(),
+                'cancellation_reason' => $reason,
+            ]);
+
+            $this->coupons->release($booking->coupon_id);
+        }
+
+        $this->audit('booking.deleted', $booking, [], [], $reason, $admin->id);
+
+        $booking->delete();
+    }
+
     public function expireStalePendingTeacherConfirmations(): int
     {
         $updated = 0;

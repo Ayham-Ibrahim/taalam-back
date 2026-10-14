@@ -128,6 +128,18 @@ class Booking extends Model
     }
 
     /**
+     * مصدر الحقيقة الوحيد لسؤال "هل دُفع هذا الحجز فعلاً؟" — status وحده لا يكفي
+     * (pending_payment له صف Payment بحالة pending لا paid بعد؛ confirmed/active
+     * لا تُبلَغ إلا بعد أن يضبط PaymentService/webhook صف الدفع نفسه paid أولاً).
+     * مستخدَمة في BookingService::delete لمنع حذف حجز تم تحصيل ثمنه فعلياً —
+     * لا استرداد تلقائي في هذا النظام (راجع تعليق هجرة جدول payments).
+     */
+    public function hasPaidPayment(): bool
+    {
+        return $this->payments()->where('status', 'paid')->exists();
+    }
+
+    /**
      * يحصر الاستعلام بما يحق للمستخدم رؤيته حسب دوره — الأدمن يرى الكل، المعلم
      * حجوزات طلابه، الطالب حجوزاته فقط. مركزي كي لا يتكرر منطق الأدوار في كل Controller.
      */
