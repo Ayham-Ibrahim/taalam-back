@@ -21,6 +21,9 @@ class Teacher extends Model
     /** نفس المنطق أيضاً — سجل خبرات سابقة يديره المعلم بنفسه (عنوان + فترة نصية) */
     public const MAX_EXPERIENCES = 10;
 
+    /** نفس منطق MAX_VIDEOS — يمنع نمواً غير محدود لغاليري نماذج الداعم الأكاديمي */
+    public const MAX_GALLERY_ITEMS = 20;
+
     protected $fillable = [
         'user_id',
         'teacher_type',
@@ -127,6 +130,16 @@ class Teacher extends Model
         return $this->hasMany(Package::class);
     }
 
+    public function galleryItems()
+    {
+        return $this->hasMany(TeacherGalleryItem::class)->orderBy('sort_order');
+    }
+
+    public function supportPackages()
+    {
+        return $this->hasMany(SupportPackage::class);
+    }
+
     public function courses()
     {
         return $this->hasMany(Course::class);
@@ -155,6 +168,13 @@ class Teacher extends Model
     public function isTrainingCenter(): bool
     {
         return $this->teacher_type === 'training_center';
+    }
+
+    /** الداعم الأكاديمي — موظف شركة شريكة خارجية، يدعم طلاباً جامعيين بمهامهم الدراسية
+     * لا جلسات/حجوزات تقليدية. له غاليري نماذج أعمال وباقات دعم بسعر ثابت بلا هامش منصة. */
+    public function isAcademicSupport(): bool
+    {
+        return $this->teacher_type === 'academic_support';
     }
 
     public function isVerified(): bool

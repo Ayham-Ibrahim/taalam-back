@@ -16,6 +16,7 @@ use App\Http\Controllers\MetaController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\Package\AvailabilityController;
 use App\Http\Controllers\Package\PackageController;
+use App\Http\Controllers\SupportPackage\SupportPackageController;
 use App\Http\Controllers\Payment\PaymentWebhookController;
 use App\Http\Controllers\Payout\PayoutController;
 use App\Http\Controllers\ProfileController;
@@ -32,6 +33,7 @@ use App\Http\Controllers\Teacher\TeacherController;
 use App\Http\Controllers\Accountant\AccountantController;
 use App\Http\Controllers\Teacher\TeacherExperienceController;
 use App\Http\Controllers\Teacher\TeacherFaqController;
+use App\Http\Controllers\Teacher\TeacherGalleryItemController;
 use App\Http\Controllers\Teacher\TeacherImportController;
 use App\Http\Controllers\Teacher\TeacherVideoController;
 use App\Http\Controllers\Teacher\VerificationDocumentController;
@@ -121,6 +123,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('teachers/{teacher}/experiences', [TeacherExperienceController::class, 'store']);
     Route::put('teacher-experiences/{experience}', [TeacherExperienceController::class, 'update']);
     Route::delete('teacher-experiences/{experience}', [TeacherExperienceController::class, 'destroy']);
+    Route::post('teachers/{teacher}/gallery-items', [TeacherGalleryItemController::class, 'store']);
+    Route::delete('teacher-gallery-items/{item}', [TeacherGalleryItemController::class, 'destroy']);
 
     Route::get('badges', [BadgeController::class, 'index']);
     Route::post('teachers/{teacher}/badges', [BadgeController::class, 'grant']);
@@ -136,6 +140,14 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('packages/{package}/enable', [PackageController::class, 'enable']);
     Route::post('packages/{package}/approve', [PackageController::class, 'approve']);
     Route::post('packages/{package}/reject', [PackageController::class, 'reject']);
+
+    Route::get('support-packages', [SupportPackageController::class, 'index']);
+    Route::post('support-packages', [SupportPackageController::class, 'store']);
+    Route::get('support-packages/{supportPackage}', [SupportPackageController::class, 'show']);
+    Route::post('support-packages/{supportPackage}/approve', [SupportPackageController::class, 'approve']);
+    Route::post('support-packages/{supportPackage}/reject', [SupportPackageController::class, 'reject']);
+    Route::post('support-packages/{supportPackage}/disable', [SupportPackageController::class, 'disable']);
+    Route::post('support-packages/{supportPackage}/enable', [SupportPackageController::class, 'enable']);
 
     Route::get('packages/{package}/coupons', [CouponController::class, 'index']);
     Route::post('packages/{package}/coupons', [CouponController::class, 'store']);

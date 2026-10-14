@@ -44,6 +44,22 @@ class SettingsSeeder extends Seeder
                 'group' => 'pricing',
                 'label_ar' => 'العملة الافتراضية',
             ],
+            [
+                'key' => 'support_package_basic_price',
+                'value' => '1000',
+                'type' => 'decimal',
+                'group' => 'pricing',
+                'label_ar' => 'سعر باقة الدعم الطلابي الأساسية (د.إ لكل مادة)',
+                'description' => 'سعر ثابت — بلا هامش منصة، الطالب يدفعه كاملاً ويستلمه الداعم الأكاديمي كاملاً',
+            ],
+            [
+                'key' => 'support_package_premium_price',
+                'value' => '1500',
+                'type' => 'decimal',
+                'group' => 'pricing',
+                'label_ar' => 'سعر باقة الدعم الطلابي الشاملة (د.إ لكل مادة)',
+                'description' => 'سعر ثابت — بلا هامش منصة، الطالب يدفعه كاملاً ويستلمه الداعم الأكاديمي كاملاً',
+            ],
 
             // ═══════ الحجز والمواعيد ═══════
             [

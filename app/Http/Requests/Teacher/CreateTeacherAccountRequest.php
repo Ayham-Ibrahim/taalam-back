@@ -23,7 +23,7 @@ class CreateTeacherAccountRequest extends FormRequest
             'name' => ['required', 'string', 'max:150', 'regex:/^[\p{L}\p{M}]+(?:[\s\'-][\p{L}\p{M}]+)*$/u'],
             'email' => ['required', 'email', 'max:150', 'unique:users,email'],
             'phone' => ['nullable', 'string', 'max:25', 'regex:/^\+?\d{7,24}$/', 'unique:users,phone'],
-            'teacher_type' => ['required', Rule::in(['school', 'university', 'training_center'])],
+            'teacher_type' => ['required', Rule::in(['school', 'university', 'training_center', 'academic_support'])],
             'password' => ['required', Password::defaults()],
         ];
     }
