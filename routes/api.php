@@ -133,6 +133,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('packages/{package}', [PackageController::class, 'update']);
     Route::post('packages/{package}/submit', [PackageController::class, 'submit']);
     Route::post('packages/{package}/disable', [PackageController::class, 'disable']);
+    Route::post('packages/{package}/enable', [PackageController::class, 'enable']);
     Route::post('packages/{package}/approve', [PackageController::class, 'approve']);
     Route::post('packages/{package}/reject', [PackageController::class, 'reject']);
 

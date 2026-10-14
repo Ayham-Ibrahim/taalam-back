@@ -170,4 +170,23 @@ class Package extends Model
         return $generated->exists()
             && ! $this->bookings()->whereHas('sessions', fn (Builder $q) => $q->where('status', '!=', 'cancelled'))->exists();
     }
+
+    /**
+     * نفس قيد TeacherService::assertNoLiveOrImminentSessions بالضبط — تعطيل
+     * الباقة لا يُلغي حجوزاتها القائمة فعلاً، لكن منعه عند جلسة جارية الآن أو
+     * جلسة ستبدأ خلال ٢٤ ساعة يعطي الأدمن فرصة ليُرتّب (إلغاء/تأجيل) قبل أن
+     * يُفاجَأ طالب بباقة معطّلة أثناء جلسة وشيكة. الجلسات الأبعد لا تمنع.
+     */
+    public function hasLiveOrImminentSessions(): bool
+    {
+        return ClassSession::query()
+            ->whereHas('booking', fn (Builder $q) => $q->where('package_id', $this->id))
+            ->whereIn('status', ['scheduled', 'active'])
+            ->where('scheduled_at', '<=', now()->addDay())
+            ->get(['id', 'scheduled_at', 'duration_min'])
+            ->contains(fn (ClassSession $session) => $session->scheduled_at
+                ->copy()
+                ->addMinutes($session->duration_min)
+                ->isAfter(now()));
+    }
 }

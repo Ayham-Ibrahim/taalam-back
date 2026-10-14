@@ -168,6 +168,15 @@ class PackageController extends Controller
         return $this->success($this->resourceFor($package, $request->user()), 'تم تعطيل الباقة');
     }
 
+    public function enable(Request $request, Package $package)
+    {
+        $this->authorize('enable', $package);
+
+        $package = $this->packageService->enable($package);
+
+        return $this->success($this->resourceFor($package, $request->user()), 'تمت إعادة تفعيل الباقة');
+    }
+
     public function approve(ApprovePackageRequest $request, Package $package)
     {
         $package = $this->approvalService->approve(

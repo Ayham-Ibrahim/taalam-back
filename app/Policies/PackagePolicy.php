@@ -39,6 +39,11 @@ class PackagePolicy
         return $user->isAdmin() || $user->loadMissing('teacher')->teacher?->id === $package->teacher_id;
     }
 
+    public function enable(User $user, Package $package): bool
+    {
+        return $user->isAdmin() || $user->loadMissing('teacher')->teacher?->id === $package->teacher_id;
+    }
+
     public function approve(User $user): bool
     {
         return $user->isAdmin();

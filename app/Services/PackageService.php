@@ -118,9 +118,35 @@ class PackageService
             ]);
         }
 
+        if ($package->hasLiveOrImminentSessions()) {
+            throw ValidationException::withMessages([
+                'session' => ['لا يمكن تعطيل الباقة لوجود جلسات نشطة أو ستبدأ خلال ٢٤ ساعة — يجب انتظار انتهائها أو إلغاؤها أولاً.'],
+            ]);
+        }
+
         $package->update(['status' => 'disabled']);
 
         $this->audit('package.disabled', $package);
+
+        return $package;
+    }
+
+    /**
+     * عكس disable() — لا حاجة لفحص جلسات هنا: الباقة المعطّلة أصلاً غير قابلة
+     * للحجز (isBookable/scopeBookable يشترطان status='active')، فلا جلسات
+     * جديدة قد تنشأ عليها وهي معطّلة لتُفحَص.
+     */
+    public function enable(Package $package): Package
+    {
+        if ($package->status !== 'disabled') {
+            throw ValidationException::withMessages([
+                'status' => ['يمكن إعادة التفعيل فقط لباقة معطّلة'],
+            ]);
+        }
+
+        $package->update(['status' => 'active']);
+
+        $this->audit('package.enabled', $package);
 
         return $package;
     }
