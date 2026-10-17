@@ -32,6 +32,7 @@ class AccountCreatedByAdmin extends Notification implements ShouldQueue
         $roleLabel = match ($this->role) {
             'teacher' => 'teacher',
             'accountant' => 'accountant',
+            'academic_support' => 'academic support',
             default => 'student',
         };
 

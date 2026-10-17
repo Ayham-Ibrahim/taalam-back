@@ -5,14 +5,13 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * باقات الدعم الطلابي — خاصة بالداعم الأكاديمي (Teacher::isAcademicSupport)
- * فقط، منفصلة تماماً عن packages العادية: لا جلسات/جدول/سعة، فقط مادة + فئة
- * سعر ثابتة (basic/premium). الطالب يدفع ثمنها كاملاً للداعم — بلا هامش منصة
+ * باقات الدعم الطلابي — خاصة بالداعم الأكاديمي (academic_supporters، لا علاقة
+ * بـ teachers إطلاقاً). لا جلسات/جدول/سعة، فقط مادة + فئة سعر ثابتة
+ * (basic/premium). الطالب يدفع ثمنها كاملاً — بلا هامش منصة
  * (platform_margin_percent=0 دائماً، student_price=teacher_price دائماً)؛ تسوية
  * تعلّم مع شركة الداعم الشريكة تتم يدوياً خارج المنصة بالكامل.
  *
- * لا مرحلة draft (بعكس packages العادية) — نموذج واحد يُرسَل مباشرة
- * pending_approval (انظر SupportPackageService::create).
+ * لا مرحلة draft — نموذج واحد يُرسَل مباشرة pending_approval (انظر SupportPackageService::create).
  */
 return new class extends Migration
 {
@@ -20,7 +19,7 @@ return new class extends Migration
     {
         Schema::create('support_packages', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('teacher_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('academic_supporter_id')->constrained()->cascadeOnDelete();
             $table->foreignId('subject_id')->constrained()->restrictOnDelete();
             $table->enum('tier', ['basic', 'premium']);
             $table->text('description');
@@ -46,7 +45,7 @@ return new class extends Migration
             $table->timestamps();
             $table->softDeletes();
 
-            $table->index(['teacher_id', 'status']);
+            $table->index(['academic_supporter_id', 'status']);
         });
     }
 

@@ -77,23 +77,6 @@ class PublicTeacherResource extends JsonResource
                 ->unique()
                 ->sort()
                 ->values()),
-            // الداعم الأكاديمي فقط (Teacher::isAcademicSupport) — غاليري نماذج أعمال
-            // وباقات دعم بسعر ثابت، بدل الباقات/الجلسات العادية.
-            'gallery_items' => $this->whenLoaded('galleryItems', fn () => $this->galleryItems->map(fn ($item) => [
-                'id' => $item->id,
-                'file_path' => $item->file_path,
-                'original_name' => $item->original_name,
-                'file_type' => $item->file_type,
-                'size_bytes' => $item->size_bytes,
-            ])),
-            'support_packages' => $this->whenLoaded('supportPackages', fn () => $this->supportPackages->map(fn ($sp) => [
-                'id' => $sp->id,
-                'tier' => $sp->tier,
-                'description' => $sp->description,
-                'subject' => $sp->subject ? ['id' => $sp->subject->id, 'name_ar' => $sp->subject->name_ar] : null,
-                'student_price' => (float) $sp->student_price,
-                'currency' => $sp->currency,
-            ])),
             'stats' => $this->stats,
         ];
     }

@@ -71,6 +71,11 @@ class User extends Authenticatable
         return $this->hasOne(Student::class);
     }
 
+    public function academicSupporter()
+    {
+        return $this->hasOne(AcademicSupporter::class);
+    }
+
     public function isAdmin(): bool
     {
         return $this->role === 'admin';
@@ -89,6 +94,11 @@ class User extends Authenticatable
     public function isAccountant(): bool
     {
         return $this->role === 'accountant';
+    }
+
+    public function isAcademicSupport(): bool
+    {
+        return $this->role === 'academic_support';
     }
 
     /** الأدمن أو المحاسب — كل ما هو مالي (المستحقات، الحجوزات/المدفوعات) */

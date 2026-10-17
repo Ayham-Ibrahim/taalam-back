@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Booking;
 use App\Models\Enrollment;
 use App\Models\Payment;
+use App\Models\SupportPackagePurchase;
 use Illuminate\Support\Facades\Log;
 use Stripe\Exception\SignatureVerificationException;
 use Stripe\StripeClient;
@@ -24,6 +25,7 @@ class PaymentService
     public function __construct(
         private readonly BookingService $bookingService,
         private readonly EnrollmentService $enrollmentService,
+        private readonly SupportPackagePurchaseService $supportPackagePurchaseService,
     ) {}
 
     public function createCheckoutSessionForBooking(Booking $booking): string
@@ -94,6 +96,42 @@ class PaymentService
         return $session->url;
     }
 
+    public function createCheckoutSessionForSupportPackagePurchase(SupportPackagePurchase $purchase): string
+    {
+        $payment = $purchase->payments()->latest()->firstOrFail();
+        $purchase->loadMissing(['student.user', 'supportPackage.subject']);
+
+        $subjectName = $purchase->supportPackage->subject?->name_ar ?? '';
+
+        $session = $this->stripe()->checkout->sessions->create([
+            'mode' => 'payment',
+            'payment_method_types' => ['card'],
+            'customer_email' => $purchase->student->user->email,
+            'line_items' => [[
+                'quantity' => 1,
+                'price_data' => [
+                    'currency' => strtolower($purchase->currency),
+                    'unit_amount' => (int) round(((float) $purchase->amount) * 100),
+                    'product_data' => ['name' => "اشتراك دعم أكاديمي #{$purchase->id} - {$subjectName}"],
+                ],
+            ]],
+            'metadata' => ['support_package_purchase_id' => $purchase->id, 'payment_id' => $payment->id],
+            'success_url' => $this->frontendPaymentUrl('/payments/success', [
+                'session_id' => '{CHECKOUT_SESSION_ID}',
+                'kind' => 'support_package_purchase',
+                'target' => "support-package-purchase-{$purchase->id}",
+            ]),
+            'cancel_url' => $this->frontendPaymentUrl('/payments/cancel', [
+                'kind' => 'support_package_purchase',
+                'target' => "support-package-purchase-{$purchase->id}",
+            ]),
+        ]);
+
+        $payment->update(['stripe_session_id' => $session->id]);
+
+        return $session->url;
+    }
+
     /**
      * @throws UnexpectedValueException|SignatureVerificationException عند فشل التحقق من التوقيع
      */
@@ -108,7 +146,7 @@ class PaymentService
 
     private function handleCheckoutCompleted(object $session): void
     {
-        $payment = Payment::with(['booking', 'enrollment'])->where('stripe_session_id', $session->id)->first();
+        $payment = Payment::with(['booking', 'enrollment', 'supportPackagePurchase'])->where('stripe_session_id', $session->id)->first();
 
         if (! $payment || $payment->status === 'paid') {
             return;
@@ -125,8 +163,10 @@ class PaymentService
             $this->bookingService->confirmBooking($payment->booking);
         } elseif ($payment->enrollment_id) {
             $this->enrollmentService->confirmEnrollment($payment->enrollment);
+        } elseif ($payment->support_package_purchase_id) {
+            $this->supportPackagePurchaseService->confirmPurchase($payment->supportPackagePurchase);
         } else {
-            Log::warning('Stripe payment confirmed without a linked booking or enrollment', ['payment_id' => $payment->id]);
+            Log::warning('Stripe payment confirmed without a linked booking, enrollment, or purchase', ['payment_id' => $payment->id]);
         }
     }
 

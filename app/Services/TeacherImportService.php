@@ -123,7 +123,7 @@ class TeacherImportService
             'phone' => ['nullable', 'string', 'max:25', 'unique:users,phone'],
             'whatsapp' => ['nullable', 'string', 'max:25'],
             'gender' => ['nullable', Rule::in(['male', 'female'])],
-            'teacher_type' => ['required', Rule::in(['school', 'university', 'training_center', 'academic_support'])],
+            'teacher_type' => ['required', Rule::in(['school', 'university', 'training_center'])],
         ], [
             'teacher_type.required' => 'نوع المعلم (مدرسي/جامعي/مركز تدريب) مفقود أو غير معروف من قيمة العمود',
         ]);

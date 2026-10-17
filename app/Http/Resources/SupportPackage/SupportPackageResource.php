@@ -15,11 +15,10 @@ class SupportPackageResource extends JsonResource
     {
         return [
             'id' => $this->id,
-            'teacher_id' => $this->teacher_id,
-            'teacher' => $this->whenLoaded('teacher', fn () => [
-                'id' => $this->teacher->id,
-                'teacher_type' => $this->teacher->teacher_type,
-                'name' => $this->teacher->user?->name,
+            'academic_supporter_id' => $this->academic_supporter_id,
+            'academic_supporter' => $this->whenLoaded('academicSupporter', fn () => [
+                'id' => $this->academicSupporter->id,
+                'name' => $this->academicSupporter->user?->name,
             ]),
             'tier' => $this->tier,
             'description' => $this->description,

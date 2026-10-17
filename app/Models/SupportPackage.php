@@ -14,7 +14,7 @@ class SupportPackage extends Model
     ];
 
     protected $fillable = [
-        'teacher_id',
+        'academic_supporter_id',
         'subject_id',
         'tier',
         'description',
@@ -42,9 +42,9 @@ class SupportPackage extends Model
         ];
     }
 
-    public function teacher()
+    public function academicSupporter()
     {
-        return $this->belongsTo(Teacher::class);
+        return $this->belongsTo(AcademicSupporter::class);
     }
 
     public function subject()
@@ -55,5 +55,10 @@ class SupportPackage extends Model
     public function approver()
     {
         return $this->belongsTo(User::class, 'approved_by');
+    }
+
+    public function purchases()
+    {
+        return $this->hasMany(SupportPackagePurchase::class);
     }
 }

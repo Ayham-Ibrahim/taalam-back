@@ -15,7 +15,7 @@ class SearchTeachersRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'teacher_type' => ['nullable', Rule::in(['school', 'university', 'training_center', 'academic_support'])],
+            'teacher_type' => ['nullable', Rule::in(['school', 'university', 'training_center'])],
             'subject_id' => ['nullable', 'integer', 'exists:subjects,id'],
             'curriculum_id' => ['nullable', 'integer', 'exists:curricula,id'],
             'stage_id' => ['nullable', 'integer', 'exists:stages,id'],

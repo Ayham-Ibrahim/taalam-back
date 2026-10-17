@@ -119,19 +119,6 @@ class TeacherController extends Controller
                 'user:id,name,email,phone,avatar_path',
                 'verificationDocuments' => fn ($q) => $q->latest(),
             ]);
-
-            // الداعم الأكاديمي يحتاج غاليريه وباقاته (بكل حالاتها هنا، لا النشطة
-            // فقط كما في العرض العام) ليديرها من لوحته الخاصة.
-            if ($teacher->isAcademicSupport()) {
-                $teacher->load(['galleryItems', 'supportPackages' => fn ($q) => $q->with('subject:id,name_ar')->latest()]);
-            }
-        } elseif ($teacher->isAcademicSupport()) {
-            // الداعم الأكاديمي لا باقات/جلسات تقليدية له — غاليري نماذج أعمال
-            // وباقات دعم نشطة فقط (معلَّقة/مرفوضة/معطَّلة لا تخص الزائر العام).
-            $teacher->load([
-                'galleryItems',
-                'supportPackages' => fn ($q) => $q->where('status', 'active')->with('subject:id,name_ar'),
-            ]);
         } else {
             // المراحل/الصفوف المعروضة للطالب مُشتقّة من باقات المعلم الفعلية
             // القابلة للحجز فقط (PublicTeacherResource) — لا من تصنيف عام، ولا

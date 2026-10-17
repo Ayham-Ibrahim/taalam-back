@@ -19,7 +19,7 @@ class InviteTeacherRequest extends FormRequest
             'name' => ['required', 'string', 'max:150'],
             'email' => ['required', 'email', 'max:150', 'unique:users,email'],
             'phone' => ['nullable', 'string', 'max:25', 'unique:users,phone'],
-            'teacher_type' => ['required', Rule::in(['school', 'university', 'training_center', 'academic_support'])],
+            'teacher_type' => ['required', Rule::in(['school', 'university', 'training_center'])],
         ];
     }
 }

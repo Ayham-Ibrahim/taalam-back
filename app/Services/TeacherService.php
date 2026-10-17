@@ -9,7 +9,6 @@ use App\Models\Enrollment;
 use App\Models\Teacher;
 use App\Models\TeacherExperience;
 use App\Models\TeacherFaq;
-use App\Models\TeacherGalleryItem;
 use App\Models\TeacherVideo;
 use App\Models\User;
 use App\Models\VerificationDocument;
@@ -309,55 +308,6 @@ class TeacherService
         $this->audit('teacher.experience_removed', $experience, ['title' => $experience->title], []);
 
         $experience->delete();
-    }
-
-    /**
-     * غاليري نماذج أعمال الداعم الأكاديمي — مقصورة على isAcademicSupport() (يُفحَص
-     * في AddTeacherGalleryItemRequest قبل الوصول هنا). القرص عام (public) عمداً —
-     * نماذج تسويقية علنية لا وثائق حساسة، فلا حاجة لتوقيع مؤقت كوثائق التوثيق.
-     */
-    public function addGalleryItem(Teacher $teacher, $file): TeacherGalleryItem
-    {
-        if ($teacher->galleryItems()->count() >= Teacher::MAX_GALLERY_ITEMS) {
-            throw ValidationException::withMessages([
-                'gallery' => ['لا يمكن إضافة أكثر من '.Teacher::MAX_GALLERY_ITEMS.' عنصراً — احذف عنصراً قديماً أولاً.'],
-            ]);
-        }
-
-        $path = FileStorage::storeFile($file, "teacher_gallery/{$teacher->id}", 'gallery', 'public');
-
-        $extension = strtolower($file->getClientOriginalExtension());
-        $fileType = match (true) {
-            in_array($extension, ['jpeg', 'jpg', 'png'], true) => 'image',
-            $extension === 'pdf' => 'pdf',
-            in_array($extension, ['ppt', 'pptx'], true) => 'pptx',
-            in_array($extension, ['xls', 'xlsx'], true) => 'xlsx',
-            default => 'pdf',
-        };
-
-        $item = $teacher->galleryItems()->create([
-            'file_path' => $path,
-            'original_name' => $file->getClientOriginalName(),
-            'mime_type' => $file->getMimeType(),
-            'size_bytes' => $file->getSize(),
-            'file_type' => $fileType,
-            'sort_order' => ($teacher->galleryItems()->max('sort_order') ?? -1) + 1,
-        ]);
-
-        $this->audit('teacher.gallery_item_added', $item, [], ['original_name' => $item->original_name]);
-
-        return $item;
-    }
-
-    public function removeGalleryItem(TeacherGalleryItem $item): void
-    {
-        $this->audit('teacher.gallery_item_removed', $item, ['original_name' => $item->original_name], []);
-
-        // file_path محفوظ كرابط عام كامل (نفس عائد FileStorage::storeFile لقرص public) —
-        // نفس نمط AuthService::deleteAvatar بالضبط لاشتقاق المسار النسبي داخل القرص.
-        Storage::disk('public')->delete(Str::after($item->file_path, '/storage/'));
-
-        $item->delete();
     }
 
     /**

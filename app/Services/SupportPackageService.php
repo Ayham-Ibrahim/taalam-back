@@ -2,14 +2,14 @@
 
 namespace App\Services;
 
+use App\Models\AcademicSupporter;
 use App\Models\SupportPackage;
-use App\Models\Teacher;
 use App\Models\User;
 use App\Traits\LogsAuditEvents;
 use Illuminate\Validation\ValidationException;
 
 /**
- * باقات الدعم الطلابي — مقصورة على الداعم الأكاديمي (Teacher::isAcademicSupport).
+ * باقات الدعم الطلابي — خاصة بالداعم الأكاديمي (كيان منفصل تماماً عن Teacher).
  * بعكس PackageService: لا مرحلة draft (نموذج واحد يُرسَل مباشرة pending_approval)،
  * ولا هامش منصة إطلاقاً (platform_margin_percent=0 ثابتة، السعر نفسه ثابت حسب
  * الفئة من الإعدادات — لا يتحكم به الداعم ولا الأدمن). راجع تعليق هجرة الجدول.
@@ -20,24 +20,18 @@ class SupportPackageService
 
     public function __construct(private readonly SettingsService $settings) {}
 
-    public function create(Teacher $teacher, array $data): SupportPackage
+    public function create(AcademicSupporter $supporter, array $data): SupportPackage
     {
-        if (! $teacher->isAcademicSupport()) {
+        if (! $supporter->isActive()) {
             throw ValidationException::withMessages([
-                'teacher_type' => ['باقات الدعم الطلابي مخصصة للداعم الأكاديمي فقط'],
-            ]);
-        }
-
-        if (! $teacher->isVerified()) {
-            throw ValidationException::withMessages([
-                'teacher_status' => ['يجب توثيق الحساب أولاً قبل إنشاء باقة دعم'],
+                'supporter_status' => ['لا يمكن إنشاء باقة دعم إلا من حساب نشط'],
             ]);
         }
 
         $price = $this->priceForTier($data['tier']);
 
         $supportPackage = SupportPackage::create([
-            'teacher_id' => $teacher->id,
+            'academic_supporter_id' => $supporter->id,
             'subject_id' => $data['subject_id'],
             'tier' => $data['tier'],
             'description' => $data['description'],
@@ -101,15 +95,21 @@ class SupportPackageService
     }
 
     /**
-     * لا فحص جلسات/اشتراكات نشطة هنا (بعكس PackageService::disable) — لا جلسات
-     * أصلاً لهذا النوع. Phase 2 (عند بناء الشراء الفعلي) يجب أن يضيف فحصاً مماثلاً
-     * لمنع التعطيل إن وُجد طلاب مشتركون قائمون بالباقة.
+     * لا جلسات لهذا النوع فلا فحص جدول/تعارض كـ PackageService::disable — لكن
+     * التعطيل يُمنَع إن وُجدت عمليات شراء قائمة (pending_payment أو confirmed)
+     * عليها: لا يصح إخفاء باقة طالب دفع ثمنها أو بصدد الدفع لها للتو.
      */
     public function disable(SupportPackage $supportPackage): SupportPackage
     {
         if ($supportPackage->status !== 'active') {
             throw ValidationException::withMessages([
                 'status' => ['لا يمكن تعطيل الباقة من هذه الحالة'],
+            ]);
+        }
+
+        if ($supportPackage->purchases()->whereIn('status', ['pending_payment', 'confirmed'])->exists()) {
+            throw ValidationException::withMessages([
+                'purchases' => ['لا يمكن تعطيل الباقة لوجود عمليات شراء قائمة عليها'],
             ]);
         }
 

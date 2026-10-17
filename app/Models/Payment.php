@@ -9,6 +9,7 @@ class Payment extends Model
     protected $fillable = [
         'booking_id',
         'enrollment_id',
+        'support_package_purchase_id',
         'student_id',
         'stripe_session_id',
         'stripe_payment_intent',
@@ -45,6 +46,11 @@ class Payment extends Model
     public function enrollment()
     {
         return $this->belongsTo(Enrollment::class);
+    }
+
+    public function supportPackagePurchase()
+    {
+        return $this->belongsTo(SupportPackagePurchase::class);
     }
 
     public function student()

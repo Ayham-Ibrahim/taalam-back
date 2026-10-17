@@ -5,6 +5,9 @@ use App\Http\Controllers\Admin\AuditLogController;
 use App\Http\Controllers\Admin\ImportBatchController;
 use App\Http\Controllers\Admin\NotificationLogController;
 use App\Http\Controllers\Admin\SettingsController;
+use App\Http\Controllers\AcademicSupporter\AcademicSupporterController;
+use App\Http\Controllers\AcademicSupporter\AcademicSupporterGalleryItemController;
+use App\Http\Controllers\AcademicSupporter\AcademicSupporterSearchController;
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\Booking\BookingController;
 use App\Http\Controllers\Booking\EnrollmentController;
@@ -27,13 +30,13 @@ use App\Http\Controllers\Session\ClassSessionController;
 use App\Http\Controllers\Session\SessionAttendanceController;
 use App\Http\Controllers\Student\StudentController;
 use App\Http\Controllers\Student\StudentImportController;
+use App\Http\Controllers\SupportPackagePurchase\SupportPackagePurchaseController;
 use App\Http\Controllers\TaxonomyController;
 use App\Http\Controllers\Teacher\BadgeController;
 use App\Http\Controllers\Teacher\TeacherController;
 use App\Http\Controllers\Accountant\AccountantController;
 use App\Http\Controllers\Teacher\TeacherExperienceController;
 use App\Http\Controllers\Teacher\TeacherFaqController;
-use App\Http\Controllers\Teacher\TeacherGalleryItemController;
 use App\Http\Controllers\Teacher\TeacherImportController;
 use App\Http\Controllers\Teacher\TeacherVideoController;
 use App\Http\Controllers\Teacher\VerificationDocumentController;
@@ -55,7 +58,6 @@ Route::prefix('auth')->group(function () {
 Route::middleware(['auth:sanctum', 'throttle:uploads'])->post('me/avatar', [ProfileController::class, 'uploadAvatar']);
 Route::middleware('auth:sanctum')->delete('me/avatar', [ProfileController::class, 'deleteAvatar']);
 Route::middleware('auth:sanctum')->put('me/profile', [ProfileController::class, 'updateProfile']);
-Route::middleware('auth:sanctum')->put('me/timezone/sync', [ProfileController::class, 'syncTimezone']);
 Route::middleware(['auth:sanctum', 'throttle:password-change'])->put('me/password', [ProfileController::class, 'updatePassword']);
 
 Route::post('teachers/accept-invitation', [TeacherController::class, 'acceptInvitation']);
@@ -123,8 +125,26 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('teachers/{teacher}/experiences', [TeacherExperienceController::class, 'store']);
     Route::put('teacher-experiences/{experience}', [TeacherExperienceController::class, 'update']);
     Route::delete('teacher-experiences/{experience}', [TeacherExperienceController::class, 'destroy']);
-    Route::post('teachers/{teacher}/gallery-items', [TeacherGalleryItemController::class, 'store']);
-    Route::delete('teacher-gallery-items/{item}', [TeacherGalleryItemController::class, 'destroy']);
+    Route::get('academic-supporters', [AcademicSupporterController::class, 'index']);
+    Route::post('academic-supporters/create-account', [AcademicSupporterController::class, 'createAccount']);
+    Route::get('academic-supporters/{academicSupporter}/admin-detail', [AcademicSupporterController::class, 'show']);
+    Route::put('academic-supporters/{academicSupporter}', [AcademicSupporterController::class, 'update']);
+    Route::put('academic-supporters/{academicSupporter}/password', [AcademicSupporterController::class, 'resetPassword']);
+    Route::post('academic-supporters/{academicSupporter}/suspend', [AcademicSupporterController::class, 'suspend']);
+    Route::post('academic-supporters/{academicSupporter}/reactivate', [AcademicSupporterController::class, 'reactivate']);
+    Route::delete('academic-supporters/{academicSupporter}', [AcademicSupporterController::class, 'destroy']);
+
+    Route::middleware('throttle:uploads')->post('academic-supporters/{academicSupporter}/gallery-items', [AcademicSupporterGalleryItemController::class, 'store']);
+    Route::delete('academic-supporter-gallery-items/{item}', [AcademicSupporterGalleryItemController::class, 'destroy']);
+
+    // تصفّح/بروفايل الداعم الأكاديمي — حصراً للطالب الجامعي (تحقق إضافي داخل الكنترولر نفسه)
+    Route::get('academic-supporters/search', [AcademicSupporterSearchController::class, 'index']);
+    Route::get('academic-supporters/{academicSupporter}', [AcademicSupporterSearchController::class, 'show']);
+
+    Route::get('support-package-purchases', [SupportPackagePurchaseController::class, 'index']);
+    Route::get('support-package-purchases/{supportPackagePurchase}', [SupportPackagePurchaseController::class, 'show']);
+    Route::post('support-packages/{supportPackage}/purchases', [SupportPackagePurchaseController::class, 'store']);
+    Route::post('support-package-purchases/{supportPackagePurchase}/checkout', [SupportPackagePurchaseController::class, 'checkout']);
 
     Route::get('badges', [BadgeController::class, 'index']);
     Route::post('teachers/{teacher}/badges', [BadgeController::class, 'grant']);

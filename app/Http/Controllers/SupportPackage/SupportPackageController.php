@@ -21,8 +21,8 @@ class SupportPackageController extends Controller
         $user = $request->user();
 
         $supportPackages = SupportPackage::query()
-            ->with(['teacher:id,user_id,teacher_type', 'teacher.user:id,name', 'subject:id,name_ar'])
-            ->when(! $user->isAdmin(), fn ($q) => $q->whereHas('teacher', fn ($t) => $t->where('user_id', $user->id)))
+            ->with(['academicSupporter:id,user_id', 'academicSupporter.user:id,name', 'subject:id,name_ar'])
+            ->when(! $user->isAdmin(), fn ($q) => $q->whereHas('academicSupporter', fn ($t) => $t->where('user_id', $user->id)))
             ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))
             ->latest()
             ->paginate($request->integer('per_page', 20));
@@ -34,16 +34,16 @@ class SupportPackageController extends Controller
     {
         $this->authorize('view', $supportPackage);
 
-        $supportPackage->load(['teacher.user:id,name', 'subject:id,name_ar']);
+        $supportPackage->load(['academicSupporter.user:id,name', 'subject:id,name_ar']);
 
         return $this->success(new SupportPackageResource($supportPackage));
     }
 
     public function store(CreateSupportPackageRequest $request)
     {
-        $teacher = $request->user()->loadMissing('teacher')->teacher;
+        $supporter = $request->user()->loadMissing('academicSupporter')->academicSupporter;
 
-        $supportPackage = $this->supportPackageService->create($teacher, $request->validated());
+        $supportPackage = $this->supportPackageService->create($supporter, $request->validated());
 
         return $this->success(new SupportPackageResource($supportPackage), 'تم إرسال باقة الدعم بانتظار مراجعة الأدمن', 201);
     }

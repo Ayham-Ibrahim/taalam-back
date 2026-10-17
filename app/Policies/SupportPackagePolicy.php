@@ -9,19 +9,19 @@ class SupportPackagePolicy
 {
     public function viewAny(User $user): bool
     {
-        return $user->isAdmin() || $user->loadMissing('teacher')->teacher !== null;
+        return $user->isAdmin() || $user->loadMissing('academicSupporter')->academicSupporter !== null;
     }
 
     public function view(User $user, SupportPackage $supportPackage): bool
     {
-        return $user->isAdmin() || $user->loadMissing('teacher')->teacher?->id === $supportPackage->teacher_id;
+        return $user->isAdmin() || $user->loadMissing('academicSupporter')->academicSupporter?->id === $supportPackage->academic_supporter_id;
     }
 
     public function create(User $user): bool
     {
-        $teacher = $user->loadMissing('teacher')->teacher;
+        $supporter = $user->loadMissing('academicSupporter')->academicSupporter;
 
-        return $teacher !== null && $teacher->isAcademicSupport() && $teacher->isVerified();
+        return $supporter !== null && $supporter->isActive();
     }
 
     public function approve(User $user): bool
@@ -36,11 +36,11 @@ class SupportPackagePolicy
 
     public function disable(User $user, SupportPackage $supportPackage): bool
     {
-        return $user->isAdmin() || $user->loadMissing('teacher')->teacher?->id === $supportPackage->teacher_id;
+        return $user->isAdmin() || $user->loadMissing('academicSupporter')->academicSupporter?->id === $supportPackage->academic_supporter_id;
     }
 
     public function enable(User $user, SupportPackage $supportPackage): bool
     {
-        return $user->isAdmin() || $user->loadMissing('teacher')->teacher?->id === $supportPackage->teacher_id;
+        return $user->isAdmin() || $user->loadMissing('academicSupporter')->academicSupporter?->id === $supportPackage->academic_supporter_id;
     }
 }
