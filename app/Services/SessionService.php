@@ -15,6 +15,9 @@ class SessionService
 {
     use LogsAuditEvents;
 
+    /** يُسمح بالانضمام قبل الموعد المجدول بهذه المدة — ريثما يستعد الطرفان قبل بدء الجلسة فعلياً. */
+    private const EARLY_JOIN_MINUTES = 5;
+
     public function __construct(
         private readonly SettingsService $settings,
         private readonly BigBlueButtonService $bbb,
@@ -79,8 +82,9 @@ class SessionService
 
         $now = now();
         $endsAt = $session->scheduled_at->clone()->addMinutes($session->duration_min);
+        $joinableFrom = $session->scheduled_at->clone()->subMinutes(self::EARLY_JOIN_MINUTES);
 
-        if ($now->lt($session->scheduled_at)) {
+        if ($now->lt($joinableFrom)) {
             return ['joinable' => false, 'message' => 'لم تبدأ هذه الجلسة بعد، يرجى الانتظار حتى موعدها ثم إعادة المحاولة.'];
         }
 

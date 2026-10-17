@@ -132,9 +132,10 @@ class BookingFlowTest extends TestCase
         $this->assertNotNull($confirmed->confirmed_at);
         $this->assertNull($confirmed->hold_expires_at);
 
-        // النصاب الفردي = 1 → الباقة تصبح full تلقائياً بعد أول حجز مؤكَّد
+        // النصاب الفردي = 1 يعني طالب واحد لكل جلسة، لا للباقة كلها — تبقى active
+        // وقابلة لحجز طلاب آخرين بأوقات مختلفة طالما جدول المعلم يسمح (PackageObserver).
         $this->assertSame(1, $package->fresh()->enrolled_count);
-        $this->assertSame('full', $package->fresh()->status);
+        $this->assertSame('active', $package->fresh()->status);
 
         Queue::assertPushed(CreateBbbRoomJob::class);
 
