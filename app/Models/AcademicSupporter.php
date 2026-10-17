@@ -31,12 +31,24 @@ class AcademicSupporter extends Model
         'bio',
         'qualification',
         'experience_years',
+        'university_id',
+        'major_id',
         'status',
     ];
 
     public function user()
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function university()
+    {
+        return $this->belongsTo(University::class);
+    }
+
+    public function major()
+    {
+        return $this->belongsTo(Major::class);
     }
 
     public function subjects()

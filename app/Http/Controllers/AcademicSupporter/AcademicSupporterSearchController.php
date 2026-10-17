@@ -41,8 +41,9 @@ class AcademicSupporterSearchController extends Controller
             'user:id,name,avatar_path',
             'subjects:id,name_ar',
             'languages:id,code,name_ar',
+            'university', 'major',
             'galleryItems',
-            'supportPackages' => fn ($q) => $q->where('status', 'active')->with('subject:id,name_ar'),
+            'supportPackages' => fn ($q) => $q->where('status', 'active')->with('subjects:id,name_ar'),
         ]);
 
         return $this->success(new PublicAcademicSupporterResource($academicSupporter));

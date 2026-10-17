@@ -72,7 +72,7 @@ class AcademicSupporterService
             $supporter->languages()->sync($languageIds);
         }
 
-        return $supporter->fresh(['subjects', 'languages', 'user']);
+        return $supporter->fresh(['subjects', 'languages', 'university', 'major', 'user']);
     }
 
     /**

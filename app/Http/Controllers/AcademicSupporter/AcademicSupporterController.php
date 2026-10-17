@@ -44,8 +44,8 @@ class AcademicSupporterController extends Controller
 
         $academicSupporter->load([
             'user:id,name,email,phone,avatar_path',
-            'subjects', 'languages', 'galleryItems',
-            'supportPackages' => fn ($q) => $q->with('subject:id,name_ar')->latest(),
+            'subjects', 'languages', 'university', 'major', 'galleryItems',
+            'supportPackages' => fn ($q) => $q->with('subjects:id,name_ar')->latest(),
         ]);
 
         return $this->success(new AdminAcademicSupporterResource($academicSupporter));

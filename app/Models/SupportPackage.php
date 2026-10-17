@@ -15,7 +15,7 @@ class SupportPackage extends Model
 
     protected $fillable = [
         'academic_supporter_id',
-        'subject_id',
+        'title',
         'tier',
         'description',
         'teacher_price',
@@ -47,9 +47,9 @@ class SupportPackage extends Model
         return $this->belongsTo(AcademicSupporter::class);
     }
 
-    public function subject()
+    public function subjects()
     {
-        return $this->belongsTo(Subject::class);
+        return $this->belongsToMany(Subject::class, 'support_package_subject');
     }
 
     public function approver()
@@ -60,5 +60,10 @@ class SupportPackage extends Model
     public function purchases()
     {
         return $this->hasMany(SupportPackagePurchase::class);
+    }
+
+    public function coupons()
+    {
+        return $this->hasMany(Coupon::class);
     }
 }

@@ -11,14 +11,12 @@ use Illuminate\Validation\ValidationException;
 /**
  * باقات الدعم الطلابي — خاصة بالداعم الأكاديمي (كيان منفصل تماماً عن Teacher).
  * بعكس PackageService: لا مرحلة draft (نموذج واحد يُرسَل مباشرة pending_approval)،
- * ولا هامش منصة إطلاقاً (platform_margin_percent=0 ثابتة، السعر نفسه ثابت حسب
- * الفئة من الإعدادات — لا يتحكم به الداعم ولا الأدمن). راجع تعليق هجرة الجدول.
+ * ولا هامش منصة إطلاقاً (platform_margin_percent=0 ثابتة دائماً). الاسم والسعر
+ * ومواد الباقة (متعددة) كلها يُدخلها الداعم يدوياً — tier تصنيف فقط الآن.
  */
 class SupportPackageService
 {
     use LogsAuditEvents;
-
-    public function __construct(private readonly SettingsService $settings) {}
 
     public function create(AcademicSupporter $supporter, array $data): SupportPackage
     {
@@ -28,11 +26,11 @@ class SupportPackageService
             ]);
         }
 
-        $price = $this->priceForTier($data['tier']);
+        $price = (float) $data['price'];
 
         $supportPackage = SupportPackage::create([
             'academic_supporter_id' => $supporter->id,
-            'subject_id' => $data['subject_id'],
+            'title' => $data['title'],
             'tier' => $data['tier'],
             'description' => $data['description'],
             'teacher_price' => $price,
@@ -43,17 +41,11 @@ class SupportPackageService
             'submitted_at' => now(),
         ]);
 
+        $supportPackage->subjects()->sync($data['subject_ids']);
+
         $this->audit('support_package.submitted', $supportPackage, [], ['status' => 'pending_approval']);
 
-        return $supportPackage->fresh(['subject']);
-    }
-
-    private function priceForTier(string $tier): float
-    {
-        $key = $tier === 'premium' ? 'support_package_premium_price' : 'support_package_basic_price';
-        $default = $tier === 'premium' ? 1500 : 1000;
-
-        return (float) $this->settings->get($key, $default);
+        return $supportPackage->fresh(['subjects']);
     }
 
     public function approve(SupportPackage $supportPackage, User $admin): SupportPackage

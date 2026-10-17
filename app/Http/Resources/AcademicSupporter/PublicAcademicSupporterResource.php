@@ -17,6 +17,8 @@ class PublicAcademicSupporterResource extends JsonResource
             'bio' => $this->bio,
             'qualification' => $this->qualification,
             'experienceYears' => $this->experience_years,
+            'university' => $this->whenLoaded('university', fn () => $this->university ? ['id' => $this->university->id, 'name' => $this->university->name_ar] : null),
+            'major' => $this->whenLoaded('major', fn () => $this->major ? ['id' => $this->major->id, 'name' => $this->major->name_ar] : null),
             'subjects' => $this->whenLoaded('subjects', fn () => $this->subjects->map(fn ($s) => ['id' => $s->id, 'name' => $s->name_ar])),
             'languages' => $this->whenLoaded('languages', fn () => $this->languages->map(fn ($l) => ['code' => $l->code, 'name' => $l->name_ar])),
             'galleryItems' => $this->whenLoaded('galleryItems', fn () => $this->galleryItems->map(fn ($g) => [
@@ -24,9 +26,10 @@ class PublicAcademicSupporterResource extends JsonResource
             ])),
             'supportPackages' => $this->whenLoaded('supportPackages', fn () => $this->supportPackages->map(fn ($sp) => [
                 'id' => $sp->id,
+                'title' => $sp->title,
                 'tier' => $sp->tier,
                 'description' => $sp->description,
-                'subject' => $sp->subject ? ['id' => $sp->subject->id, 'name' => $sp->subject->name_ar] : null,
+                'subjects' => $sp->relationLoaded('subjects') ? $sp->subjects->map(fn ($s) => ['id' => $s->id, 'name' => $s->name_ar]) : [],
                 'price' => (float) $sp->student_price,
                 'currency' => $sp->currency,
             ])),

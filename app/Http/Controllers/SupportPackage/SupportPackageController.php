@@ -21,7 +21,7 @@ class SupportPackageController extends Controller
         $user = $request->user();
 
         $supportPackages = SupportPackage::query()
-            ->with(['academicSupporter:id,user_id', 'academicSupporter.user:id,name', 'subject:id,name_ar'])
+            ->with(['academicSupporter:id,user_id', 'academicSupporter.user:id,name', 'subjects:id,name_ar'])
             ->when(! $user->isAdmin(), fn ($q) => $q->whereHas('academicSupporter', fn ($t) => $t->where('user_id', $user->id)))
             ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))
             ->latest()
@@ -34,7 +34,7 @@ class SupportPackageController extends Controller
     {
         $this->authorize('view', $supportPackage);
 
-        $supportPackage->load(['academicSupporter.user:id,name', 'subject:id,name_ar']);
+        $supportPackage->load(['academicSupporter.user:id,name', 'subjects:id,name_ar']);
 
         return $this->success(new SupportPackageResource($supportPackage));
     }
