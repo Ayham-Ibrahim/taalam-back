@@ -14,6 +14,12 @@ use Illuminate\Validation\ValidationException;
 
 class AuthService
 {
+    /**
+     * timezone (إن أُرسلت) = منطقة متصفح الطالب الفعلية وقت إنشاء الحساب —
+     * تُلتقَط مرة واحدة هنا فقط، لا تُعاد مزامنتها تلقائياً بعد ذلك في أي جلسة
+     * لاحقة (لا مسار آخر يكتب فوق users.timezone تلقائياً — فقط هذا الالتقاط
+     * الأولي أو تعديل الطالب اليدوي من الإعدادات لاحقاً).
+     */
     public function registerStudent(array $data): array
     {
         return DB::transaction(function () use ($data) {
@@ -25,6 +31,7 @@ class AuthService
                 'gender' => $data['gender'] ?? null,
                 'role' => 'student',
                 'password' => $data['password'],
+                'timezone' => $data['timezone'] ?? 'Asia/Riyadh',
             ]);
 
             $student = Student::create([
@@ -78,13 +85,15 @@ class AuthService
         ];
     }
 
-    /** يحمّل علاقة teacher أو student فقط حسب دور المستخدم — لا داعي لتحميل كليهما */
+    /** يحمّل علاقة teacher أو student أو academicSupporter فقط حسب دور المستخدم — لا داعي لتحميل الكل */
     public function loadRoleRelation(User $user): User
     {
         if ($user->isTeacher()) {
             $user->load(['teacher:id,user_id,teacher_type,status']);
         } elseif ($user->isStudent()) {
             $user->load(['student:id,user_id,education_type,stage_id,university_id']);
+        } elseif ($user->isAcademicSupport()) {
+            $user->load(['academicSupporter:id,user_id,status']);
         }
 
         return $user;
@@ -137,7 +146,7 @@ class AuthService
             'gender' => $data['gender'] ?? null,
         ];
 
-        // اختيار يدوي صريح لتفعيل/تعطيل الاكتشاف التلقائي من الإعدادات — يطغى دائماً على نتيجة syncTimezone التالية
+        // اختيار يدوي صريح لتفعيل/تعطيل الاكتشاف التلقائي من الإعدادات
         if (array_key_exists('timezone_auto', $data) && $data['timezone_auto'] !== null) {
             $updates['timezone_auto'] = (bool) $data['timezone_auto'];
             if (! $data['timezone_auto'] && ! empty($data['timezone'])) {
@@ -150,16 +159,6 @@ class AuthService
         }
 
         $user->update($updates);
-
-        return $user;
-    }
-
-    /** مزامنة صامتة من متصفح المستخدم — تُطبَّق فقط إن لم يُثبِّت المستخدم منطقته يدوياً من قبل (timezone_auto) */
-    public function syncTimezone(User $user, string $timezone): User
-    {
-        if ($user->timezone_auto) {
-            $user->update(['timezone' => $timezone]);
-        }
 
         return $user;
     }
