@@ -28,12 +28,12 @@ class SupportPackagePurchaseConfirmed extends Notification implements ShouldQueu
     public function toMail($notifiable): MailMessage
     {
         $studentName = $this->purchase->student->user->name;
-        $subjectName = $this->purchase->supportPackage->subject?->name_ar ?? '';
+        $packageTitle = $this->purchase->supportPackage->title;
 
         return (new MailMessage)
             ->subject('اشتراك طالب جديد في باقة الدعم')
             ->greeting("مرحباً {$notifiable->name}،")
-            ->line("اشترك الطالب {$studentName} في باقتك ({$subjectName}) وتم تأكيد الدفع.")
+            ->line("اشترك الطالب {$studentName} في باقتك ({$packageTitle}) وتم تأكيد الدفع.")
             ->line('يرجى التواصل مع الطالب لتنسيق تقديم الخدمة.');
     }
 

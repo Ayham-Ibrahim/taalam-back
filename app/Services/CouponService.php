@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Booking;
 use App\Models\Coupon;
 use App\Models\Package;
+use App\Models\SupportPackage;
 use App\Models\User;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -17,6 +18,22 @@ class CouponService
             'code' => $this->normalizeCode($data['code'] ?? null) ?? $this->generateUniqueCode(),
             'package_id' => $package->id,
             'teacher_id' => $package->teacher_id,
+            'created_by' => $creator->id,
+            'discount_type' => $data['discount_type'],
+            'discount_value' => $data['discount_value'],
+            'max_redemptions' => $data['max_redemptions'] ?? null,
+            'redeemed_count' => 0,
+            'expires_at' => $data['expires_at'] ?? null,
+            'is_active' => true,
+        ]);
+    }
+
+    /** يوازي create() تماماً لكن لباقة دعم أكاديمي — الأدمن فقط ينشئها (راجع SupportPackageCouponPolicy) */
+    public function createForSupportPackage(SupportPackage $supportPackage, User $creator, array $data): Coupon
+    {
+        return Coupon::create([
+            'code' => $this->normalizeCode($data['code'] ?? null) ?? $this->generateUniqueCode(),
+            'support_package_id' => $supportPackage->id,
             'created_by' => $creator->id,
             'discount_type' => $data['discount_type'],
             'discount_value' => $data['discount_value'],
@@ -75,6 +92,46 @@ class CouponService
             'teacherAmount' => $teacherAmount,
             'platformAmount' => $platformAmount,
             'amountPaid' => round($teacherAmount + $platformAmount, 2),
+        ];
+    }
+
+    /**
+     * يوازي validateAndReserve() لكن لباقة دعم أكاديمي — لا هامش منصة لحمايته هنا
+     * (platform_revenue=0 دائماً لهذا النوع، التسوية مع الداعم تتم يدوياً خارج
+     * المنصة)، فالسقف الآمن الوحيد هو ألا يتجاوز الخصم سعر الباقة نفسه: نسبة
+     * محدودة بـ 100%، مبلغ ثابت محدود بـ student_price (مفروض في
+     * CreateSupportPackageCouponRequest وقت الإنشاء، لا حاجة لإعادة التحقق هنا
+     * لأن السعر لا يتغيّر بعد إنشاء الكوبون).
+     *
+     * @return array{coupon: Coupon, discountAmount: float, amountPaid: float}
+     */
+    public function validateAndReserveForSupportPackage(string $code, SupportPackage $supportPackage): array
+    {
+        $coupon = Coupon::where('support_package_id', $supportPackage->id)
+            ->where('code', $this->normalizeCode($code))
+            ->lockForUpdate()
+            ->first();
+
+        if (! $coupon) {
+            throw ValidationException::withMessages(['coupon_code' => ['كود الخصم غير صحيح لهذه الباقة.']]);
+        }
+
+        if (! $coupon->isRedeemable()) {
+            throw ValidationException::withMessages(['coupon_code' => ['هذا الكود لم يعد صالحاً (منتهٍ أو معطَّل أو استُنفِد).']]);
+        }
+
+        $coupon->increment('redeemed_count');
+
+        $price = (float) $supportPackage->student_price;
+        $discountAmount = $coupon->isPercent()
+            ? round($price * (float) $coupon->discount_value / 100, 2)
+            : round((float) $coupon->discount_value, 2);
+        $amountPaid = max(0, round($price - $discountAmount, 2));
+
+        return [
+            'coupon' => $coupon,
+            'discountAmount' => min($discountAmount, $price),
+            'amountPaid' => $amountPaid,
         ];
     }
 

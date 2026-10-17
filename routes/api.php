@@ -13,6 +13,7 @@ use App\Http\Controllers\Booking\BookingController;
 use App\Http\Controllers\Booking\EnrollmentController;
 use App\Http\Controllers\Complaint\ComplaintController;
 use App\Http\Controllers\Coupon\CouponController;
+use App\Http\Controllers\Coupon\SupportPackageCouponController;
 use App\Http\Controllers\Course\CourseController;
 use App\Http\Controllers\FavoriteController;
 use App\Http\Controllers\MetaController;
@@ -173,6 +174,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('packages/{package}/coupons', [CouponController::class, 'store']);
     Route::put('coupons/{coupon}', [CouponController::class, 'update']);
     Route::delete('coupons/{coupon}', [CouponController::class, 'destroy']);
+    Route::get('support-packages/{supportPackage}/coupons', [SupportPackageCouponController::class, 'index']);
+    Route::post('support-packages/{supportPackage}/coupons', [SupportPackageCouponController::class, 'store']);
 
     Route::get('teachers/{teacher}/availability-slots', [AvailabilityController::class, 'indexSlots']);
     Route::post('teachers/{teacher}/availability-slots', [AvailabilityController::class, 'storeSlot']);

@@ -10,6 +10,7 @@ class Coupon extends Model
         'code',
         'package_id',
         'teacher_id',
+        'support_package_id',
         'created_by',
         'discount_type',
         'discount_value',
@@ -36,6 +37,11 @@ class Coupon extends Model
     public function package()
     {
         return $this->belongsTo(Package::class);
+    }
+
+    public function supportPackage()
+    {
+        return $this->belongsTo(SupportPackage::class);
     }
 
     public function teacher()

@@ -14,6 +14,8 @@ class CouponResource extends JsonResource
             'code' => $this->code,
             'packageId' => $this->package_id,
             'packageTitle' => $this->whenLoaded('package', fn () => $this->package?->title),
+            'supportPackageId' => $this->support_package_id,
+            'supportPackageTitle' => $this->whenLoaded('supportPackage', fn () => $this->supportPackage?->title),
             'discountType' => $this->discount_type,
             'discountValue' => (float) $this->discount_value,
             'maxRedemptions' => $this->max_redemptions,

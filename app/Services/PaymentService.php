@@ -99,9 +99,9 @@ class PaymentService
     public function createCheckoutSessionForSupportPackagePurchase(SupportPackagePurchase $purchase): string
     {
         $payment = $purchase->payments()->latest()->firstOrFail();
-        $purchase->loadMissing(['student.user', 'supportPackage.subject']);
+        $purchase->loadMissing(['student.user', 'supportPackage']);
 
-        $subjectName = $purchase->supportPackage->subject?->name_ar ?? '';
+        $packageTitle = $purchase->supportPackage->title;
 
         $session = $this->stripe()->checkout->sessions->create([
             'mode' => 'payment',
@@ -112,7 +112,7 @@ class PaymentService
                 'price_data' => [
                     'currency' => strtolower($purchase->currency),
                     'unit_amount' => (int) round(((float) $purchase->amount) * 100),
-                    'product_data' => ['name' => "اشتراك دعم أكاديمي #{$purchase->id} - {$subjectName}"],
+                    'product_data' => ['name' => "اشتراك دعم أكاديمي #{$purchase->id} - {$packageTitle}"],
                 ],
             ]],
             'metadata' => ['support_package_purchase_id' => $purchase->id, 'payment_id' => $payment->id],

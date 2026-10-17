@@ -18,7 +18,9 @@ class SupportPackagePurchase extends Model
         'student_id',
         'academic_supporter_id',
         'support_package_id',
+        'coupon_id',
         'amount',
+        'discount_amount',
         'currency',
         'status',
         'hold_expires_at',
@@ -29,6 +31,7 @@ class SupportPackagePurchase extends Model
     {
         return [
             'amount' => 'decimal:2',
+            'discount_amount' => 'decimal:2',
             'hold_expires_at' => 'datetime',
             'confirmed_at' => 'datetime',
         ];
@@ -47,6 +50,11 @@ class SupportPackagePurchase extends Model
     public function supportPackage()
     {
         return $this->belongsTo(SupportPackage::class);
+    }
+
+    public function coupon()
+    {
+        return $this->belongsTo(Coupon::class);
     }
 
     public function payments()

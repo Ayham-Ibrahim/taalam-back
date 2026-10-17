@@ -20,20 +20,36 @@ class SupportPackagePurchaseService
 {
     use LogsAuditEvents;
 
-    public function __construct(private readonly SettingsService $settings) {}
+    public function __construct(
+        private readonly SettingsService $settings,
+        private readonly CouponService $coupons,
+    ) {}
 
-    public function initiate(Student $student, SupportPackage $supportPackage): SupportPackagePurchase
+    public function initiate(Student $student, SupportPackage $supportPackage, ?string $couponCode = null): SupportPackagePurchase
     {
         $this->assertUniversityStudent($student);
         $this->assertPackagePurchasable($supportPackage);
         $this->assertNoOpenPurchase($student, $supportPackage);
 
-        return DB::transaction(function () use ($student, $supportPackage) {
+        return DB::transaction(function () use ($student, $supportPackage, $couponCode) {
+            $amount = $supportPackage->student_price;
+            $couponId = null;
+            $discountAmount = null;
+
+            if ($couponCode) {
+                $result = $this->coupons->validateAndReserveForSupportPackage($couponCode, $supportPackage);
+                $amount = $result['amountPaid'];
+                $couponId = $result['coupon']->id;
+                $discountAmount = $result['discountAmount'];
+            }
+
             $purchase = SupportPackagePurchase::create([
                 'student_id' => $student->id,
                 'academic_supporter_id' => $supportPackage->academic_supporter_id,
                 'support_package_id' => $supportPackage->id,
-                'amount' => $supportPackage->student_price,
+                'coupon_id' => $couponId,
+                'amount' => $amount,
+                'discount_amount' => $discountAmount,
                 'currency' => $supportPackage->currency,
                 'status' => 'pending_payment',
                 'hold_expires_at' => now()->addMinutes((int) $this->settings->get('booking_payment_hold_minutes', 15)),
@@ -61,7 +77,7 @@ class SupportPackagePurchaseService
             'hold_expires_at' => null,
         ]);
 
-        $purchase->loadMissing(['academicSupporter.user', 'student.user', 'supportPackage.subject']);
+        $purchase->loadMissing(['academicSupporter.user', 'student.user', 'supportPackage']);
         $purchase->academicSupporter->user->notify(new SupportPackagePurchaseConfirmed($purchase));
 
         return $purchase;

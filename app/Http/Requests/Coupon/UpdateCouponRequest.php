@@ -33,14 +33,39 @@ class UpdateCouponRequest extends FormRequest
             }
 
             $coupon = $this->route('coupon');
+            $type = $this->input('discount_type', $coupon->discount_type);
+            $value = (float) $this->input('discount_value', $coupon->discount_value);
+
+            // كوبون باقة دعم أكاديمي — لا هامش منصة لحمايته، السقف هو سعر الباقة نفسه (راجع CreateSupportPackageCouponRequest)
+            if ($coupon->support_package_id !== null) {
+                $supportPackage = $coupon->loadMissing('supportPackage')->supportPackage;
+                if (! $supportPackage) {
+                    return;
+                }
+
+                if ($type === 'percent') {
+                    if ($value > 100) {
+                        $validator->errors()->add('discount_value', 'نسبة الخصم لا يمكن أن تتجاوز 100%.');
+                    }
+
+                    return;
+                }
+
+                if ($value > (float) $supportPackage->student_price) {
+                    $validator->errors()->add(
+                        'discount_value',
+                        "قيمة الخصم لا يمكن أن تتجاوز سعر الباقة ({$supportPackage->student_price} {$supportPackage->currency}).",
+                    );
+                }
+
+                return;
+            }
+
             $package = $coupon?->loadMissing('package')->package;
 
             if (! $package || $package->platform_margin_percent === null) {
                 return;
             }
-
-            $type = $this->input('discount_type', $coupon->discount_type);
-            $value = (float) $this->input('discount_value', $coupon->discount_value);
 
             if ($type === 'percent') {
                 if ($value > (float) $package->platform_margin_percent) {
