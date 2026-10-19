@@ -40,4 +40,10 @@ class ClassSessionPolicy
 
         return $query->exists();
     }
+
+    /** تعديل موعد الجلسة مباشرة (بلا طلب تغيير موعد) — للأدمن وحده. */
+    public function reschedule(User $user, ClassSession $session): bool
+    {
+        return $user->isAdmin();
+    }
 }

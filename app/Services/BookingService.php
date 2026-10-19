@@ -496,6 +496,11 @@ class BookingService
 
             foreach ($sessions as $session) {
                 $this->registerAttendee($session, $student, booking: $booking);
+                // الحجز اليدوي مؤكَّد فوراً فلا يمر أبداً بـ confirmBooking (مسار
+                // webhook الدفع) — وهو المكان الوحيد الذي كان يُنشئ غرفة BBB، فبقيت
+                // جلسات كل حجز يدوي بلا رابط انضمام إطلاقاً. afterCommit: لا تُنفَّذ
+                // الـ Job قبل حفظ المعاملة فعلاً (وإلا قد لا تجد الجلسة بعد).
+                CreateBbbRoomJob::dispatch($session->id)->afterCommit();
             }
 
             $this->createManualPayment($booking);
@@ -526,12 +531,18 @@ class BookingService
             'hold_expires_at' => null,
         ]);
 
-        $booking->loadMissing(['package', 'sessions']);
+        $booking->loadMissing(['package', 'sessions', 'attendedSessions']);
         $this->incrementEnrolledCount($booking->package);
 
-        foreach ($booking->sessions as $session) {
-            CreateBbbRoomJob::dispatch($session->id);
-        }
+        // sessions وحدها (class_sessions.booking_id) تخص فقط حجز أول طالب انضمّ
+        // للباقة الجماعية — حجز أي طالب لاحق لا "يملك" جلساتها، فكان دفعه لا يُنشئ
+        // أي غرفة. إن لم يدفع الأول أبداً (انتهت مهلته) تبقى جلسات المجموعة كلها بلا
+        // رابط. attendedSessions (عبر session_attendees) تغطي جلسات هذا الحجز فعلاً
+        // أياً كان مالكها؛ createBbbRoom آمن التكرار لجلسة لها غرفة مسبقاً.
+        $booking->sessions
+            ->merge($booking->attendedSessions)
+            ->unique('id')
+            ->each(fn (ClassSession $session) => CreateBbbRoomJob::dispatch($session->id));
 
         return $booking;
     }

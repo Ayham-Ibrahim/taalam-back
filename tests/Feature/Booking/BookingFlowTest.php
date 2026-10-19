@@ -249,6 +249,15 @@ class BookingFlowTest extends TestCase
         ]);
 
         $this->assertSame(1, $package->fresh()->enrolled_count);
+
+        // الحجز اليدوي لا يمر بـ confirmBooking — كانت جلساته تبقى بلا رابط انضمام إطلاقاً.
+        $sessions = $booking->fresh()->sessions;
+        $this->assertCount(4, $sessions);
+        $sessions->each(function ($session) {
+            $this->assertNotNull($session->bbb_meeting_id);
+            $this->assertNotNull($session->join_url_student);
+            $this->assertNotNull($session->join_url_teacher);
+        });
     }
 
     public function test_manual_booking_endpoint_requires_admin_and_reason(): void
