@@ -25,6 +25,14 @@ class MetaController extends Controller
     /** قيم education_type على جداول subjects/stages (تختلف عن teacher_type: training مقابل training_center) */
     private const EDUCATION_TYPES = ['school', 'university', 'training'];
 
+    /** كل نسخ كاش filters() — بلا نوع ('all') ولكل نوع تعليم؛ يمسحها TaxonomyController عند أي تعديل */
+    public const FILTER_CACHE_SCOPES = ['all', 'school', 'university', 'training'];
+
+    public static function filtersCacheKey(string $scope): string
+    {
+        return "meta:filters:v3:{$scope}";
+    }
+
     public function stats()
     {
         $stats = Cache::remember('meta:stats', self::CACHE_TTL, function () {
@@ -53,8 +61,17 @@ class MetaController extends Controller
         $eduType = $request->query('education_type');
         $eduType = in_array($eduType, self::EDUCATION_TYPES, true) ? $eduType : null;
 
-        $filters = Cache::remember('meta:filters:'.($eduType ?? 'all'), self::CACHE_TTL, function () use ($eduType) {
+        $filters = Cache::remember(self::filtersCacheKey($eduType ?? 'all'), self::CACHE_TTL, function () use ($eduType) {
             $grades = $eduType === 'school' || $eduType === null ? range(1, 12) : [];
+
+            // صفوف كل مرحلة من نطاقها المحدَّد (grade_from..grade_to) — تستخدمها
+            // الواجهة لجعل قائمة "الصف" تابعة للمرحلة المختارة (الإعدادية 7–9
+            // فقط مثلاً). مرحلة بلا نطاق لا تظهر هنا فتعود الواجهة للقائمة الكاملة.
+            $stageGrades = Stage::where('is_active', true)
+                ->whereNotNull('grade_from')->whereNotNull('grade_to')
+                ->get(['id', 'grade_from', 'grade_to'])
+                ->mapWithKeys(fn ($s) => [$s->id => array_map('strval', range($s->grade_from, $s->grade_to))])
+                ->all();
 
             return [
                 'educationType' => $eduType,
@@ -72,6 +89,7 @@ class MetaController extends Controller
                     ->when($eduType, fn ($q) => $q->where('education_type', $eduType))
                     ->orderBy('sort_order')->get(['id', 'name_ar'])
                     ->map(fn ($s) => ['value' => $s->id, 'label' => $s->name_ar])->all(),
+                'stageGrades' => (object) $stageGrades,
                 'languages' => Language::where('is_active', true)->get(['id', 'name_ar'])
                     ->map(fn ($l) => ['value' => $l->id, 'label' => $l->name_ar])->all(),
                 'curricula' => Curriculum::where('is_active', true)->orderBy('sort_order')->get(['id', 'name_ar'])
