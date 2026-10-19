@@ -62,7 +62,7 @@ class TaxonomyController extends Controller
 
         $item = $modelClass::create($request->validated());
 
-        Cache::forget($this->cacheKey($type));
+        $this->forgetCaches($type);
 
         return $this->success($item, 'تم الإنشاء بنجاح', 201);
     }
@@ -75,7 +75,7 @@ class TaxonomyController extends Controller
         $item = $modelClass::findOrFail($id);
         $item->update($request->validated());
 
-        Cache::forget($this->cacheKey($type));
+        $this->forgetCaches($type);
 
         return $this->success($item, 'تم التحديث بنجاح');
     }
@@ -87,7 +87,7 @@ class TaxonomyController extends Controller
 
         $modelClass::findOrFail($id)->delete();
 
-        Cache::forget($this->cacheKey($type));
+        $this->forgetCaches($type);
 
         return $this->success(null, 'تم الحذف بنجاح');
     }
@@ -97,6 +97,19 @@ class TaxonomyController extends Controller
         abort_unless(isset(self::MODELS[$type]), 404, 'نوع التصنيف غير معروف');
 
         return self::MODELS[$type];
+    }
+
+    /**
+     * يمسح كذلك خيارات فلاتر البحث المخبَّأة (MetaController::filters) — وإلا
+     * يبقى مثلاً نطاق صفوف مرحلة عُدِّل للتو أو مادة جديدة غائبين عن صفحة البحث
+     * حتى انتهاء مدة الكاش (ساعة).
+     */
+    private function forgetCaches(string $type): void
+    {
+        Cache::forget($this->cacheKey($type));
+        foreach (MetaController::FILTER_CACHE_SCOPES as $scope) {
+            Cache::forget(MetaController::filtersCacheKey($scope));
+        }
     }
 
     private function cacheKey(string $type): string

@@ -29,6 +29,9 @@ class TaxonomyItemRequest extends FormRequest
                 'code' => ['required', 'string', 'max:30', Rule::unique('stages', 'code')->ignore($id)],
                 'name_ar' => ['required', 'string', 'max:100'],
                 'education_type' => ['required', Rule::in(['school', 'university', 'training'])],
+                // نطاق صفوف المرحلة — يُستخدم بفلتر البحث؛ معاً أو لا شيء
+                'grade_from' => ['nullable', 'integer', 'min:1', 'max:12', 'required_with:grade_to'],
+                'grade_to' => ['nullable', 'integer', 'min:1', 'max:12', 'required_with:grade_from', 'gte:grade_from'],
                 'sort_order' => ['nullable', 'integer', 'min:0', 'max:10000'],
                 'is_active' => ['nullable', 'boolean'],
             ],
@@ -82,6 +85,13 @@ class TaxonomyItemRequest extends FormRequest
             'education_type.required' => 'نوع التعليم مطلوب',
             'education_type.in' => 'نوع التعليم غير صالح',
             'country.max' => 'اسم الدولة طويل جداً',
+            'grade_from.required_with' => 'حدّد الصف الأول للمرحلة',
+            'grade_to.required_with' => 'حدّد الصف الأخير للمرحلة',
+            'grade_to.gte' => 'الصف الأخير يجب ألا يسبق الصف الأول',
+            'grade_from.min' => 'الصف يجب أن يكون بين 1 و12',
+            'grade_from.max' => 'الصف يجب أن يكون بين 1 و12',
+            'grade_to.min' => 'الصف يجب أن يكون بين 1 و12',
+            'grade_to.max' => 'الصف يجب أن يكون بين 1 و12',
         ];
     }
 }
