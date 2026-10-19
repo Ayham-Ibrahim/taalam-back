@@ -181,9 +181,10 @@ class TeacherService
         $subjectIds = $data['subject_ids'] ?? null;
         $curriculumIds = $data['curriculum_ids'] ?? null;
         $languageIds = $data['language_ids'] ?? null;
+        $majorIds = $data['major_ids'] ?? null;
         $name = $data['name'] ?? null;
 
-        unset($data['subject_ids'], $data['curriculum_ids'], $data['language_ids'], $data['name']);
+        unset($data['subject_ids'], $data['curriculum_ids'], $data['language_ids'], $data['major_ids'], $data['name']);
 
         // name يعيش على users لا teachers — Teacher::$fillable لا يتضمّنه أصلاً،
         // فمررناه عبر fill() كان سيُتجاهَل بصمت دون أي تحديث فعلي.
@@ -207,7 +208,15 @@ class TeacherService
             $teacher->languages()->sync($languageIds);
         }
 
-        return $teacher->fresh(['subjects', 'curricula', 'languages', 'user']);
+        // التخصص للمعلم الجامعي فقط — أي نوع آخر تُمسح تخصصاته بدل أن تبقى
+        // عالقة فيظهر بفلتر "تعليم جامعي" بالخطأ.
+        if ($teacher->teacher_type !== 'university') {
+            $teacher->majors()->detach();
+        } elseif ($majorIds !== null) {
+            $teacher->majors()->sync($majorIds);
+        }
+
+        return $teacher->fresh(['subjects', 'curricula', 'languages', 'majors', 'user']);
     }
 
     /** يُرفَض بعد الحد الأقصى (Teacher::MAX_VIDEOS) — لا حذف تلقائي للأقدم، على المعلم/الأدمن حذف واحد أولاً */

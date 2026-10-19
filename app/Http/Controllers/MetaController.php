@@ -3,8 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Models\ClassSession;
+use App\Models\CourseField;
 use App\Models\Curriculum;
 use App\Models\Language;
+use App\Models\Major;
 use App\Models\Package;
 use App\Models\Stage;
 use App\Models\Student;
@@ -31,7 +33,7 @@ class MetaController extends Controller
 
     public static function filtersCacheKey(string $scope): string
     {
-        return "meta:filters:v3:{$scope}";
+        return "meta:filters:v4:{$scope}";
     }
 
     public function stats()
@@ -91,6 +93,15 @@ class MetaController extends Controller
                     ->orderBy('sort_order')->get(['id', 'name_ar'])
                     ->map(fn ($s) => ['value' => $s->id, 'label' => $s->name_ar])->all(),
                 'stageGrades' => (object) $stageGrades,
+                // التخصصات للجامعي فقط، ومجالات الدورات للتدريبي فقط
+                'majors' => in_array($eduType, ['university', null], true)
+                    ? Major::where('is_active', true)->orderBy('name_ar')->get(['id', 'name_ar'])
+                        ->map(fn ($m) => ['value' => $m->id, 'label' => $m->name_ar])->all()
+                    : [],
+                'courseFields' => in_array($eduType, ['training', null], true)
+                    ? CourseField::where('is_active', true)->orderBy('sort_order')->get(['id', 'name_ar'])
+                        ->map(fn ($f) => ['value' => $f->id, 'label' => $f->name_ar])->all()
+                    : [],
                 'languages' => Language::where('is_active', true)->get(['id', 'name_ar'])
                     ->map(fn ($l) => ['value' => $l->id, 'label' => $l->name_ar])->all(),
                 'curricula' => Curriculum::where('is_active', true)->orderBy('sort_order')->get(['id', 'name_ar'])

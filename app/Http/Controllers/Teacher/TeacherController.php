@@ -109,7 +109,7 @@ class TeacherController extends Controller
         }
 
         $teacher->load([
-            'user:id,name,avatar_path', 'subjects', 'curricula', 'languages', 'videos', 'faqs',
+            'user:id,name,avatar_path', 'subjects', 'curricula', 'languages', 'majors', 'videos', 'faqs',
             'experiences', 'activeBadgeAwards',
         ]);
         if ($isManager) {
@@ -149,6 +149,7 @@ class TeacherController extends Controller
             'subjects',
             'curricula',
             'languages',
+            'majors',
             'videos',
             'faqs',
             'experiences',

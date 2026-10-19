@@ -57,6 +57,7 @@ class AdminTeacherResource extends JsonResource
             'subjects' => $this->whenLoaded('subjects', fn () => $this->subjects->map(fn ($s) => ['id' => $s->id, 'name' => $s->name_ar])),
             'curricula' => $this->whenLoaded('curricula', fn () => $this->curricula->map(fn ($c) => ['id' => $c->id, 'name' => $c->name_ar])),
             'languages' => $this->whenLoaded('languages', fn () => $this->languages->map(fn ($l) => ['id' => $l->id, 'name' => $l->name_ar])),
+            'majors' => $this->whenLoaded('majors', fn () => $this->majors->map(fn ($m) => ['id' => $m->id, 'name' => $m->name_ar])),
             'submittedAt' => optional($this->created_at)->toDateString(),
             'verifiedAt' => optional($this->verified_at)->toDateString(),
             'rejectionReason' => $this->rejection_reason,
