@@ -323,6 +323,24 @@ class SettingsSeeder extends Seeder
                 'group' => 'sla',
                 'label_ar' => 'مهلة اعتراض الطلاب على تغيير الجدول (ساعة)',
             ],
+
+            // ═══════ التواصل ═══════
+            [
+                'key' => 'contact_email',
+                'value' => 'taalam@t3allem.com',
+                'type' => 'string',
+                'group' => 'contact',
+                'label_ar' => 'البريد الإلكتروني للتواصل',
+                'description' => 'يظهر في صفحة تواصل معنا، الفوتر، وبيانات SEO الهيكلية (JSON-LD)',
+            ],
+            [
+                'key' => 'contact_address',
+                'value' => 'Sharjah Freezone',
+                'type' => 'string',
+                'group' => 'contact',
+                'label_ar' => 'العنوان',
+                'description' => 'يظهر في صفحة تواصل معنا وبيانات SEO الهيكلية (JSON-LD)',
+            ],
         ];
 
         foreach ($settings as $s) {
