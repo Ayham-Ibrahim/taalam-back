@@ -3,17 +3,21 @@
 namespace App\Http\Controllers\Session;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Session\RescheduleSessionRequest;
 use App\Http\Resources\Session\ClassSessionResource;
 use App\Models\ClassSession;
 use App\Services\BookingService;
+use App\Services\RescheduleService;
 use App\Services\SessionService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 
 class ClassSessionController extends Controller
 {
     public function __construct(
         private readonly SessionService $sessionService,
         private readonly BookingService $bookingService,
+        private readonly RescheduleService $rescheduleService,
     ) {}
 
     public function index(Request $request)
@@ -35,6 +39,8 @@ class ClassSessionController extends Controller
                 fn ($q) => $q->whereHas('booking', fn ($b) => $b->where('package_id', $request->integer('package_id')))
             )
             ->when($request->filled('course_id'), fn ($q) => $q->where('course_id', $request->integer('course_id')))
+            // تبويب "الجلسات" في ملف المعلم لدى الأدمن — للمعلم نفسه لا أثر له (visibleTo يقيّده بجلساته أصلاً).
+            ->when($request->filled('teacher_id'), fn ($q) => $q->where('teacher_id', $request->integer('teacher_id')))
             ->when(
                 $request->filled('student_id'),
                 fn ($q) => $q->whereHas('attendees', fn ($a) => $a->where('student_id', $request->integer('student_id')))
@@ -157,5 +163,23 @@ class ClassSessionController extends Controller
         }
 
         return $this->success(['url' => $result['url']]);
+    }
+
+    /**
+     * تعديل الأدمن لموعد الجلسة مباشرة — رابط الانضمام يبقى كما هو. القيود
+     * (جلسة لم تبدأ، موعد مستقبلي، لا حضور مسجَّل، لا تعارض) في
+     * RescheduleService::adminReschedule.
+     */
+    public function reschedule(RescheduleSessionRequest $request, ClassSession $session)
+    {
+        // الموعد يُخزَّن بتوقيت التطبيق (UTC) — نصّ ISO بإزاحة توقيت (+03:00)
+        // يُحوَّل هنا صراحة، وإلا يُحفَظ رقم الساعة المحلي كما هو على أنه UTC.
+        $newTime = Carbon::parse($request->validated('scheduled_at'))->setTimezone(config('app.timezone'));
+
+        $session = $this->rescheduleService->adminReschedule($session, $request->user(), $newTime, $request->validated('notes'));
+
+        $session->load(self::eagerLoad());
+
+        return $this->success(new ClassSessionResource($session), 'تم تعديل موعد الجلسة');
     }
 }

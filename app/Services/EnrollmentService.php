@@ -84,6 +84,9 @@ class EnrollmentService
                     'enrollment_id' => $enrollment->id,
                     'attendance' => 'registered',
                 ]);
+                // نفس سبب BookingService::createManualBooking — التسجيل اليدوي لا يمر
+                // بـ confirmEnrollment فلم تكن تُنشأ غرفة BBB لجلساته أبداً.
+                CreateBbbRoomJob::dispatch($session->id)->afterCommit();
             }
 
             $this->createManualPayment($enrollment);

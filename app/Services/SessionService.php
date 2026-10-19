@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Jobs\CreateBbbRoomJob;
 use App\Models\Booking;
 use App\Models\ClassSession;
 use App\Models\SessionAttendee;
@@ -17,6 +18,10 @@ class SessionService
 
     /** يُسمح بالانضمام قبل الموعد المجدول بهذه المدة — ريثما يستعد الطرفان قبل بدء الجلسة فعلياً. */
     private const EARLY_JOIN_MINUTES = 5;
+
+    private const PAID_BOOKING_STATUSES = ['confirmed', 'active', 'completed'];
+
+    private const PAID_ENROLLMENT_STATUSES = ['confirmed', 'in_progress', 'completed'];
 
     public function __construct(
         private readonly SettingsService $settings,
@@ -212,9 +217,17 @@ class SessionService
         return $session->fresh(['attendees']);
     }
 
+    /**
+     * الجلسة التعويضية كانت تُنشأ بلا أي سطر حضور وبلا غرفة BBB: لا يراها أي طالب
+     * (visibleTo تشترط سطر حضور)، ولا يمكن لأحد الانضمام إليها — ومع ذلك يحوّلها
+     * completeEndedSessions إلى completed بعد موعدها فتُحتسب ضمن مستحقات المعلم.
+     * تُنسخ الآن أسطر حضور الجلسة الأصلية (بنفس الحجز/التسجيل، بحالة registered)،
+     * وتُنشأ غرفتها فوراً إن كانت الأصلية مدفوعة أصلاً (لها غرفة)؛ غير ذلك يلتقطها
+     * createMissingRooms بمجرد اكتمال الدفع.
+     */
     public function createMakeupSession(ClassSession $original): ClassSession
     {
-        return ClassSession::create([
+        $makeup = ClassSession::create([
             'booking_id' => $original->booking_id,
             'course_id' => $original->course_id,
             'teacher_id' => $original->teacher_id,
@@ -225,6 +238,50 @@ class SessionService
             'is_makeup' => true,
             'makeup_for_session_id' => $original->id,
         ]);
+
+        foreach ($original->attendees()->get() as $attendee) {
+            SessionAttendee::create([
+                'class_session_id' => $makeup->id,
+                'student_id' => $attendee->student_id,
+                'booking_id' => $attendee->booking_id,
+                'enrollment_id' => $attendee->enrollment_id,
+                'attendance' => 'registered',
+            ]);
+        }
+
+        if ($original->bbb_meeting_id) {
+            CreateBbbRoomJob::dispatch($makeup->id)->afterCommit();
+        }
+
+        return $makeup;
+    }
+
+    /**
+     * شبكة أمان دورية (CreateMissingBbbRoomsJob): أي جلسة قادمة مدفوعة فعلاً (طالب
+     * واحد على الأقل حجزه/تسجيله مؤكَّد) لكن بلا غرفة BBB — لأي مسار لم يُنشئ غرفتها
+     * (حجز يدوي أو مجموعة أو تعويضية قبل إصلاحها، أو أي مسار مستقبلي يُنسى فيه ذلك)
+     * — تُنشأ غرفتها هنا، فيظهر رابطها ويصل تذكيرها كأي جلسة أخرى. جلسات pending_payment
+     * مستبعدة عمداً: الرابط ينتظر الدفع.
+     */
+    public function createMissingRooms(int $limit = 100): int
+    {
+        $sessions = ClassSession::query()
+            ->where('status', 'scheduled')
+            ->whereNull('bbb_meeting_id')
+            ->whereRaw('DATE_ADD(scheduled_at, INTERVAL duration_min MINUTE) > ?', [now()])
+            ->whereHas('attendees', fn ($a) => $a->where(fn ($q) => $q
+                ->whereHas('booking', fn ($b) => $b->whereIn('status', self::PAID_BOOKING_STATUSES))
+                ->orWhereHas('enrollment', fn ($e) => $e->whereIn('status', self::PAID_ENROLLMENT_STATUSES))
+            ))
+            ->orderBy('scheduled_at')
+            ->limit($limit)
+            ->get();
+
+        foreach ($sessions as $session) {
+            $this->createBbbRoom($session);
+        }
+
+        return $sessions->count();
     }
 
     /**
