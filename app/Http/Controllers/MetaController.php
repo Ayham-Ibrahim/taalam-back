@@ -10,6 +10,7 @@ use App\Models\Stage;
 use App\Models\Student;
 use App\Models\Subject;
 use App\Models\Teacher;
+use App\Services\SettingsService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 
@@ -102,5 +103,20 @@ class MetaController extends Controller
         });
 
         return $this->success($filters);
+    }
+
+    /**
+     * البريد والعنوان الرسميان يُعدَّلان من إعدادات الأدمن (contact_email/contact_address)
+     * بدل أن يكونا hardcoded بالفرونت إند — تستهلكه صفحة تواصل معنا، الفوتر، وJSON-LD.
+     * بلا طبقة تخبئة إضافية هنا عمداً: SettingsService::all() مخبَّأة أصلاً ومُفرَّغة
+     * تلقائياً عند أي تعديل من الأدمن (Cache::forget('settings:all'))، فتخبئة ثانية هنا
+     * كانت ستُبقي القيمة القديمة ظاهرة للزوار حتى ساعة كاملة بعد كل تعديل.
+     */
+    public function contactInfo(SettingsService $settings)
+    {
+        return $this->success([
+            'email' => $settings->get('contact_email'),
+            'address' => $settings->get('contact_address'),
+        ]);
     }
 }

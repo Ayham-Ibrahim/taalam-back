@@ -93,6 +93,7 @@ Route::get('teachers/{teacher}/rating-summary', [ReviewController::class, 'ratin
 // إحصائيات الصفحة الرئيسية وخيارات فلاتر البحث — بلا مصادقة عمداً
 Route::get('meta/stats', [MetaController::class, 'stats']);
 Route::get('meta/filters', [MetaController::class, 'filters']);
+Route::get('meta/contact-info', [MetaController::class, 'contactInfo']);
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('dashboard/admin', [AdminDashboardController::class, 'overview']);
