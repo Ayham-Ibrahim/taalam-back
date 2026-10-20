@@ -30,10 +30,11 @@ class UpdateStudentProfileRequest extends FormRequest
             'level' => ['required_if:education_type,training', 'nullable', Rule::in(['beginner', 'intermediate', 'advanced'])],
 
             'birth_date' => ['nullable', 'date', 'before:today'],
+            // ولي الأمر يخص الطالب المدرسي فقط — الجامعي/التدريبي راشد قانونياً
             // أحرف فقط (بلا أرقام أو رموز) — نفس نمط CreateTeacherAccountRequest::name
-            'guardian_name' => ['required', 'string', 'max:150', 'regex:/^[\p{L}\p{M}]+(?:[\s\'-][\p{L}\p{M}]+)*$/u'],
+            'guardian_name' => ['required_if:education_type,school', 'nullable', 'string', 'max:150', 'regex:/^[\p{L}\p{M}]+(?:[\s\'-][\p{L}\p{M}]+)*$/u'],
             // أرقام فقط (٧–٢٤ خانة) مع بادئة + اختيارية — نفس نمط بقية حقول الهاتف
-            'guardian_phone' => ['required', 'string', 'max:25', 'regex:/^\+?[0-9]{7,24}$/'],
+            'guardian_phone' => ['required_if:education_type,school', 'nullable', 'string', 'max:25', 'regex:/^\+?[0-9]{7,24}$/'],
         ];
     }
 
