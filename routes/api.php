@@ -16,6 +16,7 @@ use App\Http\Controllers\Coupon\CouponController;
 use App\Http\Controllers\Coupon\SupportPackageCouponController;
 use App\Http\Controllers\Course\CourseController;
 use App\Http\Controllers\FavoriteController;
+use App\Http\Controllers\LegalPageController;
 use App\Http\Controllers\MetaController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\Package\AvailabilityController;
@@ -46,6 +47,7 @@ use Illuminate\Support\Facades\Route;
 
 Route::prefix('auth')->group(function () {
     Route::middleware('throttle:register')->post('register/student', [AuthController::class, 'registerStudent']);
+    Route::middleware('throttle:register')->post('register/teacher', [AuthController::class, 'registerTeacher']);
     Route::middleware('throttle:login')->post('login', [AuthController::class, 'login']);
     Route::middleware('throttle:password-reset')->post('forgot-password', [AuthController::class, 'forgotPassword']);
     Route::middleware('throttle:password-reset')->post('reset-password', [AuthController::class, 'resetPassword']);
@@ -94,6 +96,9 @@ Route::get('teachers/{teacher}/rating-summary', [ReviewController::class, 'ratin
 Route::get('meta/stats', [MetaController::class, 'stats']);
 Route::get('meta/filters', [MetaController::class, 'filters']);
 Route::get('meta/contact-info', [MetaController::class, 'contactInfo']);
+
+// سياسة الخصوصية والشروط والأحكام — قراءة عامة، التعديل محمي ضمن مجموعة auth:sanctum أدناه
+Route::get('legal-pages/{legalPage:slug}', [LegalPageController::class, 'show']);
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('dashboard/admin', [AdminDashboardController::class, 'overview']);
@@ -249,6 +254,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('me/reviews', [ReviewController::class, 'myReviews']);
     Route::get('reviews', [ReviewController::class, 'index']);
     Route::post('class-sessions/{session}/reviews', [ReviewController::class, 'store']);
+    Route::post('teachers/{teacher}/reviews', [ReviewController::class, 'storeForTeacher']);
     Route::put('reviews/{review}', [ReviewController::class, 'update']);
     Route::post('reviews/{review}/respond', [ReviewController::class, 'respond']);
     Route::post('reviews/{review}/hide', [ReviewController::class, 'hide']);
@@ -278,6 +284,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('admin/settings', [SettingsController::class, 'index']);
     Route::put('admin/settings/{key}', [SettingsController::class, 'update']);
+    Route::put('admin/legal-pages/{legalPage:slug}', [LegalPageController::class, 'update']);
     Route::get('admin/audit-log', [AuditLogController::class, 'index']);
     Route::get('admin/notification-logs', [NotificationLogController::class, 'index']);
 
