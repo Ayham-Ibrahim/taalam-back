@@ -91,6 +91,12 @@ class Teacher extends Model
         return $this->belongsToMany(Language::class, 'teacher_language');
     }
 
+    /** تخصصات المعلم الجامعي — يُفلتَر بها في البحث عند اختيار "تعليم جامعي" */
+    public function majors()
+    {
+        return $this->belongsToMany(Major::class, 'teacher_major');
+    }
+
     public function verificationDocuments()
     {
         return $this->hasMany(VerificationDocument::class);

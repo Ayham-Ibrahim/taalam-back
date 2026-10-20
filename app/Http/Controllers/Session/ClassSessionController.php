@@ -6,11 +6,14 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Session\RescheduleSessionRequest;
 use App\Http\Resources\Session\ClassSessionResource;
 use App\Models\ClassSession;
+use App\Models\User;
 use App\Services\BookingService;
 use App\Services\RescheduleService;
+use App\Services\SessionJoinLogService;
 use App\Services\SessionService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Gate;
 
 class ClassSessionController extends Controller
 {
@@ -18,6 +21,7 @@ class ClassSessionController extends Controller
         private readonly SessionService $sessionService,
         private readonly BookingService $bookingService,
         private readonly RescheduleService $rescheduleService,
+        private readonly SessionJoinLogService $joinLogService,
     ) {}
 
     public function index(Request $request)
@@ -48,6 +52,7 @@ class ClassSessionController extends Controller
             ->when($request->filled('from'), fn ($q) => $q->where('scheduled_at', '>=', $request->date('from')))
             ->when($request->filled('to'), fn ($q) => $q->where('scheduled_at', '<=', $request->date('to')))
             ->with(self::eagerLoad())
+            ->when($request->user()->isAdmin(), fn ($q) => $q->with(self::JOIN_LOGS_RELATION))
             // الافتراضي desc (الأحدث تاريخاً أولاً) يبقى كما كان لأي طرف آخر يعتمد
             // عليه ضمناً — sort=asc صريح (الأقرب موعداً أولاً) يطلبه استدعاء
             // "جلساتي" في لوحة الطالب تحديداً.
@@ -66,6 +71,10 @@ class ClassSessionController extends Controller
         $this->authorize('view', $session);
 
         $session->load(self::eagerLoad());
+
+        if (request()->user()->isAdmin()) {
+            $session->load(self::JOIN_LOGS_RELATION);
+        }
 
         return $this->success(new ClassSessionResource($session));
     }
@@ -128,6 +137,9 @@ class ClassSessionController extends Controller
             ->whereHas('booking.package', fn ($q) => $q->where('session_format', $category));
     }
 
+    /** سجل الانضمام يظهر للأدمن فقط — لا يُحمَّل (فلا يظهر في الاستجابة) لغيره */
+    private const JOIN_LOGS_RELATION = 'joinLogs:id,class_session_id,user_id,role,student_id,first_joined_at,last_joined_at,join_count';
+
     private static function eagerLoad(): array
     {
         return [
@@ -162,7 +174,31 @@ class ClassSessionController extends Controller
             return $this->error($result['message'], 422);
         }
 
+        $this->joinLogService->record($session, $request->user());
+
         return $this->success(['url' => $result['url']]);
+    }
+
+    /**
+     * زر بريد التذكير (رابط موقّع لمستلم بعينه) — نفس منطق join تماماً لكن بتحويل
+     * مباشر لغرفة BBB، فيُسجَّل انضمام المستلم كأنه ضغط "انضم" من المنصة.
+     */
+    public function joinRedirect(ClassSession $session, User $user)
+    {
+        abort_unless(Gate::forUser($user)->allows('view', $session), 403);
+
+        $result = $this->sessionService->resolveJoinUrl($session, $user);
+
+        if (! $result['joinable']) {
+            return response()->view('session-join-unavailable', [
+                'message' => $result['message'],
+                'platformUrl' => frontend_url('/login'),
+            ], 422);
+        }
+
+        $this->joinLogService->record($session, $user);
+
+        return redirect()->away($result['url']);
     }
 
     /**

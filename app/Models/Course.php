@@ -9,6 +9,9 @@ class Course extends Model
 {
     use SoftDeletes;
 
+    /** الحالات التي تظهر فيها الدورة للطلاب (نفس فحص CourseService عند التسجيل) */
+    public const PUBLIC_STATUSES = ['active', 'full', 'in_progress'];
+
     protected $attributes = [
         'currency' => 'AED',
         'session_duration_min' => 60,

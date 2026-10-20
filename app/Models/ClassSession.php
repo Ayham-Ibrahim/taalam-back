@@ -64,6 +64,12 @@ class ClassSession extends Model
         return $this->hasMany(SessionAttendee::class);
     }
 
+    /** سجل الانضمام (زر "انضم") — للعرض على الأدمن فقط، لا يدخل في أي منطق آخر */
+    public function joinLogs()
+    {
+        return $this->hasMany(SessionJoinLog::class);
+    }
+
     public function makeupForSession()
     {
         return $this->belongsTo(ClassSession::class, 'makeup_for_session_id');

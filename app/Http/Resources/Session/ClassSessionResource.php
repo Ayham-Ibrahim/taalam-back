@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources\Session;
 
+use App\Models\SessionJoinLog;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -48,6 +49,13 @@ class ClassSessionResource extends JsonResource
             'course' => $this->whenLoaded('course'),
             'attendees' => $this->whenLoaded('attendees'),
             'reschedule_requests' => $this->whenLoaded('rescheduleRequests'),
+            // تُحمَّل للأدمن فقط (ClassSessionController::eagerLoad) — غائبة كلياً عن غيره
+            'join_logs' => $this->whenLoaded('joinLogs'),
+            // هل بدأت الجلسة بعد بدء تسجيل الانضمام — وإلا فغياب سجلها لا يعني غياباً
+            'join_tracked' => $this->when(
+                $this->relationLoaded('joinLogs'),
+                fn () => ($since = SessionJoinLog::trackingStartedAt()) !== null && $this->scheduled_at?->gte($since),
+            ),
         ];
     }
 }

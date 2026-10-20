@@ -78,6 +78,12 @@ Route::get('verification-documents/{document}/download', [VerificationDocumentCo
     ->middleware('signed')
     ->name('verification-documents.download');
 
+// زر "انضم" في بريد التذكير — موقّع لكل مستلم كي يمرّ الانضمام عبر المنصة فيُسجَّل في
+// session_join_logs (بدل رابط BBB الخام). لا auth:sanctum: يُفتح من البريد مباشرة.
+Route::get('class-sessions/{session}/join-redirect/{user}', [ClassSessionController::class, 'joinRedirect'])
+    ->middleware('signed')
+    ->name('class-sessions.join-redirect');
+
 // Stripe يستدعي هذا المسار مباشرة — التحقق يتم عبر توقيع Stripe-Signature وليس Sanctum
 Route::post('webhooks/stripe', [PaymentWebhookController::class, 'stripe']);
 
