@@ -18,15 +18,36 @@ return new class extends Migration
             $table->string('title', 150)->after('academic_supporter_id');
         });
 
-        Schema::table('support_packages', function (Blueprint $table) {
-            $table->dropForeign(['subject_id']);
-            $table->dropColumn('subject_id');
-        });
-
         Schema::create('support_package_subject', function (Blueprint $table) {
             $table->foreignId('support_package_id')->constrained()->cascadeOnDelete();
             $table->foreignId('subject_id')->constrained()->cascadeOnDelete();
             $table->primary(['support_package_id', 'subject_id']);
+        });
+
+        // نقل البيانات قبل حذف subject_id — كي لا تفقد الباقات الموجودة مادتها،
+        // ونعطيها اسماً افتراضياً من فئتها ومادتها بدل اسم فارغ. يشمل الباقات
+        // المحذوفة ناعماً أيضاً (لا شرط على deleted_at) لأنها قد تُستعاد.
+        DB::table('support_packages')
+            ->leftJoin('subjects', 'subjects.id', '=', 'support_packages.subject_id')
+            ->orderBy('support_packages.id')
+            ->select('support_packages.id', 'support_packages.subject_id', 'support_packages.tier', 'subjects.name_ar as subject_name')
+            ->each(function ($package) {
+                if ($package->subject_id) {
+                    DB::table('support_package_subject')->insertOrIgnore([
+                        'support_package_id' => $package->id,
+                        'subject_id' => $package->subject_id,
+                    ]);
+                }
+
+                $tierLabel = $package->tier === 'premium' ? 'باقة شاملة' : 'باقة أساسية';
+                DB::table('support_packages')->where('id', $package->id)->update([
+                    'title' => $package->subject_name ? "{$tierLabel} - {$package->subject_name}" : $tierLabel,
+                ]);
+            });
+
+        Schema::table('support_packages', function (Blueprint $table) {
+            $table->dropForeign(['subject_id']);
+            $table->dropColumn('subject_id');
         });
     }
 

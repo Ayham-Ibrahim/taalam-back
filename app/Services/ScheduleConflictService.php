@@ -39,7 +39,7 @@ class ScheduleConflictService
      *
      * @throws ValidationException عند تقاطع أي لحظة مقترحة مع جلسة قائمة فعلاً إما للطالب نفسه أو للمعلم نفسه (مع أي طالب آخر)
      */
-    public function assertNoConflict(Student $student, int $teacherId, iterable $candidateStarts, int $candidateDurationMinutes, array $excludeSessionIds = []): void
+    public function assertNoConflict(?Student $student, int $teacherId, iterable $candidateStarts, int $candidateDurationMinutes, array $excludeSessionIds = []): void
     {
         $existingSessions = ClassSession::query()
             ->whereIn('status', self::LIVE_STATUSES)
@@ -49,10 +49,16 @@ class ScheduleConflictService
                 //     مُلغى أو منتهية مهلته. بعد إلغاء/انتهاء الحجز يبقى صف الجلسة
                 //     في class_sessions بحالة scheduled، لكنه لم يعد التزاماً فعلياً
                 //     فلا يجوز أن يمنع حجزاً جديداً على نفس الموعد.
-                $query->whereHas('attendees', function ($a) use ($student) {
-                    $a->where('student_id', $student->id);
-                    ClassSession::constrainToLiveAttendee($a);
-                })
+                //     $student = null: فحص جدول المعلم وحده — جلسة دورة لا طالب
+                //     مسجَّل فيها بعد ويعدّل الأدمن موعدها (RescheduleService::adminReschedule).
+                $query->when(
+                    $student,
+                    fn ($q) => $q->whereHas('attendees', function ($a) use ($student) {
+                        $a->where('student_id', $student->id);
+                        ClassSession::constrainToLiveAttendee($a);
+                    }),
+                    fn ($q) => $q->whereRaw('1 = 0'),
+                )
                     // (ب) أو جلسة لهذا المعلم لم يبطل كل حضورها (طالب واحد على الأقل
                     //     باشتراك قائم)، أو جلسة دورة لا حضور مؤكَّد عليها بعد.
                     ->orWhere(function ($q) use ($teacherId) {
@@ -92,7 +98,7 @@ class ScheduleConflictService
 
             if ($conflict) {
                 throw ValidationException::withMessages([
-                    'schedule' => [$this->conflictMessage($conflict, $teacherId, $student->id)],
+                    'schedule' => [$this->conflictMessage($conflict, $teacherId, $student?->id)],
                 ]);
             }
         }
@@ -106,14 +112,14 @@ class ScheduleConflictService
      * والتوقيت الفعلي — بتوقيت المعلم صاحب الجلسة المتعارضة تحديداً، لا UTC
      * الخام ولا توقيت من يستدعي هذه الدالة.
      */
-    private function conflictMessage(ClassSession $conflict, int $teacherId, int $studentId): string
+    private function conflictMessage(ClassSession $conflict, int $teacherId, ?int $studentId): string
     {
         $conflict->loadMissing('teacher.user:id,timezone');
         $timezone = $conflict->teacher?->user?->timezone ?? config('app.timezone');
         $when = $conflict->scheduled_at->copy()->setTimezone($timezone)->format('Y-m-d H:i');
 
         $isSameTeacher = (int) $conflict->teacher_id === $teacherId;
-        $isSameStudent = SessionAttendee::where('class_session_id', $conflict->id)
+        $isSameStudent = $studentId !== null && SessionAttendee::where('class_session_id', $conflict->id)
             ->where('student_id', $studentId)
             ->exists();
 

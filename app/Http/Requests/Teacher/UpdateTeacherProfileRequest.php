@@ -62,6 +62,8 @@ class UpdateTeacherProfileRequest extends FormRequest
             'curriculum_ids.*' => ['integer', 'exists:curricula,id'],
             'language_ids' => ['nullable', 'array', 'max:20'],
             'language_ids.*' => ['integer', 'exists:languages,id'],
+            'major_ids' => ['nullable', 'array', 'max:20'],
+            'major_ids.*' => ['integer', 'exists:majors,id'],
         ];
     }
 }

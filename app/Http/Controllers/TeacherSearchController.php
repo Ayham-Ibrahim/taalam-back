@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Requests\Teacher\SearchTeachersRequest;
 use App\Models\AvailabilitySlot;
 use App\Models\Booking;
+use App\Models\Course;
 use App\Models\ClassSession;
 use App\Models\Enrollment;
 use App\Models\Package;
@@ -51,6 +52,15 @@ class TeacherSearchController extends Controller
             })
             ->when($filters['language_id'] ?? null, function ($q, $languageId) {
                 $q->whereHas('languages', fn ($lq) => $lq->where('languages.id', $languageId));
+            })
+            ->when($filters['major_id'] ?? null, function ($q, $majorId) {
+                $q->whereHas('majors', fn ($mq) => $mq->where('majors.id', $majorId));
+            })
+            // مجال الدورة يُستنتَج من دورات المركز الظاهرة للطلاب فعلياً، لا من
+            // حقل بالملف الشخصي — المركز قد يقدّم دورات بعدة مجالات.
+            ->when($filters['course_field_id'] ?? null, function ($q, $fieldId) {
+                $q->whereHas('courses', fn ($cq) => $cq->whereIn('status', Course::PUBLIC_STATUSES)
+                    ->where('course_field_id', $fieldId));
             })
             // فحص واحد مشترك للحدَّين معاً — لا نداءين مستقلَّين (كانا سابقاً
             // منفصلَين: EXISTS باقة ≥ الحد الأدنى، وEXISTS باقة ≤ الحد الأقصى،
