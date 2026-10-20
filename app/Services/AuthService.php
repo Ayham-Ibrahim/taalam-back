@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Student;
+use App\Models\Teacher;
 use App\Models\User;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -51,6 +52,41 @@ class AuthService
             ]);
 
             $user->setRelation('student', $student);
+
+            return [
+                'user' => $user,
+                'token' => $user->createToken('api')->plainTextToken,
+            ];
+        });
+    }
+
+    /**
+     * تسجيل ذاتي للمعلم (يشمل مراكز التدريب كنوع ثالث — ليست كياناً منفصلاً،
+     * راجع تعليق هجرة جدول teachers). نفس نقطة النهاية التي ينتجها
+     * TeacherService::createByAdmin() (status='active_unverified'، دخول فوري)
+     * لكن بلا تدخل أدمن — لا يستبدل invite()/createByAdmin() بل يضيف باباً
+     * ثانياً. ProtectedRoute على الفرونت إند يحوّل أي معلم بهذه الحالة تلقائياً
+     * لشاشة إكمال الملف، بصرف النظر عن طريقة إنشاء حسابه.
+     */
+    public function registerTeacher(array $data): array
+    {
+        return DB::transaction(function () use ($data) {
+            $user = User::create([
+                'name' => $data['name'],
+                'email' => $data['email'],
+                'phone' => $data['phone'] ?? null,
+                'role' => 'teacher',
+                'password' => $data['password'],
+                'is_active' => true,
+            ]);
+
+            $teacher = Teacher::create([
+                'user_id' => $user->id,
+                'teacher_type' => $data['teacher_type'],
+                'status' => 'active_unverified',
+            ]);
+
+            $user->setRelation('teacher', $teacher);
 
             return [
                 'user' => $user,

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\ForgotPasswordRequest;
 use App\Http\Requests\Auth\LoginRequest;
 use App\Http\Requests\Auth\RegisterStudentRequest;
+use App\Http\Requests\Auth\RegisterTeacherRequest;
 use App\Http\Requests\Auth\ResetPasswordRequest;
 use App\Http\Resources\UserResource;
 use App\Services\AuthService;
@@ -20,6 +21,16 @@ class AuthController extends Controller
         $result = $this->authService->registerStudent($request->validated());
 
         return $this->success($result, 'تم إنشاء الحساب بنجاح', 201);
+    }
+
+    public function registerTeacher(RegisterTeacherRequest $request)
+    {
+        $result = $this->authService->registerTeacher($request->validated());
+
+        return $this->success([
+            'user' => new UserResource($result['user']),
+            'token' => $result['token'],
+        ], 'تم إنشاء حساب المعلم بنجاح', 201);
     }
 
     public function login(LoginRequest $request)
