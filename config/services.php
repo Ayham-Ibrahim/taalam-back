@@ -44,6 +44,8 @@ return [
         'url' => env('BBB_URL'),
         'secret' => env('BBB_SECRET'),
         'checksum_algorithm' => env('BBB_CHECKSUM_ALGORITHM', 'sha1'),
+        // للتطوير المحلي فقط (APP_ENV=local): تُعتبر الغرف موجودة بلا خادم BBB
+        'fake_rooms' => env('BBB_FAKE_ROOMS', false),
     ],
 
 ];
