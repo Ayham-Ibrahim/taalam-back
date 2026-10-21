@@ -47,7 +47,44 @@ class RescheduleRequestController extends Controller
     {
         $this->authorize('view', $rescheduleRequest);
 
-        return $this->success($rescheduleRequest->load(['session', 'requester:id,name', 'reviewer:id,name']));
+        $rescheduleRequest->load([
+            'requester:id,name,email,phone,timezone',
+            'reviewer:id,name',
+            'booking.student.user:id,name,timezone',
+            'booking.package:id,title,session_format',
+            'session:id,teacher_id,booking_id,course_id,sequence_no,scheduled_at,duration_min,status',
+            'session.teacher.user:id,name',
+            'session.course:id,title',
+            'session.attendees:id,class_session_id,student_id',
+            'session.attendees.student.user:id,name,timezone',
+        ]);
+
+        return $this->success($this->serializeDetails($rescheduleRequest));
+    }
+
+    /** نافذة "عرض" في جدول الأدمن — كل ما في serializeListItem + تفاصيل الجلسة والمراجعة */
+    private function serializeDetails(RescheduleRequest $rescheduleRequest): array
+    {
+        $session = $rescheduleRequest->session;
+
+        return [
+            ...$this->serializeListItem($rescheduleRequest),
+            'requesterEmail' => $rescheduleRequest->requester?->email,
+            'requesterPhone' => $rescheduleRequest->requester?->phone,
+            'requesterTimezone' => $rescheduleRequest->requester?->timezone,
+            'sessionId' => $session?->id,
+            'sessionSequenceNo' => $session?->sequence_no,
+            'sessionStatus' => $session?->status,
+            'sessionCurrentScheduledAt' => $this->toIso($session?->scheduled_at),
+            'sessionDurationMin' => $session?->duration_min,
+            'packageTitle' => $rescheduleRequest->booking?->package?->title ?? $session?->course?->title,
+            'bookingId' => $rescheduleRequest->booking_id,
+            'hoursBeforeSession' => $rescheduleRequest->hours_before_session,
+            'reviewerName' => $rescheduleRequest->reviewer?->name,
+            'adminNotes' => $rescheduleRequest->admin_notes,
+            'escalated' => (bool) $rescheduleRequest->escalated,
+            'updatedAt' => $this->toIso($rescheduleRequest->updated_at),
+        ];
     }
 
     public function store(CreateRescheduleRequestRequest $request, ClassSession $session)
@@ -109,6 +146,7 @@ class RescheduleRequestController extends Controller
             // جدول الطالب هو أصلاً؛ هذا الحقل هو ما تعتمد عليه الواجهة لذلك
             // بدل توقيت متصفح الأدمن نفسه (كان هذا الخطأ سابقاً).
             'studentTimezone' => $this->resolveStudentTimezone($rescheduleRequest),
+            'requesterName' => $rescheduleRequest->requester?->name,
             'requesterRole' => $rescheduleRequest->requester_role,
             'status' => $rescheduleRequest->status,
             'reason' => $rescheduleRequest->reason,

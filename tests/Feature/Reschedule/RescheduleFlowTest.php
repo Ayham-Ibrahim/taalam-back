@@ -332,6 +332,33 @@ class RescheduleFlowTest extends TestCase
         $second->assertStatus(422);
     }
 
+    public function test_admin_can_view_full_reschedule_request_details(): void
+    {
+        [$teacher, $teacherToken] = $this->createVerifiedTeacher();
+        $session = $this->createSession($teacher, now()->addDays(5));
+
+        $requestId = $this->as($teacherToken)->postJson("/api/class-sessions/{$session->id}/reschedule-requests", [
+            'reason' => 'ظرف طارئ',
+        ])->assertStatus(201)->json('data.id');
+
+        [$admin, $adminToken] = $this->createAdmin();
+        $this->as($adminToken)->postJson("/api/reschedule-requests/{$requestId}/reject", ['reason' => 'لا يوجد بديل'])->assertOk();
+
+        $this->as($adminToken)->getJson("/api/reschedule-requests/{$requestId}")
+            ->assertOk()
+            ->assertJsonPath('data.id', $requestId)
+            ->assertJsonPath('data.requesterName', $teacher->user()->value('name'))
+            ->assertJsonPath('data.requesterRole', 'teacher')
+            ->assertJsonPath('data.reason', 'ظرف طارئ')
+            ->assertJsonPath('data.proposedScheduledAt', null)
+            ->assertJsonPath('data.sessionId', $session->id)
+            ->assertJsonPath('data.sessionDurationMin', $session->duration_min)
+            ->assertJsonPath('data.packageTitle', $session->booking->package->title)
+            ->assertJsonPath('data.status', 'rejected')
+            ->assertJsonPath('data.rejectionReason', 'لا يوجد بديل')
+            ->assertJsonPath('data.reviewerName', $admin->name);
+    }
+
     public function test_admin_list_includes_filled_reschedule_fields_and_created_at(): void
     {
         [$teacher, $teacherToken] = $this->createVerifiedTeacher();
@@ -350,6 +377,9 @@ class RescheduleFlowTest extends TestCase
         $response->assertStatus(200)
             ->assertJsonPath('data.0.teacherName', $teacher->user()->value('name'))
             ->assertJsonPath('data.0.studentName', $session->booking->student->user->name)
+            ->assertJsonPath('data.0.requesterName', $teacher->user()->value('name'))
+            ->assertJsonPath('data.0.requesterRole', 'teacher')
+            ->assertJsonPath('data.0.reason', 'سبب')
             ->assertJsonPath('data.0.status', 'pending');
 
         $this->assertSame($session->scheduled_at->toIso8601String(), $response->json('data.0.originalScheduledAt'));
