@@ -108,6 +108,21 @@ class ReviewController extends Controller
         return $this->success($review, 'تم إرسال التقييم بنجاح', 201);
     }
 
+    /** تقييم حر لمعلم بصرف النظر عن وجود جلسة — راجع ReviewService::createOrUpdateForTeacher */
+    public function storeForTeacher(CreateReviewRequest $request, Teacher $teacher)
+    {
+        $student = $request->user()->loadMissing('student')->student;
+
+        $review = $this->reviewService->createOrUpdateForTeacher(
+            $student,
+            $teacher,
+            (int) $request->validated('rating'),
+            $request->validated('comment'),
+        );
+
+        return $this->success($review, 'تم إرسال التقييم بنجاح', 201);
+    }
+
     public function update(UpdateReviewRequest $request, Review $review)
     {
         $student = $request->user()->loadMissing('student')->student;
