@@ -143,4 +143,52 @@ class ClassSession extends Model
                 ->orWhereHas('enrollment', fn ($e) => $e->whereNotIn('status', ['cancelled', 'withdrawn']))
             );
     }
+
+    public const PAID_BOOKING_STATUSES = ['confirmed', 'active', 'completed'];
+
+    public const PAID_ENROLLMENT_STATUSES = ['confirmed', 'in_progress', 'completed'];
+
+    /**
+     * أضيق من constrainToLiveAttendee: الاشتراك القائم يكفي لظهور الجلسة في القوائم،
+     * أما الانضمام ورابط BBB والتذكير فتشترط اشتراكاً مدفوعاً فعلاً. حجز pending_payment
+     * "قائم" لكنه غير مدفوع — وغرفة جلسة المجموعة تُنشأ فور دفع أي طالب آخر، فلو كفى
+     * "القائم" لدخل غير الدافع مجاناً (أو احتفظ بالرابط الخام بعد انتهاء مهلته).
+     */
+    public static function constrainToPaidAttendee(Builder|HasMany $attendees): void
+    {
+        $attendees->where(fn ($q) => $q
+            ->whereHas('booking', fn ($b) => $b->whereIn('status', self::PAID_BOOKING_STATUSES))
+            ->orWhereHas('enrollment', fn ($e) => $e->whereIn('status', self::PAID_ENROLLMENT_STATUSES))
+        );
+    }
+
+    /**
+     * يضيف student_has_paid_access لكل جلسة في استعلام قائمة طالب (exists واحد ضمن
+     * نفس الاستعلام) — كي لا يسأل ClassSessionResource عن كل جلسة على حدة.
+     */
+    public function scopeWithStudentPaidAccess(Builder $query, User $user): Builder
+    {
+        $studentId = $user->isStudent() ? $user->loadMissing('student')->student?->id : null;
+
+        if ($studentId === null) {
+            return $query;
+        }
+
+        return $query->withExists(['attendees as student_has_paid_access' => function ($a) use ($studentId) {
+            $a->where('student_id', $studentId);
+            self::constrainToPaidAttendee($a);
+        }]);
+    }
+
+    public function studentHasPaidAccess(int $studentId): bool
+    {
+        if (array_key_exists('student_has_paid_access', $this->attributes)) {
+            return (bool) $this->attributes['student_has_paid_access'];
+        }
+
+        $query = $this->attendees()->where('student_id', $studentId);
+        self::constrainToPaidAttendee($query);
+
+        return $query->exists();
+    }
 }

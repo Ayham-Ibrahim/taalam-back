@@ -19,10 +19,6 @@ class SessionService
     /** يُسمح بالانضمام قبل الموعد المجدول بهذه المدة — ريثما يستعد الطرفان قبل بدء الجلسة فعلياً. */
     private const EARLY_JOIN_MINUTES = 5;
 
-    private const PAID_BOOKING_STATUSES = ['confirmed', 'active', 'completed'];
-
-    private const PAID_ENROLLMENT_STATUSES = ['confirmed', 'in_progress', 'completed'];
-
     public function __construct(
         private readonly SettingsService $settings,
         private readonly BigBlueButtonService $bbb,
@@ -269,10 +265,7 @@ class SessionService
             ->where('status', 'scheduled')
             ->whereNull('bbb_meeting_id')
             ->whereRaw('DATE_ADD(scheduled_at, INTERVAL duration_min MINUTE) > ?', [now()])
-            ->whereHas('attendees', fn ($a) => $a->where(fn ($q) => $q
-                ->whereHas('booking', fn ($b) => $b->whereIn('status', self::PAID_BOOKING_STATUSES))
-                ->orWhereHas('enrollment', fn ($e) => $e->whereIn('status', self::PAID_ENROLLMENT_STATUSES))
-            ))
+            ->whereHas('attendees', fn ($a) => ClassSession::constrainToPaidAttendee($a))
             ->orderBy('scheduled_at')
             ->limit($limit)
             ->get();

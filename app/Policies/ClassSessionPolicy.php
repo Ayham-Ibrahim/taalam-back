@@ -13,11 +13,9 @@ class ClassSessionPolicy
     }
 
     /**
-     * ملاحظة: هذه هي البوابة الفعلية للانضمام (join) أيضاً — لا مجرد "رؤية"
-     * الجلسة. لذا لا يكفي وجود سطر حضور للطالب على هذه الجلسة؛ يجب أن يمثّل
-     * اشتراكاً قائماً فعلاً (لا expired/cancelled) — وإلا يبقى بإمكان طالب
-     * حجزه باطل الانضمام لجلسة لم يعد يملك حقاً فيها. نفس الشرط بالضبط
-     * المستخدم في ClassSession::scopeVisibleTo لإخفاء الجلسة من قائمته أصلاً.
+     * رؤية تفاصيل الجلسة: لا يكفي وجود سطر حضور للطالب؛ يجب أن يمثّل اشتراكاً
+     * قائماً (لا expired/cancelled) — نفس شرط ClassSession::scopeVisibleTo. حجز
+     * pending_payment يمرّ هنا (يرى جلسته قبل الدفع) لكنه لا يمرّ من join أدناه.
      */
     public function view(User $user, ClassSession $session): bool
     {
@@ -39,6 +37,27 @@ class ClassSessionPolicy
         ClassSession::constrainToLiveAttendee($query);
 
         return $query->exists();
+    }
+
+    /**
+     * بوابة الانضمام (زر "انضم" ورابط بريد التذكير): الطالب يحتاج اشتراكاً مدفوعاً
+     * فعلاً، لا مجرد قائم — وإلا دخل صاحب حجز pending_payment جلسة مجموعة غرفتها
+     * أُنشئت لأن طالباً آخر دفع. pending_payment بلا دفع لا يمرّ حتى لو لم يلحق
+     * المجدول بتحويله expired بعد.
+     */
+    public function join(User $user, ClassSession $session): bool
+    {
+        if ($user->isAdmin()) {
+            return true;
+        }
+
+        if ($user->loadMissing('teacher')->teacher?->id === $session->teacher_id) {
+            return true;
+        }
+
+        $studentId = $user->loadMissing('student')->student?->id;
+
+        return $studentId !== null && $session->studentHasPaidAccess($studentId);
     }
 
     /** تعديل موعد الجلسة مباشرة (بلا طلب تغيير موعد) — للأدمن وحده. */
