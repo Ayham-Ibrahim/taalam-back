@@ -48,6 +48,7 @@ class Teacher extends Model
         'verified_at',
         'verified_by',
         'rejection_reason',
+        'suspension_reason',
         'no_show_count',
         'ranking_score',
     ];

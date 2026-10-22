@@ -403,12 +403,12 @@ class TeacherService
 
         $old = $teacher->only(['status']);
 
-        $teacher->update(['status' => 'suspended']);
+        $teacher->update(['status' => 'suspended', 'suspension_reason' => $reason]);
 
         // نفس منطق reject(): التعليق إجراء عقابي، يجب أن يقطع الجلسات النشطة
-        // فوراً لا أن ينتظر. المعلم لا يزال يستطيع تسجيل الدخول من جديد (تسجيل
-        // الدخول غير مشروط بالحالة)، فيحصل على توكن جديد إن احتاج التفاعل مع
-        // حسابه أثناء التعليق (مثلاً إعادة رفع وثيقة).
+        // فوراً لا أن ينتظر. المعلم لا يزال يستطيع تسجيل الدخول من جديد — لكن
+        // AuthService::login() يرفض الدخول طالما الحالة suspended ويعرض له
+        // suspension_reason، فلا يحصل على توكن جديد إلا بعد إعادة التفعيل.
         $teacher->loadMissing('user');
         $teacher->user?->tokens()->delete();
 
@@ -465,7 +465,7 @@ class TeacherService
 
         $old = $teacher->only(['status']);
 
-        $teacher->update(['status' => 'verified']);
+        $teacher->update(['status' => 'verified', 'suspension_reason' => null]);
 
         $this->audit('teacher.reactivated', $teacher, $old, ['status' => 'verified']);
 
