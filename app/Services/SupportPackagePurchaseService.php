@@ -29,7 +29,20 @@ class SupportPackagePurchaseService
     {
         $this->assertUniversityStudent($student);
         $this->assertPackagePurchasable($supportPackage);
-        $this->assertNoOpenPurchase($student, $supportPackage);
+
+        $openPurchase = $this->findOpenPurchase($student, $supportPackage);
+        if ($openPurchase) {
+            if ($openPurchase->status === 'confirmed') {
+                throw ValidationException::withMessages([
+                    'support_package' => ['لديك بالفعل اشتراك في هذه الباقة'],
+                ]);
+            }
+
+            // pending_payment لم تنتهِ مهلته المؤقتة بعد (لو كانت انتهت لكانت
+            // expireStalePendingPurchases حوّلتها قبل هذا الاستدعاء) — الطالب يحاول
+            // الدفع من جديد لنفس الشراء، فنعيد استخدامه بدل رفضه أو إنشاء مكرر
+            return $openPurchase;
+        }
 
         return DB::transaction(function () use ($student, $supportPackage, $couponCode) {
             $amount = $supportPackage->student_price;
@@ -83,6 +96,31 @@ class SupportPackagePurchaseService
         return $purchase;
     }
 
+    /**
+     * اشتراكات باقات الدعم المعلَّقة للدفع التي انقضت مهلتها المؤقتة (hold_expires_at)
+     * دون إتمام الدفع — تُحوَّل إلى expired، بدلاً من البقاء "قائمة" للأبد وتعطيل
+     * شراء جديد كلياً (initiate() ترجع لنفس الشراء القائم طالما لم تنتهِ مهلته —
+     * هذا الفحص خاص بالشراء المنتهي فعلاً). نظير BookingService::expireStalePendingPayments.
+     */
+    public function expireStalePendingPurchases(): int
+    {
+        $staleCouponIds = SupportPackagePurchase::where('status', 'pending_payment')
+            ->whereNotNull('hold_expires_at')
+            ->where('hold_expires_at', '<', now())
+            ->whereNotNull('coupon_id')
+            ->pluck('coupon_id')
+            ->all();
+
+        $expired = SupportPackagePurchase::where('status', 'pending_payment')
+            ->whereNotNull('hold_expires_at')
+            ->where('hold_expires_at', '<', now())
+            ->update(['status' => 'expired']);
+
+        $this->coupons->releaseMany($staleCouponIds);
+
+        return $expired;
+    }
+
     private function assertUniversityStudent(Student $student): void
     {
         if ($student->education_type !== 'university') {
@@ -101,22 +139,13 @@ class SupportPackagePurchaseService
         }
     }
 
-    /**
-     * "قائم لم ينتهِ" = شراء لنفس الباقة بحالة pending_payment أو confirmed — لا يصح
-     * شراء نفس الباقة مرتين طالما الأولى لم تُلغَ/تنتهِ.
-     */
-    private function assertNoOpenPurchase(Student $student, SupportPackage $supportPackage): void
+    /** "قائم" = pending_payment (لم تنتهِ مهلته بعد) أو confirmed — الاثنان يعنيان عدم الحاجة لشراء جديد */
+    private function findOpenPurchase(Student $student, SupportPackage $supportPackage): ?SupportPackagePurchase
     {
-        $hasOpenPurchase = SupportPackagePurchase::where('student_id', $student->id)
+        return SupportPackagePurchase::where('student_id', $student->id)
             ->where('support_package_id', $supportPackage->id)
             ->whereIn('status', ['pending_payment', 'confirmed'])
-            ->exists();
-
-        if ($hasOpenPurchase) {
-            throw ValidationException::withMessages([
-                'support_package' => ['لديك بالفعل اشتراك قائم في هذه الباقة'],
-            ]);
-        }
+            ->first();
     }
 
     private function createPendingPayment(SupportPackagePurchase $purchase): Payment
