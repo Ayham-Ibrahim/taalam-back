@@ -111,6 +111,18 @@ class AuthService
             ]);
         }
 
+        // حساب المعلم المعلَّق يُمنع من الدخول صراحةً ويُعرَض له سبب التعليق —
+        // بعكس reject() حيث يبقى المعلم قادراً على الدخول ليرى سبب الرفض ويعيد التقديم
+        if ($user->isTeacher()) {
+            $teacher = $user->teacher()->first(['status', 'suspension_reason']);
+            if ($teacher?->status === 'suspended') {
+                $reason = $teacher->suspension_reason;
+                throw ValidationException::withMessages([
+                    'email' => [$reason ? "تم تعليق حسابك. السبب: {$reason}" : 'تم تعليق حسابك، يرجى التواصل مع الإدارة'],
+                ]);
+            }
+        }
+
         $user->forceFill(['last_login_at' => now()])->save();
 
         $this->loadRoleRelation($user);

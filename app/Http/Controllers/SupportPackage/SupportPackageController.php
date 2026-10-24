@@ -5,6 +5,7 @@ namespace App\Http\Controllers\SupportPackage;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\SupportPackage\CreateSupportPackageRequest;
 use App\Http\Requests\SupportPackage\RejectSupportPackageRequest;
+use App\Http\Requests\SupportPackage\UpdateSupportPackageRequest;
 use App\Http\Resources\SupportPackage\SupportPackageResource;
 use App\Models\SupportPackage;
 use Illuminate\Http\Request;
@@ -46,6 +47,13 @@ class SupportPackageController extends Controller
         $supportPackage = $this->supportPackageService->create($supporter, $request->validated());
 
         return $this->success(new SupportPackageResource($supportPackage), 'تم إرسال باقة الدعم بانتظار مراجعة الأدمن', 201);
+    }
+
+    public function update(UpdateSupportPackageRequest $request, SupportPackage $supportPackage)
+    {
+        $supportPackage = $this->supportPackageService->update($supportPackage, $request->validated());
+
+        return $this->success(new SupportPackageResource($supportPackage), 'تم تعديل باقة الدعم');
     }
 
     public function approve(Request $request, SupportPackage $supportPackage)

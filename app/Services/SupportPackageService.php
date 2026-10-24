@@ -48,6 +48,36 @@ class SupportPackageService
         return $supportPackage->fresh(['subjects']);
     }
 
+    /**
+     * تعديل أدمن فقط — مسموح في أي حالة (pending_approval/active/rejected/disabled)
+     * طالما لا توجد عمليات شراء قائمة عليها (نفس فحص disable() بالضبط): تعديل
+     * باقة طالب دفع ثمنها أو بصدد الدفع لها يُبقي بياناته غير متطابقة مع ما دفع له.
+     */
+    public function update(SupportPackage $supportPackage, array $data): SupportPackage
+    {
+        if ($supportPackage->purchases()->whereIn('status', ['pending_payment', 'confirmed'])->exists()) {
+            throw ValidationException::withMessages([
+                'purchases' => ['لا يمكن تعديل الباقة لوجود عمليات شراء قائمة عليها'],
+            ]);
+        }
+
+        $price = (float) $data['price'];
+
+        $supportPackage->update([
+            'title' => $data['title'],
+            'tier' => $data['tier'],
+            'description' => $data['description'],
+            'teacher_price' => $price,
+            'student_price' => $price,
+        ]);
+
+        $supportPackage->subjects()->sync($data['subject_ids']);
+
+        $this->audit('support_package.updated', $supportPackage, [], $data);
+
+        return $supportPackage->fresh(['subjects']);
+    }
+
     public function approve(SupportPackage $supportPackage, User $admin): SupportPackage
     {
         if ($supportPackage->status !== 'pending_approval') {

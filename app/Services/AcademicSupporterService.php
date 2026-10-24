@@ -98,6 +98,7 @@ class AcademicSupporterService
             $extension === 'pdf' => 'pdf',
             in_array($extension, ['ppt', 'pptx'], true) => 'pptx',
             in_array($extension, ['xls', 'xlsx'], true) => 'xlsx',
+            in_array($extension, ['doc', 'docx'], true) => 'docx',
             default => 'pdf',
         };
 

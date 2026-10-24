@@ -177,6 +177,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('support-packages', [SupportPackageController::class, 'index']);
     Route::post('support-packages', [SupportPackageController::class, 'store']);
     Route::get('support-packages/{supportPackage}', [SupportPackageController::class, 'show']);
+    Route::put('support-packages/{supportPackage}', [SupportPackageController::class, 'update']);
     Route::post('support-packages/{supportPackage}/approve', [SupportPackageController::class, 'approve']);
     Route::post('support-packages/{supportPackage}/reject', [SupportPackageController::class, 'reject']);
     Route::post('support-packages/{supportPackage}/disable', [SupportPackageController::class, 'disable']);
