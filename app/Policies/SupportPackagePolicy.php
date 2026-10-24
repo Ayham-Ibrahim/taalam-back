@@ -17,11 +17,10 @@ class SupportPackagePolicy
         return $user->isAdmin() || $user->loadMissing('academicSupporter')->academicSupporter?->id === $supportPackage->academic_supporter_id;
     }
 
+    /** الأدمن حصراً ينشئ باقات الدعم ويربطها بالداعم الذي يختاره — لا إنشاء ذاتي من الداعم */
     public function create(User $user): bool
     {
-        $supporter = $user->loadMissing('academicSupporter')->academicSupporter;
-
-        return $supporter !== null && $supporter->isActive();
+        return $user->isAdmin();
     }
 
     public function update(User $user): bool

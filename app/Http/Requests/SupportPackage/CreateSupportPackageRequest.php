@@ -24,11 +24,13 @@ class CreateSupportPackageRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'academic_supporter_id' => ['required', 'integer', 'exists:academic_supporters,id'],
             'title' => ['required', 'string', 'max:150'],
             'tier' => ['required', Rule::in(['basic', 'premium'])],
             'subject_ids' => ['required', 'array', 'min:1', 'max:10'],
             'subject_ids.*' => ['integer', 'exists:subjects,id'],
             'price' => ['required', 'numeric', 'min:1', 'max:100000'],
+            'supporter_profit_percent' => ['required', 'numeric', 'min:1', 'max:100'],
             'description' => ['required', 'string', 'max:2000'],
         ];
     }
@@ -36,6 +38,8 @@ class CreateSupportPackageRequest extends FormRequest
     public function messages(): array
     {
         return [
+            'academic_supporter_id.required' => 'يرجى اختيار الداعم الأكاديمي',
+            'academic_supporter_id.exists' => 'الداعم الأكاديمي المختار غير موجود',
             'title.required' => 'يرجى إدخال اسم الباقة',
             'tier.required' => 'يرجى اختيار نوع الباقة',
             'tier.in' => 'نوع الباقة غير صالح',
@@ -47,6 +51,10 @@ class CreateSupportPackageRequest extends FormRequest
             'price.numeric' => 'السعر يجب أن يكون رقماً',
             'price.min' => 'السعر يجب أن يكون أكبر من صفر',
             'price.max' => 'السعر كبير جداً',
+            'supporter_profit_percent.required' => 'يرجى إدخال نسبة ربح الداعم',
+            'supporter_profit_percent.numeric' => 'نسبة ربح الداعم يجب أن تكون رقماً',
+            'supporter_profit_percent.min' => 'نسبة ربح الداعم يجب أن تكون أكبر من صفر',
+            'supporter_profit_percent.max' => 'نسبة ربح الداعم لا يمكن أن تتجاوز 100%',
             'description.required' => 'الوصف حقل إلزامي ولا يمكن أن يكون فارغاً',
             'description.max' => 'الوصف يجب ألا يتجاوز 2000 حرف',
         ];

@@ -10,9 +10,11 @@ use Illuminate\Validation\ValidationException;
 
 /**
  * باقات الدعم الطلابي — خاصة بالداعم الأكاديمي (كيان منفصل تماماً عن Teacher).
- * بعكس PackageService: لا مرحلة draft (نموذج واحد يُرسَل مباشرة pending_approval)،
- * ولا هامش منصة إطلاقاً (platform_margin_percent=0 ثابتة دائماً). الاسم والسعر
- * ومواد الباقة (متعددة) كلها يُدخلها الداعم يدوياً — tier تصنيف فقط الآن.
+ * النظام الحالي (قرار معماري): الأدمن حصراً من ينشئ باقة الدعم ويربطها بداعم
+ * واحد محدد — لا يوجد إنشاء ذاتي من الداعم، ولا مرحلة مراجعة (الأدمن بإنشائه
+ * الباقة هو نفسه الموافقة، فتبدأ status=active مباشرة). الأدمن يضع سعر الباقة
+ * النهائي (student_price) ونسبة ربح الداعم منه (supporter_profit_percent) —
+ * teacher_price (مستحق الداعم) وplatform_revenue يُحسبان من هذين مباشرة.
  */
 class SupportPackageService
 {
@@ -22,28 +24,25 @@ class SupportPackageService
     {
         if (! $supporter->isActive()) {
             throw ValidationException::withMessages([
-                'supporter_status' => ['لا يمكن إنشاء باقة دعم إلا من حساب نشط'],
+                'academic_supporter_id' => ['لا يمكن إنشاء باقة دعم إلا لداعم بحساب نشط'],
             ]);
         }
 
-        $price = (float) $data['price'];
+        $pricing = $this->computePricing((float) $data['price'], (float) $data['supporter_profit_percent']);
 
         $supportPackage = SupportPackage::create([
             'academic_supporter_id' => $supporter->id,
             'title' => $data['title'],
             'tier' => $data['tier'],
             'description' => $data['description'],
-            'teacher_price' => $price,
-            'platform_margin_percent' => 0,
-            'student_price' => $price,
-            'platform_revenue' => 0,
-            'status' => 'pending_approval',
-            'submitted_at' => now(),
+            ...$pricing,
+            'status' => 'active',
+            'approved_at' => now(),
         ]);
 
         $supportPackage->subjects()->sync($data['subject_ids']);
 
-        $this->audit('support_package.submitted', $supportPackage, [], ['status' => 'pending_approval']);
+        $this->audit('support_package.created_by_admin', $supportPackage, [], ['status' => 'active', 'academic_supporter_id' => $supporter->id]);
 
         return $supportPackage->fresh(['subjects']);
     }
@@ -61,14 +60,13 @@ class SupportPackageService
             ]);
         }
 
-        $price = (float) $data['price'];
+        $pricing = $this->computePricing((float) $data['price'], (float) $data['supporter_profit_percent']);
 
         $supportPackage->update([
             'title' => $data['title'],
             'tier' => $data['tier'],
             'description' => $data['description'],
-            'teacher_price' => $price,
-            'student_price' => $price,
+            ...$pricing,
         ]);
 
         $supportPackage->subjects()->sync($data['subject_ids']);
@@ -76,6 +74,23 @@ class SupportPackageService
         $this->audit('support_package.updated', $supportPackage, [], $data);
 
         return $supportPackage->fresh(['subjects']);
+    }
+
+    /**
+     * student_price هو السعر الذي يدفعه الطالب فعلياً؛ supporter_profit_percent
+     * نسبة من هذا السعر تؤول للداعم (teacher_price)، والباقي عائد المنصة.
+     */
+    private function computePricing(float $studentPrice, float $supporterProfitPercent): array
+    {
+        $teacherPrice = round($studentPrice * $supporterProfitPercent / 100, 2);
+
+        return [
+            'student_price' => $studentPrice,
+            'supporter_profit_percent' => $supporterProfitPercent,
+            'platform_margin_percent' => round(100 - $supporterProfitPercent, 2),
+            'teacher_price' => $teacherPrice,
+            'platform_revenue' => round($studentPrice - $teacherPrice, 2),
+        ];
     }
 
     public function approve(SupportPackage $supportPackage, User $admin): SupportPackage

@@ -7,6 +7,7 @@ use App\Http\Requests\SupportPackage\CreateSupportPackageRequest;
 use App\Http\Requests\SupportPackage\RejectSupportPackageRequest;
 use App\Http\Requests\SupportPackage\UpdateSupportPackageRequest;
 use App\Http\Resources\SupportPackage\SupportPackageResource;
+use App\Models\AcademicSupporter;
 use App\Models\SupportPackage;
 use Illuminate\Http\Request;
 use App\Services\SupportPackageService;
@@ -40,13 +41,14 @@ class SupportPackageController extends Controller
         return $this->success(new SupportPackageResource($supportPackage));
     }
 
+    /** الأدمن حصراً (SupportPackagePolicy::create) — يختار الداعم الذي تُربط به الباقة عبر academic_supporter_id */
     public function store(CreateSupportPackageRequest $request)
     {
-        $supporter = $request->user()->loadMissing('academicSupporter')->academicSupporter;
+        $supporter = AcademicSupporter::findOrFail($request->validated('academic_supporter_id'));
 
         $supportPackage = $this->supportPackageService->create($supporter, $request->validated());
 
-        return $this->success(new SupportPackageResource($supportPackage), 'تم إرسال باقة الدعم بانتظار مراجعة الأدمن', 201);
+        return $this->success(new SupportPackageResource($supportPackage), 'تم إنشاء باقة الدعم وربطها بالداعم بنجاح', 201);
     }
 
     public function update(UpdateSupportPackageRequest $request, SupportPackage $supportPackage)

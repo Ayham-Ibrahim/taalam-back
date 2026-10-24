@@ -36,6 +36,7 @@ class AdminAcademicSupporterResource extends JsonResource
                 'subjects' => $sp->relationLoaded('subjects') ? $sp->subjects->map(fn ($s) => ['id' => $s->id, 'name' => $s->name_ar]) : [],
                 'subjectIds' => $sp->relationLoaded('subjects') ? $sp->subjects->pluck('id') : [],
                 'studentPrice' => (float) $sp->student_price,
+                'supporterProfitPercent' => (float) $sp->supporter_profit_percent,
                 'currency' => $sp->currency,
                 'status' => $sp->status,
                 'rejectionReason' => $sp->rejection_reason,
