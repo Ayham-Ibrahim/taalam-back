@@ -18,7 +18,7 @@ class AddAcademicSupporterGalleryItemRequest extends FormRequest
                 'required',
                 'file',
                 'max:20480',
-                'mimes:pdf,jpeg,jpg,png,pptx,ppt,xlsx,xls',
+                'mimes:pdf,jpeg,jpg,png,pptx,ppt,xlsx,xls,docx,doc',
             ],
             // صورة مصغّرة اختيارية يرفعها الداعم يدوياً — بلا توليد تلقائي (راجع تعليق الهجرة)
             // jpeg/png فقط لتطابق FileStorage::storeFile('img') تماماً
