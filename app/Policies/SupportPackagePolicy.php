@@ -24,6 +24,11 @@ class SupportPackagePolicy
         return $supporter !== null && $supporter->isActive();
     }
 
+    public function update(User $user): bool
+    {
+        return $user->isAdmin();
+    }
+
     public function approve(User $user): bool
     {
         return $user->isAdmin();
