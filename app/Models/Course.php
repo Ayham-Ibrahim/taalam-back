@@ -2,8 +2,11 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 
 class Course extends Model
 {
@@ -123,10 +126,88 @@ class Course extends Model
      */
     public function isBookable(): bool
     {
-        if ($this->status !== 'active') {
-            return false;
+        return $this->status === 'active' && ! $this->hasEnded();
+    }
+
+    /**
+     * الدورة منتهية إن مضى end_date، أو بدأت كل جلساتها المعلنة ولو لم يمضِ end_date
+     * بعد (الجدول قد يكتمل قبل نهاية الفترة) — لا يبقى ما يُسجَّل فيه. نفس تعريف scopeNotEnded.
+     */
+    public function hasEnded(): bool
+    {
+        if ($this->end_date !== null && $this->end_date->toDateString() < now()->toDateString()) {
+            return true;
         }
 
-        return $this->end_date === null || $this->end_date->toDateString() >= now()->toDateString();
+        return $this->total_sessions > 0 && $this->elapsedSessions()->count() >= $this->total_sessions;
+    }
+
+    /**
+     * مقابل hasEnded() على مستوى الاستعلام. دورة لم تُنشأ جلساتها بعد (لا تسجيل فيها)
+     * يُحكم عليها بـ end_date وحده — حساب مواعيدها المخطَّطة غير ممكن في SQL.
+     */
+    public function scopeNotEnded(Builder $query): Builder
+    {
+        return $query
+            ->where(fn ($q) => $q->whereNull('end_date')->orWhereDate('end_date', '>=', now()->toDateString()))
+            ->where(fn ($q) => $q
+                ->whereDoesntHave('sessions')
+                ->orWhereHas('sessions', fn ($s) => $s
+                    ->whereColumn('class_sessions.sequence_no', '<=', 'courses.total_sessions')
+                    ->where('scheduled_at', '>', now())));
+    }
+
+    /**
+     * مواعيد جلسات الدورة المخطَّطة من start_date حتى end_date وفق course_schedules —
+     * أول total_sessions موعداً فقط بالترتيب الزمني (الجدول الأسبوعي على كامل الفترة
+     * قد يتسع لأكثر من العدد المعلن والمدفوع ثمنه). بتوقيت النظام.
+     *
+     * @return Collection<int, Carbon>
+     */
+    public function plannedSessionDates(): Collection
+    {
+        $schedules = $this->relationLoaded('schedules') ? $this->schedules : $this->schedules()->get();
+
+        if ($schedules->isEmpty() || ! $this->start_date || ! $this->end_date) {
+            return collect();
+        }
+
+        $dates = [];
+        $cursor = $this->start_date->copy();
+
+        while ($cursor->lessThanOrEqualTo($this->end_date)) {
+            foreach ($schedules as $schedule) {
+                if ((int) $cursor->dayOfWeek === (int) $schedule->day_of_week) {
+                    // start_time أُدخِل بمنطقة المركز وقت إنشاء الدورة (schedule_timezone) — لا UTC ساذجة
+                    $dates[] = Carbon::parse($cursor->toDateString(), $this->schedule_timezone ?? 'UTC')
+                        ->setTimeFromTimeString($schedule->start_time)
+                        ->setTimezone(config('app.timezone'));
+                }
+            }
+
+            $cursor->addDay();
+        }
+
+        return collect($dates)->sortBy(fn (Carbon $d) => $d->getTimestamp())->take($this->total_sessions)->values();
+    }
+
+    /**
+     * جلسات الدورة التي بدأ موعدها فعلاً — لا تُعوَّض لمن يسجّل بعدها. من جلسات
+     * class_sessions إن أُنشئت (عند أول تسجيل)، وإلا من المواعيد المخطَّطة.
+     *
+     * @return Collection<int, array{sequence_no: int, scheduled_at: Carbon}>
+     */
+    public function elapsedSessions(): Collection
+    {
+        $sessions = $this->relationLoaded('sessions') ? $this->sessions : $this->sessions()->get();
+
+        // take(total_sessions): دورات قديمة وُلِّدت لها جلسات أكثر من العدد المعلن قبل تقييد التوليد به
+        $all = $sessions->isNotEmpty()
+            ? $sessions->sortBy('sequence_no')->take($this->total_sessions)->map(fn (ClassSession $s) => ['sequence_no' => $s->sequence_no, 'scheduled_at' => $s->scheduled_at])
+            : $this->plannedSessionDates()->map(fn (Carbon $d, int $i) => ['sequence_no' => $i + 1, 'scheduled_at' => $d]);
+
+        $now = now();
+
+        return $all->filter(fn (array $s) => $s['scheduled_at']->lte($now))->values();
     }
 }

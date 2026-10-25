@@ -223,35 +223,13 @@ class EnrollmentService
             return $existing;
         }
 
-        $schedules = $course->schedules()->get();
-
-        if ($schedules->isEmpty()) {
+        if (! $course->schedules()->exists()) {
             throw ValidationException::withMessages([
                 'course' => ['لا يوجد جدول محدد لهذه الدورة بعد'],
             ]);
         }
 
-        $dates = [];
-        $cursor = $course->start_date->copy();
-
-        while ($cursor->lessThanOrEqualTo($course->end_date)) {
-            foreach ($schedules as $schedule) {
-                if ((int) $cursor->dayOfWeek === (int) $schedule->day_of_week) {
-                    // start_time أُدخِل بمنطقة المركز وقت إنشاء الدورة (Course::schedule_timezone) — لا UTC ساذجة
-                    $dates[] = Carbon::parse($cursor->toDateString(), $course->schedule_timezone ?? 'UTC')
-                        ->setTimeFromTimeString($schedule->start_time)
-                        ->setTimezone(config('app.timezone'));
-                }
-            }
-
-            $cursor->addDay();
-        }
-
-        // total_sessions هو عدد جلسات الدورة المعلن والمدفوع ثمنه — الجدول الأسبوعي على
-        // كامل الفترة قد يتسع لأكثر منه، فتؤخذ أول total_sessions موعداً فقط بالترتيب الزمني
-        $dates = collect($dates)->sortBy(fn (Carbon $d) => $d->getTimestamp())->take($course->total_sessions);
-
-        return $dates->values()->map(function (Carbon $scheduledAt, int $index) use ($course) {
+        return $course->plannedSessionDates()->map(function (Carbon $scheduledAt, int $index) use ($course) {
             return $course->sessions()->create([
                 'teacher_id' => $course->teacher_id,
                 'sequence_no' => $index + 1,
