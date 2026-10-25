@@ -19,6 +19,7 @@ class SupportPackage extends Model
         'tier',
         'description',
         'teacher_price',
+        'supporter_profit_percent',
         'platform_margin_percent',
         'student_price',
         'platform_revenue',
@@ -34,6 +35,7 @@ class SupportPackage extends Model
     {
         return [
             'teacher_price' => 'decimal:2',
+            'supporter_profit_percent' => 'decimal:2',
             'platform_margin_percent' => 'decimal:2',
             'student_price' => 'decimal:2',
             'platform_revenue' => 'decimal:2',

@@ -5,10 +5,7 @@ namespace App\Http\Resources\SupportPackage;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
-/**
- * لا فرق بين ما يراه الأدمن وما يراه الداعم الأكاديمي مالكها — بعكس الباقات
- * العادية، لا هامش منصة يُخفى (ثابت 0 دائماً ومعروف للطرفين).
- */
+/** لا فرق بين ما يراه الأدمن وما يراه الداعم الأكاديمي مالكها — لا شيء يُخفى، كلا الطرفين يرى نسبة ربح الداعم وعائد المنصة بوضوح */
 class SupportPackageResource extends JsonResource
 {
     public function toArray(Request $request): array
@@ -25,6 +22,7 @@ class SupportPackageResource extends JsonResource
             'description' => $this->description,
             'subjects' => $this->whenLoaded('subjects', fn () => $this->subjects->map(fn ($s) => ['id' => $s->id, 'name' => $s->name_ar])),
             'teacher_price' => (float) $this->teacher_price,
+            'supporter_profit_percent' => (float) $this->supporter_profit_percent,
             'platform_margin_percent' => (float) $this->platform_margin_percent,
             'student_price' => (float) $this->student_price,
             'platform_revenue' => (float) $this->platform_revenue,
