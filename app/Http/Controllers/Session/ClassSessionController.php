@@ -52,6 +52,7 @@ class ClassSessionController extends Controller
             ->when($request->filled('from'), fn ($q) => $q->where('scheduled_at', '>=', $request->date('from')))
             ->when($request->filled('to'), fn ($q) => $q->where('scheduled_at', '<=', $request->date('to')))
             ->with(self::eagerLoad())
+            ->withStudentPaidAccess($request->user())
             ->when($request->user()->isAdmin(), fn ($q) => $q->with(self::JOIN_LOGS_RELATION))
             // الافتراضي desc (الأحدث تاريخاً أولاً) يبقى كما كان لأي طرف آخر يعتمد
             // عليه ضمناً — sort=asc صريح (الأقرب موعداً أولاً) يطلبه استدعاء
@@ -72,7 +73,9 @@ class ClassSessionController extends Controller
 
         $session->load(self::eagerLoad());
 
-        if (request()->user()->isAdmin()) {
+        // سجل الانضمام للأدمن ولصاحب الجلسة (يرى من انضمّ من طلابه في صفحة تفاصيلها) — لا للطلاب
+        $user = request()->user();
+        if ($user->isAdmin() || $user->loadMissing('teacher')->teacher?->id === $session->teacher_id) {
             $session->load(self::JOIN_LOGS_RELATION);
         }
 
@@ -154,8 +157,9 @@ class ClassSessionController extends Controller
             'booking:id,package_id,student_id,status',
             'booking.package:id,title,session_format,subject_id',
             'booking.package.subject:id,name_ar',
-            'course:id,title,subject_id',
+            'course:id,title,subject_id,course_field_id',
             'course.subject:id,name_ar',
+            'course.courseField:id,name_ar',
         ];
     }
 
@@ -166,7 +170,7 @@ class ClassSessionController extends Controller
      */
     public function join(Request $request, ClassSession $session)
     {
-        $this->authorize('view', $session);
+        $this->authorize('join', $session);
 
         $result = $this->sessionService->resolveJoinUrl($session, $request->user());
 
@@ -185,7 +189,13 @@ class ClassSessionController extends Controller
      */
     public function joinRedirect(ClassSession $session, User $user)
     {
-        abort_unless(Gate::forUser($user)->allows('view', $session), 403);
+        // رابط بريد قديم لحجز بطل بعد إرساله (انتهت مهلته/أُلغي) — صفحة واضحة بدل 403 خام
+        if (Gate::forUser($user)->denies('join', $session)) {
+            return response()->view('session-join-unavailable', [
+                'message' => 'لا يمكنك الانضمام لهذه الجلسة — اشتراكك فيها غير مدفوع أو لم يعد قائماً.',
+                'platformUrl' => frontend_url('/login'),
+            ], 403);
+        }
 
         $result = $this->sessionService->resolveJoinUrl($session, $user);
 

@@ -107,9 +107,18 @@ class CourseController extends Controller
     {
         $this->authorize('disable', $course);
 
-        $course = $this->courseService->disable($course);
+        $course = $this->courseService->disable($course, byOwner: ! $request->user()->isAdmin());
 
         return $this->success($this->resourceFor($course, $request->user()), 'تم تعطيل الدورة');
+    }
+
+    public function enable(Request $request, Course $course)
+    {
+        $this->authorize('enable', $course);
+
+        $course = $this->courseService->enable($course);
+
+        return $this->success($this->resourceFor($course, $request->user()), 'تمت إعادة تفعيل الدورة');
     }
 
     public function approve(ApproveCourseRequest $request, Course $course)

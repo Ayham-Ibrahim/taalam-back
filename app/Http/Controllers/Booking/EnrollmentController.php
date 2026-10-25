@@ -29,8 +29,9 @@ class EnrollmentController extends Controller
 
         $enrollments = Enrollment::query()
             ->with([
-                'course:id,title,subject_id,total_sessions,session_duration_min',
+                'course:id,title,subject_id,course_field_id,total_sessions,session_duration_min,start_date,end_date',
                 'course.subject:id,name_ar',
+                'course.courseField:id,name_ar',
                 'course.curricula:id,name_ar',
                 'teacher:id,user_id',
                 'teacher.user:id,name,avatar_path',
@@ -39,6 +40,8 @@ class EnrollmentController extends Controller
             ])
             ->visibleTo($user)
             ->when($request->filled('student_id'), fn ($q) => $q->where('student_id', $request->integer('student_id')))
+            // مشتركو دورة بعينها — نافذة تفاصيل الدورة لدى المركز (visibleTo يقيّده بدوراته أصلاً)
+            ->when($request->filled('course_id'), fn ($q) => $q->where('course_id', $request->integer('course_id')))
             ->latest()
             ->paginate($request->integer('per_page', 20));
 
@@ -51,8 +54,9 @@ class EnrollmentController extends Controller
 
         return $this->success($enrollment->load([
             'payments',
-            'course:id,title,description,subject_id,total_sessions,session_duration_min',
+            'course:id,title,description,subject_id,course_field_id,total_sessions,session_duration_min,start_date,end_date',
             'course.subject:id,name_ar',
+            'course.courseField:id,name_ar',
             'course.curricula:id,name_ar',
             'teacher.user:id,name,avatar_path',
         ]));

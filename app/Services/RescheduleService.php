@@ -79,7 +79,8 @@ class RescheduleService
         // بطلب طالب أو معلم واحد يكسر جدول بقية الطلاب بلا أي تنسيق بينهم، ولا
         // مسار موافقة جماعي لذلك حالياً. القرار المعماري: تغيير الموعد متاح فقط
         // لجلسات الباقات الفردية.
-        if ($session->loadMissing('booking.package')->booking?->package?->session_format === 'group') {
+        // جلسات الدورة التدريبية مشتركة بين كل المسجّلين فيها — نفس منطق الباقة الجماعية
+        if ($session->course_id !== null || $session->loadMissing('booking.package')->booking?->package?->session_format === 'group') {
             throw ValidationException::withMessages([
                 'session' => ['طلبات تغيير الموعد متاحة فقط لجلسات الباقات الفردية'],
             ]);

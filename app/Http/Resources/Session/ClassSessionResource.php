@@ -17,8 +17,11 @@ class ClassSessionResource extends JsonResource
         $user = $request->user();
         $isAdmin = $user?->isAdmin() ?? false;
         $isTeacher = $isAdmin || $user?->loadMissing('teacher')->teacher?->id === $this->teacher_id;
-        $isStudent = $isAdmin || ($user?->loadMissing('student')->student
-            && $this->attendees->contains('student_id', $user->student->id));
+        // الرابط الخام يذهب لـ BBB مباشرة بلا أي فحص من المنصة، وكلمة مرور الحضور
+        // فيه مشتركة بين كل طلاب الجلسة — فيُعرض فقط لمن دفع فعلاً، وإلا نسخه صاحب
+        // حجز pending_payment ودخل به لاحقاً حتى بعد انتهاء مهلته.
+        $studentId = $user?->loadMissing('student')->student?->id;
+        $isStudent = $isAdmin || ($studentId && $this->resource->studentHasPaidAccess($studentId));
         $pendingRescheduleRequest = $this->relationLoaded('rescheduleRequests')
             ? $this->rescheduleRequests->first()
             : null;
@@ -49,7 +52,7 @@ class ClassSessionResource extends JsonResource
             'course' => $this->whenLoaded('course'),
             'attendees' => $this->whenLoaded('attendees'),
             'reschedule_requests' => $this->whenLoaded('rescheduleRequests'),
-            // تُحمَّل للأدمن فقط (ClassSessionController::eagerLoad) — غائبة كلياً عن غيره
+            // تُحمَّل للأدمن، ولصاحب الجلسة في show فقط (ClassSessionController) — غائبة كلياً عن الطلاب
             'join_logs' => $this->whenLoaded('joinLogs'),
             // هل بدأت الجلسة بعد بدء تسجيل الانضمام — وإلا فغياب سجلها لا يعني غياباً
             'join_tracked' => $this->when(

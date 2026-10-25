@@ -247,7 +247,11 @@ class EnrollmentService
             $cursor->addDay();
         }
 
-        return collect($dates)->values()->map(function (Carbon $scheduledAt, int $index) use ($course) {
+        // total_sessions هو عدد جلسات الدورة المعلن والمدفوع ثمنه — الجدول الأسبوعي على
+        // كامل الفترة قد يتسع لأكثر منه، فتؤخذ أول total_sessions موعداً فقط بالترتيب الزمني
+        $dates = collect($dates)->sortBy(fn (Carbon $d) => $d->getTimestamp())->take($course->total_sessions);
+
+        return $dates->values()->map(function (Carbon $scheduledAt, int $index) use ($course) {
             return $course->sessions()->create([
                 'teacher_id' => $course->teacher_id,
                 'sequence_no' => $index + 1,

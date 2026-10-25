@@ -41,7 +41,13 @@ class SendSessionRemindersJob implements ShouldQueue
             ->whereNull('reminder_sent_at')
             ->whereNotNull('join_url_student')
             ->whereBetween('scheduled_at', [now(), now()->addMinutes($minutesBefore)])
-            ->with(['teacher.user', 'attendees.student.user'])
+            // غير الدافع (pending_payment) وصاحب الحجز الباطل لا يستلمان رابطاً: الأول
+            // كان سيدخل به مجاناً، والثاني يصله رابط يعطيه 403 — نفس شرط بوابة join.
+            ->with([
+                'teacher.user',
+                'attendees' => fn ($a) => ClassSession::constrainToPaidAttendee($a),
+                'attendees.student.user',
+            ])
             ->get();
 
         foreach ($sessions as $session) {

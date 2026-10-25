@@ -202,6 +202,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('courses/{course}', [CourseController::class, 'update']);
     Route::post('courses/{course}/submit', [CourseController::class, 'submit']);
     Route::post('courses/{course}/disable', [CourseController::class, 'disable']);
+    Route::post('courses/{course}/enable', [CourseController::class, 'enable']);
     Route::post('courses/{course}/approve', [CourseController::class, 'approve']);
     Route::post('courses/{course}/reject', [CourseController::class, 'reject']);
 

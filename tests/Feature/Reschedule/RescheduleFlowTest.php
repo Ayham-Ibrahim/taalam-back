@@ -4,6 +4,8 @@ namespace Tests\Feature\Reschedule;
 
 use App\Models\Booking;
 use App\Models\ClassSession;
+use App\Models\Course;
+use App\Models\CourseField;
 use App\Models\Package;
 use App\Models\SessionAttendee;
 use App\Models\Student;
@@ -623,6 +625,54 @@ class RescheduleFlowTest extends TestCase
         $response = $this->as($teacherToken)->postJson("/api/class-sessions/{$session->id}/reschedule-requests", [
             'proposed_scheduled_at' => now()->addDays(6)->toDateTimeString(),
             'reason' => 'محاولة على جلسة باقة جماعية',
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJsonPath('errors.session.0', 'طلبات تغيير الموعد متاحة فقط لجلسات الباقات الفردية');
+
+        $this->assertDatabaseMissing('reschedule_requests', ['class_session_id' => $session->id]);
+    }
+
+    /** جلسات الدورة التدريبية مشتركة بين كل المسجّلين فيها — نفس منطق الباقة الجماعية */
+    public function test_cannot_request_reschedule_for_a_course_session_and_no_request_is_created(): void
+    {
+        $centerUser = User::factory()->teacher()->create();
+        $center = Teacher::create(['user_id' => $centerUser->id, 'teacher_type' => 'training_center', 'status' => 'verified']);
+        $centerToken = $centerUser->createToken('t')->plainTextToken;
+
+        $field = CourseField::create(['code' => 'rs-c-'.uniqid(), 'name_ar' => 'مجال']);
+        $course = Course::create([
+            'teacher_id' => $center->id,
+            'title' => 'دورة',
+            'course_field_id' => $field->id,
+            'start_date' => now()->addDays(1)->toDateString(),
+            'end_date' => now()->addDays(20)->toDateString(),
+            'total_sessions' => 4,
+            'max_seats' => 5,
+            'provider_price' => 100,
+            'platform_margin_percent' => 50,
+            'student_price' => 150,
+            'platform_revenue' => 50,
+            'status' => 'active',
+            'approved_at' => now(),
+            'requires_laptop' => false,
+            'materials_included' => true,
+            'has_practical_exercises' => true,
+            'sessions_recorded' => false,
+        ]);
+
+        $session = ClassSession::create([
+            'course_id' => $course->id,
+            'teacher_id' => $center->id,
+            'sequence_no' => 1,
+            'scheduled_at' => now()->addDays(5),
+            'duration_min' => 60,
+            'status' => 'scheduled',
+        ]);
+
+        $response = $this->as($centerToken)->postJson("/api/class-sessions/{$session->id}/reschedule-requests", [
+            'proposed_scheduled_at' => now()->addDays(6)->toDateTimeString(),
+            'reason' => 'محاولة على جلسة دورة',
         ]);
 
         $response->assertStatus(422)
