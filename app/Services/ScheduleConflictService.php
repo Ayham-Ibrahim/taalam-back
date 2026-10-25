@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\ClassSession;
 use App\Models\SessionAttendee;
 use App\Models\Student;
+use App\Models\Teacher;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
 
@@ -15,6 +16,8 @@ use Illuminate\Validation\ValidationException;
  * الفحص الثاني (المعلم) كان غائباً تماماً سابقاً: التحقق كان مقيَّداً بجلسات
  * الطالب نفسه فقط، فطالبان مختلفان يحجزان نفس المعلم في نفس اللحظة تماماً
  * كان يمر بلا أي منع — يزدحم جدول المعلم بجلستين متطابقتي التوقيت.
+ * استثناء: المراكز التدريبية (teacher_type=training_center) لا يُفحص تعارض جدولها،
+ * لأن دوراتها المتزامنة يقدّمها مدرّبون مختلفون.
  *
  * "قائمة فعلاً" هنا تعني جلسة بحالة scheduled/active يخص حضورَها حجزٌ أو تسجيلٌ
  * ما زال قائماً (pending_payment أو confirmed أو active) — الجلسات تُنشأ فور
@@ -41,10 +44,14 @@ class ScheduleConflictService
      */
     public function assertNoConflict(?Student $student, int $teacherId, iterable $candidateStarts, int $candidateDurationMinutes, array $excludeSessionIds = []): void
     {
+        // المركز التدريبي يدير عدة مدرّبين فتتزامن دوراته طبيعياً — لا يُفحص جدوله
+        // كجدول شخص واحد. تعارض الطالب مع جلساته (أ) يبقى مفحوصاً كالمعتاد.
+        $checkTeacher = ! Teacher::whereKey($teacherId)->where('teacher_type', 'training_center')->exists();
+
         $existingSessions = ClassSession::query()
             ->whereIn('status', self::LIVE_STATUSES)
             ->when($excludeSessionIds, fn ($q) => $q->whereNotIn('id', $excludeSessionIds))
-            ->where(function ($query) use ($student, $teacherId) {
+            ->where(function ($query) use ($student, $teacherId, $checkTeacher) {
                 // (أ) جلسة يحضرها هذا الطالب باشتراكٍ ما زال قائماً — لا حجز/تسجيل
                 //     مُلغى أو منتهية مهلته. بعد إلغاء/انتهاء الحجز يبقى صف الجلسة
                 //     في class_sessions بحالة scheduled، لكنه لم يعد التزاماً فعلياً
@@ -61,13 +68,13 @@ class ScheduleConflictService
                 )
                     // (ب) أو جلسة لهذا المعلم لم يبطل كل حضورها (طالب واحد على الأقل
                     //     باشتراك قائم)، أو جلسة دورة لا حضور مؤكَّد عليها بعد.
-                    ->orWhere(function ($q) use ($teacherId) {
+                    ->when($checkTeacher, fn ($q) => $q->orWhere(function ($q) use ($teacherId) {
                         $q->where('teacher_id', $teacherId)
                             ->where(function ($q2) {
                                 $q2->whereDoesntHave('attendees')
                                     ->orWhereHas('attendees', fn ($a) => ClassSession::constrainToLiveAttendee($a));
                             });
-                    });
+                    }));
             })
             ->get(['id', 'teacher_id', 'scheduled_at', 'duration_min']);
 
