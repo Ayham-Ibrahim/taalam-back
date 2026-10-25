@@ -52,7 +52,7 @@ class ClassSessionResource extends JsonResource
             'course' => $this->whenLoaded('course'),
             'attendees' => $this->whenLoaded('attendees'),
             'reschedule_requests' => $this->whenLoaded('rescheduleRequests'),
-            // تُحمَّل للأدمن فقط (ClassSessionController::eagerLoad) — غائبة كلياً عن غيره
+            // تُحمَّل للأدمن، ولصاحب الجلسة في show فقط (ClassSessionController) — غائبة كلياً عن الطلاب
             'join_logs' => $this->whenLoaded('joinLogs'),
             // هل بدأت الجلسة بعد بدء تسجيل الانضمام — وإلا فغياب سجلها لا يعني غياباً
             'join_tracked' => $this->when(

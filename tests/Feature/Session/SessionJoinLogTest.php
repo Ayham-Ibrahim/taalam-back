@@ -23,7 +23,7 @@ use Tests\TestCase;
 
 /**
  * سجل الانضمام (session_join_logs) يُكتب عند نجاح GET /class-sessions/{id}/join ويُعرض
- * للأدمن فقط — دون أي أثر على حالة الجلسة أو session_attendees أو رصيد الحجز.
+ * للأدمن ولصاحب الجلسة في تفاصيلها — دون أي أثر على حالة الجلسة أو session_attendees أو رصيد الحجز.
  */
 class SessionJoinLogTest extends TestCase
 {
@@ -69,7 +69,8 @@ class SessionJoinLogTest extends TestCase
         $this->assertSame(0, SessionJoinLog::count());
     }
 
-    public function test_join_logs_are_exposed_to_the_admin_only(): void
+    /** الأدمن في القائمة والتفاصيل، وصاحب الجلسة في صفحة تفاصيلها فقط — لا الطلاب ولا معلم آخر */
+    public function test_join_logs_are_exposed_to_the_admin_and_to_the_session_owner_on_its_details(): void
     {
         [$teacher, $teacherUser] = $this->createVerifiedTeacher();
         [, $session, $studentUser] = $this->createBookingWithSession($teacher, now()->addMinutes(2));
@@ -88,6 +89,13 @@ class SessionJoinLogTest extends TestCase
         $this->assertArrayNotHasKey('join_tracked', $teacherList->json('data.0'));
         $studentShow = $this->as($studentUser->createToken('t')->plainTextToken)->getJson("/api/class-sessions/{$session->id}");
         $this->assertArrayNotHasKey('join_logs', $studentShow->json('data'));
+
+        $teacherShow = $this->as($teacherUser->createToken('t')->plainTextToken)->getJson("/api/class-sessions/{$session->id}");
+        $this->assertSame('student', $teacherShow->json('data.join_logs.0.role'));
+        $this->assertTrue($teacherShow->json('data.join_tracked'));
+
+        [, $otherTeacherUser] = $this->createVerifiedTeacher();
+        $this->as($otherTeacherUser->createToken('t')->plainTextToken)->getJson("/api/class-sessions/{$session->id}")->assertForbidden();
     }
 
     public function test_the_signed_email_link_logs_the_join_and_redirects_to_bbb(): void

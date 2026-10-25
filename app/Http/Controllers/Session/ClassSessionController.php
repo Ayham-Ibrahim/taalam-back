@@ -73,7 +73,9 @@ class ClassSessionController extends Controller
 
         $session->load(self::eagerLoad());
 
-        if (request()->user()->isAdmin()) {
+        // سجل الانضمام للأدمن ولصاحب الجلسة (يرى من انضمّ من طلابه في صفحة تفاصيلها) — لا للطلاب
+        $user = request()->user();
+        if ($user->isAdmin() || $user->loadMissing('teacher')->teacher?->id === $session->teacher_id) {
             $session->load(self::JOIN_LOGS_RELATION);
         }
 
@@ -155,8 +157,9 @@ class ClassSessionController extends Controller
             'booking:id,package_id,student_id,status',
             'booking.package:id,title,session_format,subject_id',
             'booking.package.subject:id,name_ar',
-            'course:id,title,subject_id',
+            'course:id,title,subject_id,course_field_id',
             'course.subject:id,name_ar',
+            'course.courseField:id,name_ar',
         ];
     }
 

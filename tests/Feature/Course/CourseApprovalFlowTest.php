@@ -4,6 +4,8 @@ namespace Tests\Feature\Course;
 
 use App\Models\Course;
 use App\Models\CourseField;
+use App\Models\Enrollment;
+use App\Models\Student;
 use App\Models\Teacher;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -225,6 +227,136 @@ class CourseApprovalFlowTest extends TestCase
         $filtered->assertStatus(200);
         $ids = collect($filtered->json('data'))->pluck('id');
         $this->assertSame([$courseA->id], $ids->all());
+    }
+
+    public function test_admin_can_reenable_disabled_course(): void
+    {
+        [$teacher, $centerToken] = $this->createVerifiedTeacher('training_center');
+        $course = $this->createDisabledCourse($teacher, maxSeats: 10, enrolled: 3);
+
+        // صاحب الدورة لا يعيد تفعيلها — الإدارة فقط
+        $this->as($centerToken)->postJson("/api/courses/{$course->id}/enable")->assertStatus(403);
+
+        [, $adminToken] = $this->createAdmin();
+
+        $this->as($adminToken)->postJson("/api/courses/{$course->id}/enable")
+            ->assertStatus(200)
+            ->assertJsonPath('data.status', 'active');
+        $this->assertDatabaseHas('audit_logs', ['action' => 'course.enabled']);
+
+        // ليست معطّلة الآن، فلا تُعاد مرة أخرى
+        $this->as($adminToken)->postJson("/api/courses/{$course->id}/enable")->assertStatus(422);
+    }
+
+    public function test_reenabled_course_with_no_free_seats_becomes_full(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher('training_center');
+        $course = $this->createDisabledCourse($teacher, maxSeats: 2, enrolled: 2);
+
+        [, $adminToken] = $this->createAdmin();
+
+        $this->as($adminToken)->postJson("/api/courses/{$course->id}/enable")
+            ->assertStatus(200)
+            ->assertJsonPath('data.status', 'full');
+    }
+
+    public function test_training_center_can_disable_own_course_when_no_students_enrolled(): void
+    {
+        [$teacher, $centerToken] = $this->createVerifiedTeacher('training_center');
+        $course = $this->createActiveCourse($teacher);
+
+        $this->as($centerToken)->postJson("/api/courses/{$course->id}/disable")
+            ->assertStatus(200)
+            ->assertJsonPath('data.status', 'disabled');
+        $this->assertDatabaseHas('audit_logs', ['action' => 'course.disabled']);
+    }
+
+    /** طالب بانتظار الدفع يحجز مقعداً رغم أنه لم يُحسب في enrolled_count بعد */
+    public function test_training_center_cannot_disable_course_with_enrolled_or_pending_students(): void
+    {
+        foreach (['pending_payment', 'confirmed'] as $status) {
+            [$teacher, $centerToken] = $this->createVerifiedTeacher('training_center');
+            $course = $this->createActiveCourse($teacher);
+            $this->enrollStudent($course, $status);
+
+            $this->as($centerToken)->postJson("/api/courses/{$course->id}/disable")
+                ->assertStatus(422)
+                ->assertJsonPath('errors.status.0', 'لا يمكن إيقاف الدورة لوجود طلاب مشتركين فيها');
+            $this->assertSame('active', $course->fresh()->status);
+        }
+    }
+
+    public function test_training_center_can_disable_course_whose_only_enrollment_was_cancelled(): void
+    {
+        [$teacher, $centerToken] = $this->createVerifiedTeacher('training_center');
+        $course = $this->createActiveCourse($teacher);
+        $this->enrollStudent($course, 'cancelled');
+
+        $this->as($centerToken)->postJson("/api/courses/{$course->id}/disable")
+            ->assertStatus(200)
+            ->assertJsonPath('data.status', 'disabled');
+    }
+
+    public function test_admin_can_still_disable_course_with_enrolled_students(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher('training_center');
+        $course = $this->createActiveCourse($teacher);
+        $this->enrollStudent($course, 'confirmed');
+
+        [, $adminToken] = $this->createAdmin();
+
+        $this->as($adminToken)->postJson("/api/courses/{$course->id}/disable")
+            ->assertStatus(200)
+            ->assertJsonPath('data.status', 'disabled');
+    }
+
+    private function createActiveCourse(Teacher $teacher): Course
+    {
+        $course = $this->createDisabledCourse($teacher, maxSeats: 10, enrolled: 0);
+        $course->update(['status' => 'active']);
+
+        return $course;
+    }
+
+    private function enrollStudent(Course $course, string $status): void
+    {
+        $studentUser = User::factory()->student()->create();
+        $student = Student::create(['user_id' => $studentUser->id, 'education_type' => 'school']);
+
+        Enrollment::create([
+            'reference' => 'ENR-'.strtoupper(uniqid()),
+            'student_id' => $student->id,
+            'course_id' => $course->id,
+            'teacher_id' => $course->teacher_id,
+            'amount_paid' => 150,
+            'provider_amount' => 100,
+            'platform_amount' => 50,
+            'margin_percent_snapshot' => 50,
+            'status' => $status,
+        ]);
+    }
+
+    private function createDisabledCourse(Teacher $teacher, int $maxSeats, int $enrolled): Course
+    {
+        $field = CourseField::create(['code' => 'dis-'.uniqid(), 'name_ar' => 'مجال']);
+
+        return Course::create([
+            'teacher_id' => $teacher->id,
+            'title' => 'دورة معطّلة',
+            'course_field_id' => $field->id,
+            'start_date' => '2026-12-01',
+            'end_date' => '2026-12-20',
+            'total_sessions' => 5,
+            'max_seats' => $maxSeats,
+            'enrolled_count' => $enrolled,
+            'provider_price' => 100,
+            'platform_margin_percent' => 50,
+            'student_price' => 150,
+            'platform_revenue' => 50,
+            'status' => 'disabled',
+            'approved_at' => now(),
+            ...$this->courseInfoFlags(),
+        ]);
     }
 
     /** الحقول البنيوية الإلزامية (NOT NULL بلا default) — لإنشاء Course مباشرة عبر Eloquent في الاختبارات */

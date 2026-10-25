@@ -57,6 +57,33 @@ class CourseEnrollmentFlowTest extends TestCase
         ]);
     }
 
+    /** الجدول يتسع لـ6 مواعيد خلال الفترة لكن الدورة 4 جلسات — تُولَّد أول 4 فقط بالترتيب الزمني */
+    public function test_enrollment_generates_no_more_sessions_than_course_total_sessions(): void
+    {
+        [$center] = $this->createVerifiedCenter();
+
+        // الاثنين والأربعاء لثلاثة أسابيع = 6 مواعيد ممكنة، والدورة total_sessions=4
+        $start = Carbon::now()->next(1)->startOfDay();
+        $end = $start->copy()->addDays(20);
+
+        $course = $this->createActiveCourse($center, teacherPrice: 200, margin: 50, start: $start, end: $end);
+        // الأربعاء أولاً عمداً — الترتيب الزمني لا يعتمد على ترتيب إدخال الجدول
+        $course->schedules()->create(['day_of_week' => 3, 'start_time' => '09:00', 'end_time' => '10:00']);
+        $course->schedules()->create(['day_of_week' => 1, 'start_time' => '09:00', 'end_time' => '10:00']);
+
+        app(EnrollmentService::class)->initiateEnrollment($this->createStudent(), $course);
+
+        $sessions = ClassSession::where('course_id', $course->id)->orderBy('sequence_no')->get();
+
+        $this->assertCount(4, $sessions);
+        $this->assertTrue($sessions->first()->scheduled_at->isSameDay($start));
+        $this->assertTrue($sessions->last()->scheduled_at->isSameDay($start->copy()->addDays(9)));
+        $this->assertSame(
+            $sessions->pluck('scheduled_at')->map->getTimestamp()->sort()->values()->all(),
+            $sessions->pluck('scheduled_at')->map->getTimestamp()->all(),
+        );
+    }
+
     /**
      * الطالب قد يُغلق نافذة Stripe الأولى بلا إكمال الدفع — يجب أن يبقى قادراً
      * على إعادة محاولة الدفع لاحقاً بدل أن يُحرَم منها (كان EnrollmentController
@@ -231,6 +258,37 @@ class CourseEnrollmentFlowTest extends TestCase
         $ids = collect($response->json('data'))->pluck('id');
         $this->assertTrue($ids->contains($myEnrollment->id));
         $this->assertFalse($ids->contains($otherEnrollment->id));
+    }
+
+    /** نافذة تفاصيل الدورة لدى المركز تجلب مشتركي تلك الدورة فقط */
+    public function test_center_can_filter_own_enrollments_by_course_id(): void
+    {
+        [$center] = $this->createVerifiedCenter();
+        $centerToken = User::find($center->user_id)->createToken('t')->plainTextToken;
+
+        $start = Carbon::now()->next(1)->startOfDay();
+        $courseA = $this->createActiveCourse($center, teacherPrice: 100, margin: 50, start: $start, end: $start->copy()->addDays(6));
+        $courseB = $this->createActiveCourse($center, teacherPrice: 100, margin: 50, start: $start, end: $start->copy()->addDays(6));
+        $student = $this->createStudent();
+
+        $make = fn (Course $course, string $ref) => Enrollment::create([
+            'reference' => $ref,
+            'student_id' => $student->id,
+            'course_id' => $course->id,
+            'teacher_id' => $center->id,
+            'amount_paid' => 150,
+            'provider_amount' => 100,
+            'platform_amount' => 50,
+            'margin_percent_snapshot' => 50,
+            'status' => 'confirmed',
+        ]);
+        $inA = $make($courseA, 'EN-CA-'.rand(1000, 9999));
+        $inB = $make($courseB, 'EN-CB-'.rand(1000, 9999));
+
+        $ids = collect($this->as($centerToken)->getJson("/api/enrollments?course_id={$courseA->id}")->assertOk()->json('data'))->pluck('id');
+
+        $this->assertTrue($ids->contains($inA->id));
+        $this->assertFalse($ids->contains($inB->id));
     }
 
     public function test_center_can_filter_own_enrollments_by_student_id(): void
