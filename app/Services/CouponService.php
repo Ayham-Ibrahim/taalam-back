@@ -4,9 +4,11 @@ namespace App\Services;
 
 use App\Models\Booking;
 use App\Models\Coupon;
+use App\Models\Course;
 use App\Models\Package;
 use App\Models\SupportPackage;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -44,6 +46,47 @@ class CouponService
         ]);
     }
 
+    /** كوبون أدمن واحد يُطبَّق على عدة باقات — package_id/support_package_id يبقيان null، الباقات في coupon_package */
+    public function createMultiPackage(User $creator, array $data): Coupon
+    {
+        return DB::transaction(function () use ($creator, $data) {
+            $coupon = Coupon::create([
+                'code' => $this->normalizeCode($data['code'] ?? null) ?? $this->generateUniqueCode(),
+                'created_by' => $creator->id,
+                'discount_type' => $data['discount_type'],
+                'discount_value' => $data['discount_value'],
+                'max_redemptions' => $data['max_redemptions'] ?? null,
+                'redeemed_count' => 0,
+                'expires_at' => $data['expires_at'] ?? null,
+                'is_active' => true,
+            ]);
+
+            $coupon->packages()->sync($data['package_ids'] ?? []);
+            $coupon->courses()->sync($data['course_ids'] ?? []);
+
+            return $coupon->load(['packages:id,title', 'courses:id,title']);
+        });
+    }
+
+    public function updateMultiPackage(Coupon $coupon, array $data): Coupon
+    {
+        return DB::transaction(function () use ($coupon, $data) {
+            $coupon->update(array_intersect_key($data, array_flip([
+                'discount_type', 'discount_value', 'max_redemptions', 'expires_at', 'is_active',
+            ])));
+
+            if (array_key_exists('package_ids', $data)) {
+                $coupon->packages()->sync($data['package_ids'] ?? []);
+            }
+
+            if (array_key_exists('course_ids', $data)) {
+                $coupon->courses()->sync($data['course_ids'] ?? []);
+            }
+
+            return $coupon->fresh()->load(['packages:id,title', 'courses:id,title']);
+        });
+    }
+
     public function update(Coupon $coupon, array $data): Coupon
     {
         $coupon->update(array_intersect_key($data, array_flip([
@@ -63,8 +106,10 @@ class CouponService
      */
     public function validateAndReserve(string $code, Package $package): array
     {
-        $coupon = Coupon::where('package_id', $package->id)
-            ->where('code', $this->normalizeCode($code))
+        // كوبون الباقة الواحدة (package_id) أو كوبون أدمن متعدد الباقات (coupon_package) — الكود فريد عالمياً فلا تعارض
+        $coupon = Coupon::where('code', $this->normalizeCode($code))
+            ->where(fn ($q) => $q->where('package_id', $package->id)
+                ->orWhere(fn ($m) => $m->multiPackage()->whereHas('packages', fn ($p) => $p->where('packages.id', $package->id))))
             ->lockForUpdate()
             ->first();
 
@@ -82,6 +127,11 @@ class CouponService
         $discountAmount = $coupon->isPercent()
             ? round((float) $package->student_price * (float) $coupon->discount_value / 100, 2)
             : round((float) $coupon->discount_value, 2);
+        // كوبون متعدد الباقات: هامش باقة مشمولة قد يتغيّر بعد إنشاء الكوبون (إعادة اعتماد) —
+        // الخصم لا يتجاوز حصة المنصة أبداً كي لا يمس مستحق المعلم
+        if ($coupon->isMultiPackage()) {
+            $discountAmount = min($discountAmount, round((float) $package->platform_revenue, 2));
+        }
         // مضمونة ≥ 0 لأن الخصم (نسبةً أو مبلغاً) لا يتجاوز platform_revenue دائماً
         // (مفروض وقت إنشاء/تعديل الكوبون — راجع CreateCouponRequest/UpdateCouponRequest)
         $platformAmount = max(0, round($package->platform_revenue - $discountAmount, 2));
@@ -132,6 +182,48 @@ class CouponService
             'coupon' => $coupon,
             'discountAmount' => min($discountAmount, $price),
             'amountPaid' => $amountPaid,
+        ];
+    }
+
+    /**
+     * يوازي validateAndReserve() لكن لتسجيل في دورة مركز تدريبي — فقط كوبونات الأدمن
+     * متعددة الباقات التي تشمل هذه الدورة (coupon_course). الخصم من حصة المنصة فقط،
+     * فمستحق المركز (provider_amount) لا يتأثر.
+     *
+     * @return array{coupon: Coupon, discountAmount: float, providerAmount: float, platformAmount: float, amountPaid: float}
+     */
+    public function validateAndReserveForCourse(string $code, Course $course): array
+    {
+        $coupon = Coupon::where('code', $this->normalizeCode($code))
+            ->multiPackage()
+            ->whereHas('courses', fn ($c) => $c->where('courses.id', $course->id))
+            ->lockForUpdate()
+            ->first();
+
+        if (! $coupon) {
+            throw ValidationException::withMessages(['coupon_code' => ['كود الخصم غير صحيح لهذه الدورة.']]);
+        }
+
+        if (! $coupon->isRedeemable()) {
+            throw ValidationException::withMessages(['coupon_code' => ['هذا الكود لم يعد صالحاً (منتهٍ أو معطَّل أو استُنفِد).']]);
+        }
+
+        $coupon->increment('redeemed_count');
+
+        $platformRevenue = round((float) $course->platform_revenue, 2);
+        $providerAmount = round($course->student_price - $course->platform_revenue, 2);
+        $discountAmount = $coupon->isPercent()
+            ? round((float) $course->student_price * (float) $coupon->discount_value / 100, 2)
+            : round((float) $coupon->discount_value, 2);
+        $discountAmount = min($discountAmount, $platformRevenue);
+        $platformAmount = round($platformRevenue - $discountAmount, 2);
+
+        return [
+            'coupon' => $coupon,
+            'discountAmount' => $discountAmount,
+            'providerAmount' => $providerAmount,
+            'platformAmount' => $platformAmount,
+            'amountPaid' => round($providerAmount + $platformAmount, 2),
         ];
     }
 

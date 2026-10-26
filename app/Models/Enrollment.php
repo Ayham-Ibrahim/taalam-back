@@ -18,10 +18,12 @@ class Enrollment extends Model
         'reference',
         'student_id',
         'course_id',
+        'coupon_id',
         'teacher_id',
         'amount_paid',
         'provider_amount',
         'platform_amount',
+        'discount_amount',
         'margin_percent_snapshot',
         'currency',
         'policy_accepted_at',
@@ -41,6 +43,7 @@ class Enrollment extends Model
             'amount_paid' => 'decimal:2',
             'provider_amount' => 'decimal:2',
             'platform_amount' => 'decimal:2',
+            'discount_amount' => 'decimal:2',
             'margin_percent_snapshot' => 'decimal:2',
             'policy_accepted_at' => 'datetime',
             'is_manual' => 'boolean',
@@ -53,6 +56,11 @@ class Enrollment extends Model
     public function student()
     {
         return $this->belongsTo(Student::class);
+    }
+
+    public function coupon()
+    {
+        return $this->belongsTo(Coupon::class);
     }
 
     public function course()

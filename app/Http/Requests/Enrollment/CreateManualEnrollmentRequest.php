@@ -17,6 +17,7 @@ class CreateManualEnrollmentRequest extends FormRequest
         return [
             'student_id' => ['required', 'integer', 'exists:students,id'],
             'reason' => ['required', 'string', 'max:500'],
+            'coupon_code' => ['nullable', 'string', 'max:30'],
         ];
     }
 }

@@ -39,6 +39,33 @@ class Coupon extends Model
         return $this->belongsTo(Package::class);
     }
 
+    /** باقات كوبون الأدمن متعدد الباقات فقط (package_id و support_package_id كلاهما null له) */
+    public function packages()
+    {
+        return $this->belongsToMany(Package::class)->withTimestamps();
+    }
+
+    /** دورات المراكز التدريبية المشمولة بكوبون الأدمن متعدد الباقات */
+    public function courses()
+    {
+        return $this->belongsToMany(Course::class)->withTimestamps();
+    }
+
+    public function enrollments()
+    {
+        return $this->hasMany(Enrollment::class);
+    }
+
+    public function isMultiPackage(): bool
+    {
+        return $this->package_id === null && $this->support_package_id === null;
+    }
+
+    public function scopeMultiPackage($query)
+    {
+        return $query->whereNull('package_id')->whereNull('support_package_id');
+    }
+
     public function supportPackage()
     {
         return $this->belongsTo(SupportPackage::class);

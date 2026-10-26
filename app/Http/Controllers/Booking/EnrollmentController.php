@@ -68,7 +68,9 @@ class EnrollmentController extends Controller
 
         $student = $request->user()->loadMissing('student')->student;
 
-        $enrollment = $this->enrollmentService->initiateEnrollment($student, $course);
+        $request->validate(['coupon_code' => ['nullable', 'string', 'max:30']]);
+
+        $enrollment = $this->enrollmentService->initiateEnrollment($student, $course, $request->input('coupon_code'));
         $checkoutUrl = $this->paymentService->createCheckoutSessionForEnrollment($enrollment);
 
         return $this->success([
@@ -95,6 +97,22 @@ class EnrollmentController extends Controller
         return $this->success(['checkout_url' => $checkoutUrl]);
     }
 
+    /** الطالب يطبّق كود خصم على تسجيله المعلَّق قبل إكمال الدفع */
+    public function applyCoupon(Request $request, Enrollment $enrollment)
+    {
+        abort_unless($request->user()->loadMissing('student')->student?->id === $enrollment->student_id, 403);
+
+        $data = $request->validate(['coupon_code' => ['required', 'string', 'max:30']]);
+
+        $enrollment = $this->enrollmentService->applyCoupon(
+            $enrollment,
+            $data['coupon_code'],
+            fn ($payment) => $this->paymentService->discardOpenCheckoutSession($payment),
+        );
+
+        return $this->success($enrollment, 'تم تطبيق كود الخصم');
+    }
+
     /** تنزيل فاتورة التسجيل كملف PDF — لا فاتورة قبل إتمام الدفع. */
     public function downloadInvoice(Request $request, Enrollment $enrollment)
     {
@@ -118,6 +136,7 @@ class EnrollmentController extends Controller
             $course,
             $request->user(),
             $request->validated('reason'),
+            $request->validated('coupon_code'),
         );
 
         return $this->success($enrollment, 'تم إنشاء التسجيل اليدوي بنجاح', 201);

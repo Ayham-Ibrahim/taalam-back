@@ -23,15 +23,16 @@ class EnrollmentService
     public function __construct(
         private readonly SettingsService $settings,
         private readonly ScheduleConflictService $conflicts,
+        private readonly CouponService $coupons,
     ) {}
 
-    public function initiateEnrollment(Student $student, Course $course): Enrollment
+    public function initiateEnrollment(Student $student, Course $course, ?string $couponCode = null): Enrollment
     {
         $this->assertCourseEnrollable($course);
         $this->assertNotAlreadyEnrolled($student, $course);
 
-        return DB::transaction(function () use ($student, $course) {
-            $enrollment = $this->createEnrollmentRecord($student, $course);
+        return DB::transaction(function () use ($student, $course, $couponCode) {
+            $enrollment = $this->createEnrollmentRecord($student, $course, $this->resolveCouponOverrides($couponCode, $course));
 
             // courseSessionsFor() تُنشئ جلسات الدورة (مرة واحدة، مملوكة للدورة لا
             // للطالب) أو تُعيد الموجودة — الالتزام الفعلي بالطالب يحدث في حلقة
@@ -57,20 +58,20 @@ class EnrollmentService
         });
     }
 
-    public function createManualEnrollment(Student $student, Course $course, User $admin, string $reason): Enrollment
+    public function createManualEnrollment(Student $student, Course $course, User $admin, string $reason, ?string $couponCode = null): Enrollment
     {
         $this->assertCourseEnrollable($course);
         $this->assertNotAlreadyEnrolled($student, $course);
 
-        return DB::transaction(function () use ($student, $course, $admin, $reason) {
-            $enrollment = $this->createEnrollmentRecord($student, $course, [
+        return DB::transaction(function () use ($student, $course, $admin, $reason, $couponCode) {
+            $enrollment = $this->createEnrollmentRecord($student, $course, array_merge([
                 'is_manual' => true,
                 'created_by_admin_id' => $admin->id,
                 'manual_reason' => $reason,
                 'status' => 'confirmed',
                 'confirmed_at' => now(),
                 'hold_expires_at' => null,
-            ]);
+            ], $this->resolveCouponOverrides($couponCode, $course)));
 
             $sessions = $this->courseSessionsFor($course);
             // $sessions قد تكون موجودة مسبقاً (تسجيل ثانٍ فما فوق لنفس الدورة) —
@@ -96,6 +97,43 @@ class EnrollmentService
                 'student_id' => $student->id,
                 'course_id' => $course->id,
             ], $reason, $admin->id);
+
+            return $enrollment->fresh();
+        });
+    }
+
+    /**
+     * تطبيق كوبون على تسجيل قائم بانتظار الدفع (من صفحة "أكمل الدفع"). $beforeApply
+     * يستقبل سطر الدفع المعلَّق ويُستدعى بعد نجاح حجز الكوبون وقبل تعديل المبالغ —
+     * يُمرَّر من الكنترولر لإغلاق جلسة Stripe القديمة (PaymentService) دون اعتماد
+     * دائري بين الخدمتين؛ أي استثناء منه يُلغي حجز الكوبون مع المعاملة كلها.
+     */
+    public function applyCoupon(Enrollment $enrollment, string $couponCode, ?callable $beforeApply = null): Enrollment
+    {
+        return DB::transaction(function () use ($enrollment, $couponCode, $beforeApply) {
+            $enrollment = Enrollment::whereKey($enrollment->id)->lockForUpdate()->firstOrFail();
+
+            if ($enrollment->status !== 'pending_payment' || ($enrollment->hold_expires_at && $enrollment->hold_expires_at->isPast())) {
+                throw ValidationException::withMessages(['coupon_code' => ['هذا التسجيل لم يعد بانتظار الدفع.']]);
+            }
+
+            if ($enrollment->coupon_id !== null) {
+                throw ValidationException::withMessages(['coupon_code' => ['تم تطبيق كوبون على هذا التسجيل مسبقاً.']]);
+            }
+
+            $payment = $enrollment->payments()->where('status', 'pending')->latest()->firstOrFail();
+            $overrides = $this->resolveCouponOverrides($couponCode, $enrollment->course);
+
+            if ($beforeApply) {
+                $beforeApply($payment);
+            }
+
+            $enrollment->update($overrides);
+            $payment->update([
+                'amount' => $enrollment->amount_paid,
+                'provider_amount' => $enrollment->provider_amount,
+                'platform_amount' => $enrollment->platform_amount,
+            ]);
 
             return $enrollment->fresh();
         });
@@ -180,6 +218,29 @@ class EnrollmentService
             'status' => 'pending_payment',
             'hold_expires_at' => now()->addMinutes((int) $this->settings->get('booking_payment_hold_minutes', 15)),
         ], $overrides));
+    }
+
+    /**
+     * نفس BookingService::resolveCouponOverrides — بلا كود لا يتغيّر شيء، بكود يُحجز
+     * استخدام الكوبون داخل نفس المعاملة وتُستبدل المبالغ المشتقة من الدورة.
+     *
+     * @return array<string, mixed>
+     */
+    private function resolveCouponOverrides(?string $couponCode, Course $course): array
+    {
+        if (! $couponCode) {
+            return [];
+        }
+
+        $result = $this->coupons->validateAndReserveForCourse($couponCode, $course);
+
+        return [
+            'coupon_id' => $result['coupon']->id,
+            'discount_amount' => $result['discountAmount'],
+            'amount_paid' => $result['amountPaid'],
+            'provider_amount' => $result['providerAmount'],
+            'platform_amount' => $result['platformAmount'],
+        ];
     }
 
     private function createPendingPayment(Enrollment $enrollment): Payment
