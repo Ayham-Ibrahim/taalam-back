@@ -130,6 +130,22 @@ class BookingController extends Controller
         return $this->success(['checkout_url' => $checkoutUrl]);
     }
 
+    /** الطالب يطبّق كود خصم على حجزه المعلَّق قبل إكمال الدفع */
+    public function applyCoupon(Request $request, Booking $booking)
+    {
+        abort_unless($request->user()->loadMissing('student')->student?->id === $booking->student_id, 403);
+
+        $data = $request->validate(['coupon_code' => ['required', 'string', 'max:30']]);
+
+        $booking = $this->bookingService->applyCoupon(
+            $booking,
+            $data['coupon_code'],
+            fn ($payment) => $this->paymentService->discardOpenCheckoutSession($payment),
+        );
+
+        return $this->success($booking, 'تم تطبيق كود الخصم');
+    }
+
     public function joinGroup(Request $request, Package $package)
     {
         $this->authorize('create', Booking::class);

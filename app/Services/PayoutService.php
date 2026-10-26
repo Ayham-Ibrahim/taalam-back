@@ -52,7 +52,10 @@ class PayoutService
         $items = [];
 
         foreach ($sessions as $session) {
-            $amount = $amounts[$session->id] ?? 0.0;
+            // نسبة الحضور التلقائي المثبَّتة عند انتهاء الجلسة (SessionService::completeEndedSessions):
+            // جزئية عند غياب الطالب، صفر عند غياب المعلم. NULL = جلسة لم تُقيَّم (قبل الحضور التلقائي) → كاملة
+            $percent = $session->teacher_payout_percent === null ? 100.0 : (float) $session->teacher_payout_percent;
+            $amount = ($amounts[$session->id] ?? 0.0) * $percent / 100;
 
             if ($amount <= 0) {
                 continue;

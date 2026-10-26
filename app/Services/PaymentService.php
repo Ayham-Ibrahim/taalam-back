@@ -280,6 +280,38 @@ class PaymentService
     }
 
     /**
+     * تُستدعى قبل تغيير مبلغ طلب معلَّق (تطبيق كوبون لاحقاً) — جلسة Stripe المفتوحة
+     * تحمل المبلغ القديم، فتُغلَق (expire) كي لا تُعاد عبر reusableCheckoutUrl ولا
+     * تبقى قابلة للدفع بالسعر قبل الخصم. جلسة مكتملة = الدفع تم فعلاً، فيُرفض التعديل.
+     */
+    public function discardOpenCheckoutSession(Payment $payment): void
+    {
+        if (! $payment->stripe_session_id) {
+            return;
+        }
+
+        try {
+            $session = $this->stripe()->checkout->sessions->retrieve($payment->stripe_session_id);
+        } catch (InvalidRequestException) {
+            $payment->update(['stripe_session_id' => null]);
+
+            return;
+        }
+
+        if ($session->status === CheckoutSession::STATUS_COMPLETE) {
+            throw ValidationException::withMessages([
+                'coupon_code' => ['تم استلام الدفع ويجري تأكيده — لا يمكن تطبيق كوبون الآن'],
+            ]);
+        }
+
+        if ($session->status === CheckoutSession::STATUS_OPEN) {
+            $this->stripe()->checkout->sessions->expire($session->id);
+        }
+
+        $payment->update(['stripe_session_id' => null]);
+    }
+
+    /**
      * جلسة دفع واحدة مفتوحة لكل سطر دفع: الضغط على "ادفع" مجدداً يُعيد نفس الرابط
      * بدل إنشاء جلسة جديدة تمسح القديمة (التي تبقى قابلة للدفع عند Stripe). null =
      * لا جلسة سابقة صالحة، فتُنشأ جديدة.

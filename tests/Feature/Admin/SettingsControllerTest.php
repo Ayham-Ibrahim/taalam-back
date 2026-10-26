@@ -27,8 +27,10 @@ class SettingsControllerTest extends TestCase
 
         $list = $this->as($token)->getJson('/api/admin/settings');
         $list->assertStatus(200);
-        $this->assertEquals(60, $list->json('data.0.value'));
-        $this->assertSame('integer', $list->json('data.0.type'));
+        // بعض الإعدادات تُدرج عبر migrations — لا يصح افتراض أن هذا أول سطر
+        $row = collect($list->json('data'))->firstWhere('key', 'platform_margin_percent_default');
+        $this->assertEquals(60, $row['value']);
+        $this->assertSame('integer', $row['type']);
 
         $update = $this->as($token)->putJson('/api/admin/settings/platform_margin_percent_default', ['value' => 65]);
         $update->assertStatus(200);

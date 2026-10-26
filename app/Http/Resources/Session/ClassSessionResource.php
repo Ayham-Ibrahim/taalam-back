@@ -36,6 +36,9 @@ class ClassSessionResource extends JsonResource
             'duration_min' => $this->duration_min,
             'original_scheduled_at' => $this->original_scheduled_at,
             'status' => $this->status,
+            // داخلي للأدمن فقط (ClassSession::$hidden) — لا أثر ظاهر للطالب/المعلم
+            'attendance_outcome' => $this->when($isAdmin, fn () => $this->attendance_outcome),
+            'teacher_payout_percent' => $this->when($isAdmin, fn () => $this->teacher_payout_percent),
             'started_at' => $this->started_at,
             'ended_at' => $this->ended_at,
             'cancellation_reason' => $this->cancellation_reason,

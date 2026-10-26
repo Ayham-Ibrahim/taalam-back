@@ -57,9 +57,11 @@ class TeacherSearchController extends Controller
                 $q->whereHas('majors', fn ($mq) => $mq->where('majors.id', $majorId));
             })
             // مجال الدورة يُستنتَج من دورات المركز الظاهرة للطلاب فعلياً، لا من
-            // حقل بالملف الشخصي — المركز قد يقدّم دورات بعدة مجالات.
+            // حقل بالملف الشخصي — المركز قد يقدّم دورات بعدة مجالات. الدورة
+            // المنتهية لا تُحتسَب (نظير bookable() للباقات).
             ->when($filters['course_field_id'] ?? null, function ($q, $fieldId) {
                 $q->whereHas('courses', fn ($cq) => $cq->whereIn('status', Course::PUBLIC_STATUSES)
+                    ->notEnded()
                     ->where('course_field_id', $fieldId));
             })
             // فحص واحد مشترك للحدَّين معاً — لا نداءين مستقلَّين (كانا سابقاً

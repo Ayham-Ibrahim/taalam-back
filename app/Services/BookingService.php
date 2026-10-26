@@ -228,6 +228,41 @@ class BookingService
     }
 
     /**
+     * تطبيق كوبون على حجز قائم بانتظار الدفع (من صفحة "أكمل الدفع") — نفس
+     * EnrollmentService::applyCoupon تماماً؛ $beforeApply يغلق جلسة Stripe القديمة.
+     */
+    public function applyCoupon(Booking $booking, string $couponCode, ?callable $beforeApply = null): Booking
+    {
+        return DB::transaction(function () use ($booking, $couponCode, $beforeApply) {
+            $booking = Booking::whereKey($booking->id)->lockForUpdate()->firstOrFail();
+
+            if ($booking->status !== 'pending_payment' || ($booking->hold_expires_at && $booking->hold_expires_at->isPast())) {
+                throw ValidationException::withMessages(['coupon_code' => ['هذا الحجز لم يعد بانتظار الدفع.']]);
+            }
+
+            if ($booking->coupon_id !== null) {
+                throw ValidationException::withMessages(['coupon_code' => ['تم تطبيق كوبون على هذا الحجز مسبقاً.']]);
+            }
+
+            $payment = $booking->payments()->where('status', 'pending')->latest()->firstOrFail();
+            $overrides = $this->resolveCouponOverrides($couponCode, $booking->package);
+
+            if ($beforeApply) {
+                $beforeApply($payment);
+            }
+
+            $booking->update($overrides);
+            $payment->update([
+                'amount' => $booking->amount_paid,
+                'provider_amount' => $booking->teacher_amount,
+                'platform_amount' => $booking->platform_amount,
+            ]);
+
+            return $booking->fresh();
+        });
+    }
+
+    /**
      * الحجوزات/التسجيلات المعلَّقة للدفع التي انقضت مهلتها المؤقتة (hold_expires_at)
      * دون إتمام الدفع — تُحوَّل نهائياً إلى expired (وللتسجيلات cancelled لغياب قيمة
      * expired في enum الخاص بها). مستخرَجة من ExpireStaleBookingsJob كي تُستدعى
@@ -251,11 +286,21 @@ class BookingService
         // لا دفع اكتمل لهذه الحجوزات — أي كوبونات حُجزت عند إنشائها تُعاد دفعة واحدة
         $this->coupons->releaseMany($staleCouponIds);
 
+        $staleEnrollmentCouponIds = Enrollment::where('status', 'pending_payment')
+            ->whereNotNull('hold_expires_at')
+            ->where('hold_expires_at', '<', now())
+            ->whereNotNull('coupon_id')
+            ->pluck('coupon_id')
+            ->all();
+
         // enrollments.status لا تملك قيمة 'expired' — أقرب حالة متاحة لدفع لم يكتمل هي 'cancelled'
         Enrollment::where('status', 'pending_payment')
             ->whereNotNull('hold_expires_at')
             ->where('hold_expires_at', '<', now())
             ->update(['status' => 'cancelled']);
+
+        // نفس إعادة كوبونات الحجوزات أعلاه — كوبون أدمن متعدد الباقات قد يكون حُجز لتسجيل دورة
+        $this->coupons->releaseMany($staleEnrollmentCouponIds);
 
         return $expired;
     }

@@ -43,6 +43,22 @@ class StudentCourseResource extends JsonResource
             'status' => $this->status,
             'curricula' => $this->whenLoaded('curricula'),
             'schedules' => $this->whenLoaded('schedules'),
+            // جلسات بدأ موعدها — لا تُعوَّض لمن يسجّل الآن (تُعرض قبل التسجيل)
+            'elapsed_sessions' => $this->when(
+                $this->relationLoaded('sessions'),
+                fn () => $this->elapsedSessions()->map(fn (array $s) => [
+                    'sequence_no' => $s['sequence_no'],
+                    'scheduled_at' => $s['scheduled_at']->toIso8601String(),
+                ]),
+            ),
+            // اشتراك الطالب الحالي (إن وُجد) — null للزائر أو لغير المشترك
+            'my_enrollment' => $this->when(
+                $this->relationLoaded('myEnrollment'),
+                fn () => $this->myEnrollment ? [
+                    'id' => $this->myEnrollment->id,
+                    'status' => $this->myEnrollment->status,
+                ] : null,
+            ),
         ];
     }
 }

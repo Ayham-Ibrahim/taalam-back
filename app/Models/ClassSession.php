@@ -24,6 +24,8 @@ class ClassSession extends Model
         'reminder_sent_at',
         'recording_url',
         'status',
+        'attendance_outcome',
+        'teacher_payout_percent',
         'started_at',
         'ended_at',
         'cancellation_reason',
@@ -32,9 +34,32 @@ class ClassSession extends Model
         'teacher_notes',
     ];
 
+    /**
+     * نتيجة الحضور التلقائي ونسبة مستحق المعلم شأن داخلي للأدمن والمستحقات — لا تظهر
+     * للطالب/المعلم في أي استجابة تُسلسِل الجلسة كاملة (علاقات sessions داخل الحجز مثلاً).
+     * ClassSessionResource يضيفها صراحة للأدمن فقط.
+     */
+    protected $hidden = [
+        'attendance_outcome',
+        'teacher_payout_percent',
+    ];
+
+    /** دخل المعلم وطالب واحد على الأقل — مستحق كامل */
+    public const OUTCOME_ATTENDED = 'attended';
+
+    /** دخل المعلم ولم يدخل أي طالب — نسبة التعويض من الإعداد */
+    public const OUTCOME_STUDENT_NO_SHOW = 'student_no_show';
+
+    /** لم يدخل المعلم — لا مستحق */
+    public const OUTCOME_TEACHER_ABSENT = 'teacher_absent';
+
+    /** بدأت قبل بدء تسجيل الانضمام (SessionJoinLog::trackingStartedAt) — لا دليل حضور، تُحتسب كاملة */
+    public const OUTCOME_UNTRACKED = 'untracked';
+
     protected function casts(): array
     {
         return [
+            'teacher_payout_percent' => 'decimal:2',
             'scheduled_at' => 'datetime',
             'original_scheduled_at' => 'datetime',
             'started_at' => 'datetime',

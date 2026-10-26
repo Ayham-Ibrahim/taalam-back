@@ -6,6 +6,7 @@ use App\Jobs\CreateBbbRoomJob;
 use App\Models\Booking;
 use App\Models\ClassSession;
 use App\Models\SessionAttendee;
+use App\Models\SessionJoinLog;
 use App\Models\User;
 use App\Traits\LogsAuditEvents;
 use Illuminate\Support\Carbon;
@@ -318,13 +319,70 @@ class SessionService
      * مكتملة" لأن لا جلسة تحمل هذه القيمة فعلياً)، تقييم الجلسة (ReviewService)،
      * ومنع تغيير موعد جلسة منتهية (RescheduleService، الذي أضاف فحصاً زمنياً
      * مستقلاً تحسّباً لهذا بالضبط). تُستدعى دورياً (CompleteEndedSessionsJob).
+     *
+     * الحالة تبقى 'completed' لكل جلسة منتهية كما كانت (لا أثر ظاهر للطالب/المعلم)، لكن
+     * تُحسم معها نتيجة الحضور التلقائي من session_join_logs ونسبة مستحق المعلم منها
+     * (راجع attendanceOutcome) — تُثبَّت النسبة لحظتها فلا يغيّر تعديل الإعداد لاحقاً
+     * جلسات سابقة. سجل الانضمام لا يُكتب إلا ضمن نافذة الجلسة (resolveJoinUrl)، فهو
+     * نهائي بمجرد انتهاء وقتها.
      */
     public function completeEndedSessions(): int
     {
-        return ClassSession::query()
+        $trackedSince = SessionJoinLog::trackingStartedAt();
+        $noShowPercent = (float) $this->settings->get('student_no_show_teacher_payout_percent', 50);
+        $completed = 0;
+
+        ClassSession::query()
             ->where('status', 'scheduled')
             ->whereRaw('DATE_ADD(scheduled_at, INTERVAL duration_min MINUTE) < ?', [now()])
-            ->update(['status' => 'completed']);
+            ->with('joinLogs')
+            ->chunkById(200, function ($sessions) use ($trackedSince, $noShowPercent, &$completed) {
+                foreach ($sessions as $session) {
+                    $outcome = $this->attendanceOutcome($session, $trackedSince);
+
+                    $completed += ClassSession::whereKey($session->id)
+                        ->where('status', 'scheduled')
+                        ->update([
+                            'status' => 'completed',
+                            'attendance_outcome' => $outcome,
+                            'teacher_payout_percent' => match ($outcome) {
+                                ClassSession::OUTCOME_STUDENT_NO_SHOW => $noShowPercent,
+                                ClassSession::OUTCOME_TEACHER_ABSENT => 0,
+                                ClassSession::OUTCOME_UNTRACKED => null,
+                                default => 100,
+                            },
+                        ]);
+                }
+            });
+
+        return $completed;
+    }
+
+    /**
+     * الحضور التلقائي فقط: "دخل" = له سجل في session_join_logs آخر انضمام فيه ضمن نافذة
+     * الجلسة الحالية (يُستبعد سجل من موعد سابق قبل تغيير الموعد). attendance اليدوي
+     * (ومنه excused) لا يدخل هنا — إلغاء الطالب الفعلي يتم بتغيير موعد الجلسة عبر الأدمن.
+     */
+    private function attendanceOutcome(ClassSession $session, ?Carbon $trackedSince): string
+    {
+        if ($trackedSince === null || $session->scheduled_at->lt($trackedSince)) {
+            return ClassSession::OUTCOME_UNTRACKED;
+        }
+
+        $windowStart = $session->scheduled_at->clone()->subMinutes(self::EARLY_JOIN_MINUTES);
+        $windowEnd = $session->scheduled_at->clone()->addMinutes($session->duration_min);
+
+        $joined = $session->joinLogs->filter(
+            fn (SessionJoinLog $log) => $log->last_joined_at->between($windowStart, $windowEnd)
+        );
+
+        if (! $joined->contains('role', 'teacher')) {
+            return ClassSession::OUTCOME_TEACHER_ABSENT;
+        }
+
+        return $joined->contains('role', 'student')
+            ? ClassSession::OUTCOME_ATTENDED
+            : ClassSession::OUTCOME_STUDENT_NO_SHOW;
     }
 
     /**

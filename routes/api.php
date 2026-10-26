@@ -13,6 +13,7 @@ use App\Http\Controllers\Booking\BookingController;
 use App\Http\Controllers\Booking\EnrollmentController;
 use App\Http\Controllers\Complaint\ComplaintController;
 use App\Http\Controllers\Coupon\CouponController;
+use App\Http\Controllers\Coupon\MultiPackageCouponController;
 use App\Http\Controllers\Coupon\SupportPackageCouponController;
 use App\Http\Controllers\Course\CourseController;
 use App\Http\Controllers\FavoriteController;
@@ -187,6 +188,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('packages/{package}/coupons', [CouponController::class, 'store']);
     Route::put('coupons/{coupon}', [CouponController::class, 'update']);
     Route::delete('coupons/{coupon}', [CouponController::class, 'destroy']);
+    // كوبونات الأدمن متعددة الباقات — الحذف عبر DELETE coupons/{coupon} أعلاه
+    Route::get('admin/multi-package-coupons', [MultiPackageCouponController::class, 'index']);
+    Route::post('admin/multi-package-coupons', [MultiPackageCouponController::class, 'store']);
+    Route::put('admin/multi-package-coupons/{coupon}', [MultiPackageCouponController::class, 'update']);
     Route::get('support-packages/{supportPackage}/coupons', [SupportPackageCouponController::class, 'index']);
     Route::post('support-packages/{supportPackage}/coupons', [SupportPackageCouponController::class, 'store']);
 
@@ -214,6 +219,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('bookings/{booking}/approve', [BookingController::class, 'approveRequest']);
     Route::post('bookings/{booking}/reject', [BookingController::class, 'rejectRequest']);
     Route::post('bookings/{booking}/checkout', [BookingController::class, 'checkout']);
+    Route::post('bookings/{booking}/coupon', [BookingController::class, 'applyCoupon']);
     Route::get('bookings/{booking}/invoice', [BookingController::class, 'downloadInvoice']);
     Route::delete('bookings/{booking}', [BookingController::class, 'destroy']);
 
@@ -222,6 +228,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('courses/{course}/enrollments', [EnrollmentController::class, 'store']);
     Route::post('courses/{course}/enrollments/manual', [EnrollmentController::class, 'createManual']);
     Route::post('enrollments/{enrollment}/checkout', [EnrollmentController::class, 'checkout']);
+    Route::post('enrollments/{enrollment}/coupon', [EnrollmentController::class, 'applyCoupon']);
     Route::get('enrollments/{enrollment}/invoice', [EnrollmentController::class, 'downloadInvoice']);
 
     Route::get('reschedule-requests', [RescheduleRequestController::class, 'index']);

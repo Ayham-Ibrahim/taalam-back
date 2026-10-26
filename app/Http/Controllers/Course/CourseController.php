@@ -10,12 +10,15 @@ use App\Http\Requests\Course\UpdateCourseRequest;
 use App\Http\Resources\Course\AdminCourseResource;
 use App\Http\Resources\Course\StudentCourseResource;
 use App\Http\Resources\Course\TeacherCourseResource;
+use App\Models\ClassSession;
 use App\Models\Course;
+use App\Models\Enrollment;
 use App\Models\Teacher;
 use App\Models\User;
 use App\Services\CourseApprovalService;
 use App\Services\CourseService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 
 class CourseController extends Controller
 {
@@ -62,20 +65,52 @@ class CourseController extends Controller
 
     /**
      * تصفح عام لدورات مركز موثّق النشطة فقط (للتسجيل) — بيانات غير حساسة، بلا Policy
-     * خاص، بنفس منطق PackageController::indexForTeacher. المركز غير الموثّق لا تظهر دوراته.
+     * خاص، بنفس منطق PackageController::indexForTeacher. المركز غير الموثّق لا تظهر دوراته،
+     * ولا الدورات المنتهية (Course::hasEnded) — الطالب المشترك يجدها في لوحته.
      */
-    public function indexForTeacher(Teacher $teacher)
+    public function indexForTeacher(Request $request, Teacher $teacher)
     {
         abort_unless($teacher->isVerified(), 404);
 
         $courses = Course::query()
             ->where('teacher_id', $teacher->id)
             ->where('status', 'active')
-            ->with(['courseField:id,name_ar', 'schedules'])
+            ->notEnded()
+            ->with(['courseField:id,name_ar', 'schedules', 'sessions:id,course_id,sequence_no,scheduled_at'])
             ->latest()
             ->paginate(20);
 
+        // notEnded() لا يرى المواعيد المخطَّطة لدورة بلا جلسات بعد — hasEnded() يُكمل الفحص
+        $courses->setCollection($courses->getCollection()->reject(fn (Course $course) => $course->hasEnded())->values());
+
+        $this->attachMyEnrollments($request, $courses->getCollection());
+
         return $this->paginate($courses->through(fn (Course $course) => new StudentCourseResource($course)));
+    }
+
+    /**
+     * المسار عام (خارج auth:sanctum) — لكن إن أرسل طالب مسجَّل الدخول توكنه يُرفَق
+     * اشتراكه القائم في كل دورة، ليظهر له بوضوح أنه مشترك بدل زر "اختر الدورة".
+     * pending_payment يُحتسب ما دامت مهلة الدفع قائمة (بعدها يُعامَل كأنه غير موجود).
+     */
+    private function attachMyEnrollments(Request $request, Collection $courses): void
+    {
+        $student = $request->user('sanctum')?->loadMissing('student')->student;
+
+        if (! $student || $courses->isEmpty()) {
+            return;
+        }
+
+        $enrollments = Enrollment::where('student_id', $student->id)
+            ->whereIn('course_id', $courses->pluck('id'))
+            ->where(fn ($q) => $q
+                ->whereIn('status', ClassSession::PAID_ENROLLMENT_STATUSES)
+                ->orWhere(fn ($p) => $p->where('status', 'pending_payment')
+                    ->where(fn ($h) => $h->whereNull('hold_expires_at')->orWhere('hold_expires_at', '>', now()))))
+            ->get(['id', 'course_id', 'status', 'hold_expires_at'])
+            ->keyBy('course_id');
+
+        $courses->each(fn (Course $course) => $course->setRelation('myEnrollment', $enrollments->get($course->id)));
     }
 
     public function show(Request $request, Course $course)
