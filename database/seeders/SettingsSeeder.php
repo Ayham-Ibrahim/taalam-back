@@ -129,6 +129,14 @@ class SettingsSeeder extends Seeder
                 'label_ar' => 'مهلة العودة بعد انقطاع الاتصال (دقيقة)',
             ],
             [
+                'key' => 'student_no_show_teacher_payout_percent',
+                'value' => '50',
+                'type' => 'decimal',
+                'group' => 'attendance',
+                'label_ar' => 'نسبة تعويض المعلم عند غياب الطالب (%)',
+                'description' => 'دخل المعلم الجلسة ولم يدخلها أي طالب ولم يُبلغ عن غيابه مسبقاً — يُصرف للمعلم هذه النسبة من مستحق الجلسة',
+            ],
+            [
                 'key' => 'teacher_no_show_warning_threshold',
                 'value' => '1',
                 'type' => 'integer',
