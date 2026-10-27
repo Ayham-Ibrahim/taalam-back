@@ -96,7 +96,7 @@ class TeacherSessionsReportService
             $courseIds = $courseSessions->pluck('course_id')->unique();
 
             $revenueByCourseId = Enrollment::whereIn('course_id', $courseIds)
-                ->whereIn('status', ['confirmed', 'in_progress', 'completed'])
+                ->whereIn('status', ClassSession::PAID_ENROLLMENT_STATUSES)
                 ->selectRaw('course_id, SUM(provider_amount) as teacher_total, SUM(platform_amount) as platform_total')
                 ->groupBy('course_id')
                 ->get()
@@ -117,24 +117,22 @@ class TeacherSessionsReportService
         $bookingSessions = $sessions->filter(fn (ClassSession $s) => $s->course_id === null);
 
         if ($bookingSessions->isNotEmpty()) {
-            $sessionIds = $bookingSessions->pluck('id');
-
-            $bookingIdsBySession = SessionAttendee::whereIn('class_session_id', $sessionIds)
-                ->whereNotNull('booking_id')
-                ->get(['class_session_id', 'booking_id'])
-                ->groupBy('class_session_id')
-                ->map(fn ($rows) => $rows->pluck('booking_id')->unique());
+            $bookingIdsBySession = ClassSession::payableBookingIdsBySession($bookingSessions);
 
             $allBookingIds = $bookingIdsBySession->flatten()
                 ->merge($bookingSessions->pluck('booking_id')->filter())
                 ->unique();
 
-            $bookingsById = Booking::whereIn('id', $allBookingIds)->get()->keyBy('id');
+            // سطر الحضور يبقى بعد انتهاء/إلغاء الحجز — المدفوع فقط يُحتسب مستحقاً
+            $bookingsById = Booking::whereIn('id', $allBookingIds)
+                ->whereIn('status', ClassSession::PAID_BOOKING_STATUSES)
+                ->get()
+                ->keyBy('id');
 
             foreach ($bookingSessions as $session) {
                 $bookingIds = $bookingIdsBySession->get($session->id, collect());
 
-                if ($bookingIds->isEmpty() && $session->booking_id) {
+                if (! $bookingIdsBySession->has($session->id) && $session->booking_id) {
                     $bookingIds = collect([$session->booking_id]);
                 }
 

@@ -81,6 +81,30 @@ class SessionRoomCreationTest extends TestCase
         $this->assertNotSame($session->fresh()->bbb_meeting_id, $makeup->fresh()->bbb_meeting_id);
     }
 
+    /** سطر حضور الحجز المنتهي يبقى على الأصلية — لا يُنسخ للتعويضية */
+    public function test_makeup_session_copies_only_paid_attendees(): void
+    {
+        $teacher = $this->createTeacher();
+        $package = $this->createPackage($teacher, 'individual');
+        $paidStudent = $this->createStudent();
+        $paidBooking = $this->createBooking($package, $paidStudent, 'confirmed');
+        $expiredStudent = $this->createStudent();
+        $expiredBooking = $this->createBooking($package, $expiredStudent, 'expired');
+        $session = $paidBooking->sessions()->create([
+            'teacher_id' => $teacher->id,
+            'sequence_no' => 1,
+            'scheduled_at' => now()->addHour(),
+            'duration_min' => 60,
+            'status' => 'scheduled',
+        ]);
+        $this->attend($session, $paidStudent, $paidBooking);
+        $this->attend($session, $expiredStudent, $expiredBooking);
+
+        $makeup = app(SessionService::class)->createMakeupSession($session);
+
+        $this->assertSame([$paidBooking->id], $makeup->attendees()->pluck('booking_id')->all());
+    }
+
     public function test_create_missing_rooms_only_targets_paid_upcoming_sessions(): void
     {
         $teacher = $this->createTeacher();

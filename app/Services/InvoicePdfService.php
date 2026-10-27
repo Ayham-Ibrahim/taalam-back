@@ -87,10 +87,11 @@ class InvoicePdfService
 
         $items = $payout->items->map(function (PayoutItem $item) {
             $session = $item->session;
+            $title = $session?->course?->title ?? $session?->booking?->package?->title ?? '—';
 
             return [
                 'date' => $session?->scheduled_at?->format('Y-m-d') ?? '—',
-                'title' => $session?->course?->title ?? $session?->booking?->package?->title ?? '—',
+                'title' => $item->type === PayoutItem::TYPE_SETTLEMENT ? "تسوية تسجيل متأخر — {$title}" : $title,
                 'amount' => (float) $item->amount,
             ];
         });

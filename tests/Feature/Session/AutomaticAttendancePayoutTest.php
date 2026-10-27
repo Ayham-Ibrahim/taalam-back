@@ -144,6 +144,101 @@ class AutomaticAttendancePayoutTest extends TestCase
         $this->assertEquals(100.0, (float) $this->generatePayout($teacher, $session->scheduled_at)->gross_amount);
     }
 
+    /** سطر الحضور يبقى بعد انتهاء مهلة الدفع/الإلغاء — دخول المعلم لا يمنحه مستحقاً عن حجز لم يُدفع */
+    public function test_a_session_of_an_unpaid_booking_gets_nothing_even_if_both_joined(): void
+    {
+        [$teacher, $teacherUser] = $this->createTeacher();
+        [$session, $studentUser, $attendee] = $this->createEndedSession($teacher);
+        $attendee->booking->update(['status' => 'expired']);
+        $this->logJoin($session, $teacherUser, 'teacher');
+        $this->logJoin($session, $studentUser, 'student');
+
+        app(SessionService::class)->completeEndedSessions();
+
+        $session->refresh();
+        $this->assertSame('completed', $session->status);
+        $this->assertSame(ClassSession::OUTCOME_NO_PAID_ATTENDEE, $session->attendance_outcome);
+        $this->assertEquals(0, (float) $session->teacher_payout_percent);
+        $this->assertEquals(0.0, (float) $this->generatePayout($teacher)->gross_amount);
+    }
+
+    /** untracked كانت تُحتسب كاملة — لكن ليس لحجز ملغى */
+    public function test_an_untracked_session_of_a_cancelled_booking_gets_nothing(): void
+    {
+        [$teacher] = $this->createTeacher();
+        [$session, , $attendee] = $this->createEndedSession($teacher, SessionJoinLog::trackingStartedAt()->clone()->subDays(3));
+        $attendee->booking->update(['status' => 'cancelled']);
+
+        app(SessionService::class)->completeEndedSessions();
+
+        $this->assertSame(ClassSession::OUTCOME_NO_PAID_ATTENDEE, $session->fresh()->attendance_outcome);
+        $this->assertEquals(0.0, (float) $this->generatePayout($teacher, $session->scheduled_at)->gross_amount);
+    }
+
+    /** جلسة أُغلقت سابقاً كمكتملة ثم أُلغي حجزها — المستحقات نفسها تستبعد الحجز غير المدفوع */
+    public function test_payout_ignores_a_booking_that_is_no_longer_paid(): void
+    {
+        [$teacher, $teacherUser] = $this->createTeacher();
+        [$session, $studentUser, $attendee] = $this->createEndedSession($teacher);
+        $this->logJoin($session, $teacherUser, 'teacher');
+        $this->logJoin($session, $studentUser, 'student');
+        app(SessionService::class)->completeEndedSessions();
+
+        $attendee->booking->update(['status' => 'cancelled']);
+
+        $this->assertEquals(0.0, (float) $this->generatePayout($teacher)->gross_amount);
+        $this->assertDatabaseMissing('payout_items', ['class_session_id' => $session->id]);
+    }
+
+    /** جلسة مجموعة: حجز مدفوع وآخر انتهت مهلته — يُصرف نصيب المدفوع وحده لا المجموع */
+    public function test_a_group_session_pays_only_the_share_of_paid_bookings(): void
+    {
+        [$teacher, $teacherUser] = $this->createTeacher();
+        [$session, $studentUser, $paidAttendee] = $this->createEndedSession($teacher);
+        $this->addAttendeeWithBooking($session, $paidAttendee->booking, 'expired');
+        $this->logJoin($session, $teacherUser, 'teacher');
+        $this->logJoin($session, $studentUser, 'student');
+
+        app(SessionService::class)->completeEndedSessions();
+
+        $this->assertSame(ClassSession::OUTCOME_ATTENDED, $session->fresh()->attendance_outcome);
+        $this->assertEquals(100.0, (float) $this->generatePayout($teacher)->gross_amount);
+    }
+
+    /**
+     * المنضم بعد انقضاء أصلية لها تعويضية مسجَّل في الاثنتين — حصته تُصرف عن التعويضية
+     * التي حضرها فقط، لا عن الأصلية التي فاتته أيضاً (وإلا تجاوز مستحقه ما دفع).
+     */
+    public function test_a_late_joiner_share_is_paid_on_the_makeup_only_not_on_the_original_too(): void
+    {
+        [$teacher, $teacherUser] = $this->createTeacher();
+        [$original, $earlyUser, $earlyAttendee] = $this->createEndedSession($teacher);
+        $earlyAttendee->forceFill(['created_at' => $original->scheduled_at->clone()->subDay()])->save();
+
+        $makeup = app(SessionService::class)->createMakeupSession($original);
+        $makeup->update(['scheduled_at' => now()->subHour()->subMinutes(5), 'duration_min' => 60]);
+
+        $lateAttendee = $this->addAttendeeWithBooking($original, $earlyAttendee->booking, 'confirmed');
+        SessionAttendee::create([
+            'class_session_id' => $makeup->id,
+            'student_id' => $lateAttendee->student_id,
+            'booking_id' => $lateAttendee->booking_id,
+            'attendance' => 'registered',
+        ]);
+
+        foreach ([$original, $makeup->fresh()] as $session) {
+            $this->logJoin($session, $teacherUser, 'teacher');
+            $this->logJoin($session, $earlyUser, 'student');
+        }
+
+        app(SessionService::class)->completeEndedSessions();
+        $this->generatePayout($teacher);
+
+        $this->assertDatabaseHas('payout_items', ['class_session_id' => $original->id, 'amount' => 100]);
+        // حجز الأول بجلسة واحدة استهلكها في الأصلية — حصته في التعويضية خارج سقفه، فتبقى حصة المتأخر وحدها
+        $this->assertDatabaseHas('payout_items', ['class_session_id' => $makeup->id, 'amount' => 100]);
+    }
+
     public function test_the_outcome_is_hidden_from_the_student_and_the_teacher_but_shown_to_the_admin(): void
     {
         [$teacher, $teacherUser] = $this->createTeacher();
@@ -257,5 +352,26 @@ class AutomaticAttendancePayoutTest extends TestCase
         ]);
 
         return [$session, $studentUser, $attendee];
+    }
+
+    /** طالب ثانٍ في نفس الجلسة بحجز مستقل على نفس الباقة (مستحقه 100) — كما في الباقة الجماعية */
+    private function addAttendeeWithBooking(ClassSession $session, Booking $sibling, string $status): SessionAttendee
+    {
+        $studentUser = User::factory()->student()->create();
+        $student = Student::create(['user_id' => $studentUser->id, 'education_type' => 'school']);
+
+        $booking = Booking::create([
+            ...$sibling->only(['teacher_id', 'package_id', 'amount_paid', 'teacher_amount', 'platform_amount', 'margin_percent_snapshot', 'sessions_total', 'sessions_remaining']),
+            'reference' => 'BK-'.strtoupper(uniqid()),
+            'student_id' => $student->id,
+            'status' => $status,
+        ]);
+
+        return SessionAttendee::create([
+            'class_session_id' => $session->id,
+            'student_id' => $student->id,
+            'booking_id' => $booking->id,
+            'attendance' => 'registered',
+        ]);
     }
 }

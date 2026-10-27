@@ -56,6 +56,9 @@ class ClassSession extends Model
     /** بدأت قبل بدء تسجيل الانضمام (SessionJoinLog::trackingStartedAt) — لا دليل حضور، تُحتسب كاملة */
     public const OUTCOME_UNTRACKED = 'untracked';
 
+    /** لا حاضر باشتراك مدفوع (حجز منتهٍ/ملغى/غير مدفوع) — لا مستحق مهما كان الدخول */
+    public const OUTCOME_NO_PAID_ATTENDEE = 'no_paid_attendee';
+
     protected function casts(): array
     {
         return [
@@ -98,6 +101,11 @@ class ClassSession extends Model
     public function makeupForSession()
     {
         return $this->belongsTo(ClassSession::class, 'makeup_for_session_id');
+    }
+
+    public function makeupSessions()
+    {
+        return $this->hasMany(ClassSession::class, 'makeup_for_session_id');
     }
 
     public function rescheduleRequests()
@@ -167,6 +175,35 @@ class ClassSession extends Model
                 ->whereNull('enrollment_id')
                 ->orWhereHas('enrollment', fn ($e) => $e->whereNotIn('status', ['cancelled', 'withdrawn']))
             );
+    }
+
+    /**
+     * الحجوزات التي تُحتسب حصتها في مستحق كل جلسة (PayoutService/TeacherSessionsReportService).
+     * المنضم لاحقاً لمجموعة يُسجَّل في أصلية فاتته وفي تعويضيتها معاً (BookingService::sessionsFor)
+     * — حصته تُصرف عن التعويضية وحدها: سطر حضوره في أصلية لها تعويضية، أُنشئ بعد بدئها،
+     * لا يُحتسب. فلا يتجاوز مستحق المعلم من حجزه sessions_total جلسة.
+     * جلسة لها أسطر حضور لكن لا حاضر محتسب فيها تُرجَع بمجموعة فارغة لا تُحذف — كي لا
+     * يرجع المستدعي لحجزها المالك (احتياط الجلسات القديمة بلا أسطر حضور إطلاقاً).
+     *
+     * @return \Illuminate\Support\Collection<int, \Illuminate\Support\Collection<int, int>> [class_session_id => booking ids]
+     */
+    public static function payableBookingIdsBySession(\Illuminate\Support\Collection $sessions): \Illuminate\Support\Collection
+    {
+        $sessionsById = $sessions->keyBy('id');
+        $hasMakeup = self::whereIn('makeup_for_session_id', $sessionsById->keys())
+            ->pluck('makeup_for_session_id')
+            ->flip();
+
+        return SessionAttendee::whereIn('class_session_id', $sessionsById->keys())
+            ->whereNotNull('booking_id')
+            ->get(['class_session_id', 'booking_id', 'created_at'])
+            ->groupBy('class_session_id')
+            ->map(fn ($rows, $sessionId) => $rows
+                ->reject(fn (SessionAttendee $row) => $hasMakeup->has($sessionId)
+                    && $row->created_at->gt($sessionsById[$sessionId]->scheduled_at))
+                ->pluck('booking_id')
+                ->unique()
+                ->values());
     }
 
     public const PAID_BOOKING_STATUSES = ['confirmed', 'active', 'completed'];

@@ -190,6 +190,35 @@ class BookingFlowTest extends TestCase
         }
     }
 
+    /** المنضم لاحقاً يحضر التعويضية كبقية المجموعة، والملغاة لا تُعقد فلا يُسجَّل فيها */
+    public function test_a_later_group_joiner_is_registered_in_makeup_but_not_cancelled_sessions(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        $package = $this->createActiveGroupPackage($teacher, capacity: 3, sessionsCount: 3, teacherPrice: 50, margin: 40);
+
+        // كل أسبوعين — التعويضية تُنشأ بعد أسبوع من الأصلية فلا تتعارض مع الجلسة التالية
+        foreach ([0, 2, 4] as $weeks) {
+            $date = Carbon::now()->next(2)->addWeeks($weeks);
+            $package->schedules()->create(['date' => $date->toDateString(), 'day_of_week' => $date->dayOfWeek, 'start_time' => '09:00', 'end_time' => '10:00']);
+        }
+
+        $booking1 = app(BookingService::class)->joinGroupPackage($this->createStudent(), $package);
+        app(BookingService::class)->confirmBooking($booking1);
+        [$first, $second, $third] = $booking1->sessions->sortBy('sequence_no')->values()->all();
+
+        $makeup = app(\App\Services\SessionService::class)->createMakeupSession($first);
+        $third->update(['status' => 'cancelled']);
+
+        $booking2 = app(BookingService::class)->joinGroupPackage($this->createStudent(), $package);
+
+        $this->assertSame(
+            [$first->id, $second->id, $makeup->id],
+            $booking2->attendedSessions->pluck('id')->sort()->values()->all(),
+        );
+        $this->assertSame(0, $third->attendees()->where('booking_id', $booking2->id)->count());
+        $this->assertSame(4, ClassSession::count());
+    }
+
     public function test_joining_a_group_package_whose_schedule_dates_all_passed_is_rejected_as_unavailable(): void
     {
         [$teacher] = $this->createVerifiedTeacher();

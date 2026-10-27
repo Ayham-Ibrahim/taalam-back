@@ -747,6 +747,11 @@ class BookingService
      * المعلم صراحةً من روزنامة (لا تكرار أسبوعي تلقائي) — PackageService يضمن
      * أن عدد الصفوف يساوي sessions_count بالضبط، فكل صف يصبح جلسة واحدة مرتّبة
      * زمنياً. الفردية لا تملك جدولاً زمنياً على الإطلاق — انظر sessionsFromSlots.
+     *
+     * المنضم لاحقاً لا يُسجَّل في الملغاة (لا تُعقد)، ويُسجَّل في التعويضية كبقية
+     * المجموعة — حصته تُصرف عنها بدل أصليتها التي فاتته (ClassSession::payableBookingIdsBySession)،
+     * فلا يتجاوز مستحقه منه sessions_total. الفحص على وجود الجلسات يسبق الفلترة عمداً كي
+     * لا يُعاد توليدها من الجدول إن لم يبقَ منها شيء صالح.
      */
     private function sessionsFor(Package $package, Booking $ownerBooking): Collection
     {
@@ -755,7 +760,9 @@ class BookingService
             ->get();
 
         if ($existing->isNotEmpty()) {
-            return $existing;
+            return $existing
+                ->reject(fn (ClassSession $session) => $session->status === 'cancelled')
+                ->values();
         }
 
         $schedules = $package->schedules()->orderBy('date')->orderBy('start_time')->get();
