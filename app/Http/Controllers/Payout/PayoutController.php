@@ -6,6 +6,7 @@ use App\Exports\PayoutsExport;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Payout\GeneratePayoutRequest;
 use App\Http\Requests\Payout\MarkPayoutPaidRequest;
+use App\Http\Resources\Payout\PayoutDetailResource;
 use App\Http\Resources\Payout\PayoutResource;
 use App\Models\Payout;
 use App\Models\Teacher;
@@ -46,7 +47,14 @@ class PayoutController extends Controller
     {
         $this->authorize('view', $payout);
 
-        return $this->success($payout->load('items'));
+        $payout->load([
+            'teacher.user:id,name',
+            'approver:id,name',
+            'items.session.course:id,title',
+            'items.session.booking.package:id,title,session_format',
+        ]);
+
+        return $this->success(new PayoutDetailResource($payout));
     }
 
     public function downloadInvoice(Payout $payout)

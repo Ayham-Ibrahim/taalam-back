@@ -152,6 +152,49 @@ class PayoutEndpointTest extends TestCase
         $this->assertCount(14, $row);
     }
 
+    public function test_payout_details_list_its_items_with_attendance_only_for_finance(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $adminToken = $admin->createToken('t')->plainTextToken;
+
+        $teacherUser = User::factory()->teacher()->create();
+        $teacher = Teacher::create(['user_id' => $teacherUser->id, 'teacher_type' => 'school', 'status' => 'verified']);
+        $this->createCompletedPackageSession($teacher, teacherPrice: 100, sessionsTotal: 4);
+
+        $payoutId = $this->as($adminToken)->postJson(
+            "/api/teachers/{$teacher->id}/payouts/generate",
+            ['period_start' => now()->subDay()->toDateString(), 'period_end' => now()->addDay()->toDateString()],
+        )->json('data.id');
+
+        $this->as($adminToken)->getJson("/api/payouts/{$payoutId}")
+            ->assertStatus(200)
+            ->assertJsonPath('data.providerName', $teacherUser->name)
+            ->assertJsonPath('data.grossAmount', 100)
+            ->assertJsonPath('data.totalAmount', 100)
+            ->assertJsonCount(1, 'data.items')
+            ->assertJsonPath('data.items.0.type', 'session')
+            ->assertJsonPath('data.items.0.amount', 100)
+            ->assertJsonPath('data.items.0.title', 'باقة')
+            ->assertJsonPath('data.items.0.kind', 'individual')
+            ->assertJsonPath('data.items.0.isMakeup', false)
+            ->assertJsonPath('data.items.0.payoutPercent', null);
+
+        $teacherItem = $this->as($teacherUser->createToken('t')->plainTextToken)
+            ->getJson("/api/payouts/{$payoutId}")
+            ->assertStatus(200)
+            ->json('data.items.0');
+
+        $this->assertArrayNotHasKey('attendanceOutcome', $teacherItem);
+        $this->assertArrayNotHasKey('payoutPercent', $teacherItem);
+
+        $otherTeacherUser = User::factory()->teacher()->create();
+        Teacher::create(['user_id' => $otherTeacherUser->id, 'teacher_type' => 'school', 'status' => 'verified']);
+
+        $this->as($otherTeacherUser->createToken('t')->plainTextToken)
+            ->getJson("/api/payouts/{$payoutId}")
+            ->assertStatus(403);
+    }
+
     public function test_mark_paid_requires_a_transfer_reference_and_succeeds_when_provided(): void
     {
         $admin = User::factory()->admin()->create();
