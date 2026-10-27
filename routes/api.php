@@ -245,7 +245,15 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::post('session-attendees/{attendee}/present', [SessionAttendanceController::class, 'markPresent']);
     Route::post('session-attendees/{attendee}/absent', [SessionAttendanceController::class, 'recordAbsence']);
-    Route::post('class-sessions/{session}/no-show-teacher', [SessionAttendanceController::class, 'teacherNoShow']);
+    // معطَّل: تسجيل غياب المعلم يدوياً (SessionService::recordTeacherNoShow) سابق للحضور التلقائي
+    // ويتعارض معه — لا يفحص حالة الجلسة، فيقبل جلسة مكتملة حكم الحضور التلقائي بانعقادها وصُرف
+    // مستحقها (يبقى البند المصروف)، ويقبل التكرار على نفس الجلسة: تعويضية جديدة في كل مرة بموعد
+    // تلقائي بعد أسبوع بلا فحص تعارض، وزيادة no_show_count حتى الإيقاف التلقائي للمعلم بجلسة واحدة.
+    // غياب المعلم يُحسم الآن تلقائياً (teacher_absent بنسبة 0% في completeEndedSessions) والتعويضية
+    // عبر class-sessions/{session}/makeup. لا تستدعيه الواجهة. ملاحظة: كان المسار الوحيد الذي يزيد
+    // no_show_count ويطبّق teacher_no_show_warning_threshold/suspend_threshold — لا يُعاد تفعيله قبل
+    // إضافة هذه الحمايات أو نقل الاحتساب إلى الحضور التلقائي.
+    // Route::post('class-sessions/{session}/no-show-teacher', [SessionAttendanceController::class, 'teacherNoShow']);
 
     Route::get('complaints', [ComplaintController::class, 'index']);
     Route::get('complaints/{complaint}', [ComplaintController::class, 'show']);
