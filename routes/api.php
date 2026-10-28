@@ -26,7 +26,9 @@ use App\Http\Controllers\Student\StudentController;
 use App\Http\Controllers\Student\StudentImportController;
 use App\Http\Controllers\TaxonomyController;
 use App\Http\Controllers\Teacher\BadgeController;
+use App\Http\Controllers\Teacher\TeacherAvailabilityTimeController;
 use App\Http\Controllers\Teacher\TeacherController;
+use App\Http\Controllers\Teacher\TeacherFaqController;
 use App\Http\Controllers\Teacher\TeacherImportController;
 use App\Http\Controllers\Teacher\TeacherVideoController;
 use App\Http\Controllers\Teacher\VerificationDocumentController;
@@ -111,6 +113,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('teachers/{teacher}/videos', [TeacherVideoController::class, 'store']);
     Route::delete('teacher-videos/{video}', [TeacherVideoController::class, 'destroy']);
 
+    Route::post('teachers/{teacher}/faqs', [TeacherFaqController::class, 'store']);
+    Route::put('teacher-faqs/{faq}', [TeacherFaqController::class, 'update']);
+    Route::delete('teacher-faqs/{faq}', [TeacherFaqController::class, 'destroy']);
+
     Route::get('badges', [BadgeController::class, 'index']);
     Route::post('teachers/{teacher}/badges', [BadgeController::class, 'grant']);
     Route::post('badge-awards/{badgeAward}/revoke', [BadgeController::class, 'revoke']);
@@ -130,6 +136,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('teachers/{teacher}/availability-slots/{slot}', [AvailabilityController::class, 'destroySlot']);
     Route::post('teachers/{teacher}/blackouts', [AvailabilityController::class, 'storeBlackout']);
     Route::delete('teachers/{teacher}/blackouts/{blackout}', [AvailabilityController::class, 'destroyBlackout']);
+
+    Route::get('teachers/{teacher}/availability-times', [TeacherAvailabilityTimeController::class, 'index']);
+    Route::post('teachers/{teacher}/availability-times', [TeacherAvailabilityTimeController::class, 'store']);
+    Route::delete('teachers/{teacher}/availability-times/{time}', [TeacherAvailabilityTimeController::class, 'destroy']);
 
     Route::get('courses', [CourseController::class, 'index']);
     Route::post('courses', [CourseController::class, 'store']);

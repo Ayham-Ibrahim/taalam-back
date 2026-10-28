@@ -7,6 +7,7 @@ use App\Models\Booking;
 use App\Models\ClassSession;
 use App\Models\Enrollment;
 use App\Models\Teacher;
+use App\Models\TeacherFaq;
 use App\Models\TeacherVideo;
 use App\Models\User;
 use App\Models\VerificationDocument;
@@ -445,5 +446,49 @@ class TeacherService
             'teaching_hours' => round($teachingMinutes / 60, 1),
             'total_students' => $studentIds->count(),
         ];
+    }
+
+    /**
+     * أسئلة شائعة يكتبها المعلم بنفسه — نفس نمط addVideo/removeVideo تماماً
+     * (حد أقصى للعدد + تسجيل حدث عمل واضح).
+     */
+    public function addFaq(Teacher $teacher, array $data): TeacherFaq
+    {
+        if ($teacher->faqs()->count() >= Teacher::MAX_FAQS) {
+            throw ValidationException::withMessages([
+                'faqs' => ['لا يمكن إضافة أكثر من '.Teacher::MAX_FAQS.' أسئلة — احذف سؤالاً قديماً أولاً.'],
+            ]);
+        }
+
+        $faq = $teacher->faqs()->create([
+            'question' => $data['question'],
+            'answer' => $data['answer'],
+            'sort_order' => ($teacher->faqs()->max('sort_order') ?? -1) + 1,
+        ]);
+
+        $this->audit('teacher.faq_added', $faq, [], ['question' => $faq->question]);
+
+        return $faq;
+    }
+
+    public function updateFaq(TeacherFaq $faq, array $data): TeacherFaq
+    {
+        $old = ['question' => $faq->question, 'answer' => $faq->answer];
+
+        $faq->update([
+            'question' => $data['question'],
+            'answer' => $data['answer'],
+        ]);
+
+        $this->audit('teacher.faq_updated', $faq, $old, ['question' => $faq->question, 'answer' => $faq->answer]);
+
+        return $faq;
+    }
+
+    public function removeFaq(TeacherFaq $faq): void
+    {
+        $this->audit('teacher.faq_removed', $faq, ['question' => $faq->question], []);
+
+        $faq->delete();
     }
 }

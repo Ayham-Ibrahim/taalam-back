@@ -108,7 +108,7 @@ class TeacherController extends Controller
             abort(404);
         }
 
-        $teacher->load(['user:id,name,avatar_path', 'subjects', 'curricula', 'languages', 'videos']);
+        $teacher->load(['user:id,name,avatar_path', 'subjects', 'curricula', 'languages', 'videos', 'faqs', 'availabilityTimes']);
         if ($isManager) {
             // الأحدث أولاً — قد يرفع المعلم أكثر من وثيقة لنفس النوع بعد رفض
             // سابق؛ الواجهة تعرض أول تطابق لكل نوع فقط، فيجب أن يكون الأحدث.

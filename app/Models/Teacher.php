@@ -15,6 +15,11 @@ class Teacher extends Model
     /** حد تعسفي معقول يمنع نمواً غير محدود لقائمة الفيديوهات — سهل التعديل لاحقاً إن لزم */
     public const MAX_VIDEOS = 6;
 
+    /** نفس منطق MAX_VIDEOS — حدّ معقول لعدد الأسئلة الشائعة ونوافذ التوفّر الأسبوعية */
+    public const MAX_FAQS = 15;
+
+    public const MAX_AVAILABILITY_TIMES = 21;
+
     protected $fillable = [
         'user_id',
         'teacher_type',
@@ -88,6 +93,18 @@ class Teacher extends Model
     public function videos()
     {
         return $this->hasMany(TeacherVideo::class)->orderBy('sort_order');
+    }
+
+    public function faqs()
+    {
+        return $this->hasMany(TeacherFaq::class)->orderBy('sort_order');
+    }
+
+    public function availabilityTimes()
+    {
+        return $this->hasMany(TeacherAvailabilityTime::class)
+            ->orderBy('day_of_week')
+            ->orderBy('start_time');
     }
 
     public function badgeAwards()
