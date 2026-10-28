@@ -9,12 +9,12 @@ class BookingPolicy
 {
     public function viewAny(User $user): bool
     {
-        return $user->isAdmin() || $user->isStudent() || $user->isTeacher();
+        return $user->isFinance() || $user->isStudent() || $user->isTeacher();
     }
 
     public function view(User $user, Booking $booking): bool
     {
-        return $user->isAdmin()
+        return $user->isFinance()
             || $user->loadMissing('student')->student?->id === $booking->student_id
             || $user->loadMissing('teacher')->teacher?->id === $booking->teacher_id;
     }
@@ -33,5 +33,11 @@ class BookingPolicy
     public function respondToRequest(User $user, Booking $booking): bool
     {
         return $user->isAdmin() || $user->loadMissing('teacher')->teacher?->id === $booking->teacher_id;
+    }
+
+    /** حذف حجز غير مدفوع — إجراء إداري حصراً (BookingService::delete يرفض أي حجز مدفوع بصرف النظر عن هذا) */
+    public function delete(User $user): bool
+    {
+        return $user->isAdmin();
     }
 }

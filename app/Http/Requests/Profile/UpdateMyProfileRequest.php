@@ -24,7 +24,7 @@ class UpdateMyProfileRequest extends FormRequest
             'phone' => [...$phoneFormat, Rule::unique('users', 'phone')->ignore($this->user()->id)],
             'whatsapp' => $phoneFormat,
             'gender' => ['nullable', Rule::in(['male', 'female'])],
-            // اختيار المستخدم اليدوي للمنطقة الزمنية من الإعدادات — يوقف التحديث التلقائي من المتصفح (SyncTimezoneRequest)
+            // اختيار المستخدم اليدوي للمنطقة الزمنية من الإعدادات
             'timezone' => ['nullable', 'string', 'max:64', 'timezone:all'],
             'timezone_auto' => ['nullable', 'boolean'],
         ];

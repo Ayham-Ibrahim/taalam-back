@@ -8,6 +8,7 @@ class Review extends Model
 {
     protected $fillable = [
         'student_id',
+        'reviewer_name',
         'teacher_id',
         'class_session_id',
         'booking_id',
@@ -22,6 +23,8 @@ class Review extends Model
         'is_reported',
         'report_reason',
         'edit_deadline',
+        'is_seeded',
+        'imported_by',
     ];
 
     protected function casts(): array
@@ -31,6 +34,7 @@ class Review extends Model
             'is_hidden' => 'boolean',
             'is_reported' => 'boolean',
             'edit_deadline' => 'datetime',
+            'is_seeded' => 'boolean',
         ];
     }
 
@@ -62,5 +66,10 @@ class Review extends Model
     public function hider()
     {
         return $this->belongsTo(User::class, 'hidden_by');
+    }
+
+    public function importer()
+    {
+        return $this->belongsTo(User::class, 'imported_by');
     }
 }

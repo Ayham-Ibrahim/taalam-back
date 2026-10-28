@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Student;
+use App\Models\Teacher;
 use App\Models\User;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -14,6 +15,12 @@ use Illuminate\Validation\ValidationException;
 
 class AuthService
 {
+    /**
+     * timezone (إن أُرسلت) = منطقة متصفح الطالب الفعلية وقت إنشاء الحساب —
+     * تُلتقَط مرة واحدة هنا فقط، لا تُعاد مزامنتها تلقائياً بعد ذلك في أي جلسة
+     * لاحقة (لا مسار آخر يكتب فوق users.timezone تلقائياً — فقط هذا الالتقاط
+     * الأولي أو تعديل الطالب اليدوي من الإعدادات لاحقاً).
+     */
     public function registerStudent(array $data): array
     {
         return DB::transaction(function () use ($data) {
@@ -25,6 +32,7 @@ class AuthService
                 'gender' => $data['gender'] ?? null,
                 'role' => 'student',
                 'password' => $data['password'],
+                'timezone' => $data['timezone'] ?? 'Asia/Riyadh',
             ]);
 
             $student = Student::create([
@@ -52,6 +60,41 @@ class AuthService
         });
     }
 
+    /**
+     * تسجيل ذاتي للمعلم (يشمل مراكز التدريب كنوع ثالث — ليست كياناً منفصلاً،
+     * راجع تعليق هجرة جدول teachers). نفس نقطة النهاية التي ينتجها
+     * TeacherService::createByAdmin() (status='active_unverified'، دخول فوري)
+     * لكن بلا تدخل أدمن — لا يستبدل invite()/createByAdmin() بل يضيف باباً
+     * ثانياً. ProtectedRoute على الفرونت إند يحوّل أي معلم بهذه الحالة تلقائياً
+     * لشاشة إكمال الملف، بصرف النظر عن طريقة إنشاء حسابه.
+     */
+    public function registerTeacher(array $data): array
+    {
+        return DB::transaction(function () use ($data) {
+            $user = User::create([
+                'name' => $data['name'],
+                'email' => $data['email'],
+                'phone' => $data['phone'] ?? null,
+                'role' => 'teacher',
+                'password' => $data['password'],
+                'is_active' => true,
+            ]);
+
+            $teacher = Teacher::create([
+                'user_id' => $user->id,
+                'teacher_type' => $data['teacher_type'],
+                'status' => 'active_unverified',
+            ]);
+
+            $user->setRelation('teacher', $teacher);
+
+            return [
+                'user' => $user,
+                'token' => $user->createToken('api')->plainTextToken,
+            ];
+        });
+    }
+
     public function login(string $email, string $password): array
     {
         $user = User::where('email', $email)->first();
@@ -68,6 +111,18 @@ class AuthService
             ]);
         }
 
+        // حساب المعلم المعلَّق يُمنع من الدخول صراحةً ويُعرَض له سبب التعليق —
+        // بعكس reject() حيث يبقى المعلم قادراً على الدخول ليرى سبب الرفض ويعيد التقديم
+        if ($user->isTeacher()) {
+            $teacher = $user->teacher()->first(['status', 'suspension_reason']);
+            if ($teacher?->status === 'suspended') {
+                $reason = $teacher->suspension_reason;
+                throw ValidationException::withMessages([
+                    'email' => [$reason ? "تم تعليق حسابك. السبب: {$reason}" : 'تم تعليق حسابك، يرجى التواصل مع الإدارة'],
+                ]);
+            }
+        }
+
         $user->forceFill(['last_login_at' => now()])->save();
 
         $this->loadRoleRelation($user);
@@ -78,13 +133,15 @@ class AuthService
         ];
     }
 
-    /** يحمّل علاقة teacher أو student فقط حسب دور المستخدم — لا داعي لتحميل كليهما */
+    /** يحمّل علاقة teacher أو student أو academicSupporter فقط حسب دور المستخدم — لا داعي لتحميل الكل */
     public function loadRoleRelation(User $user): User
     {
         if ($user->isTeacher()) {
             $user->load(['teacher:id,user_id,teacher_type,status']);
         } elseif ($user->isStudent()) {
             $user->load(['student:id,user_id,education_type,stage_id,university_id']);
+        } elseif ($user->isAcademicSupport()) {
+            $user->load(['academicSupporter:id,user_id,status']);
         }
 
         return $user;
@@ -137,7 +194,7 @@ class AuthService
             'gender' => $data['gender'] ?? null,
         ];
 
-        // اختيار يدوي صريح لتفعيل/تعطيل الاكتشاف التلقائي من الإعدادات — يطغى دائماً على نتيجة syncTimezone التالية
+        // اختيار يدوي صريح لتفعيل/تعطيل الاكتشاف التلقائي من الإعدادات
         if (array_key_exists('timezone_auto', $data) && $data['timezone_auto'] !== null) {
             $updates['timezone_auto'] = (bool) $data['timezone_auto'];
             if (! $data['timezone_auto'] && ! empty($data['timezone'])) {
@@ -150,16 +207,6 @@ class AuthService
         }
 
         $user->update($updates);
-
-        return $user;
-    }
-
-    /** مزامنة صامتة من متصفح المستخدم — تُطبَّق فقط إن لم يُثبِّت المستخدم منطقته يدوياً من قبل (timezone_auto) */
-    public function syncTimezone(User $user, string $timezone): User
-    {
-        if ($user->timezone_auto) {
-            $user->update(['timezone' => $timezone]);
-        }
 
         return $user;
     }

@@ -7,8 +7,10 @@ use App\Models\RescheduleRequest;
 use App\Models\User;
 use App\Notifications\RescheduleRequestReviewed;
 use App\Notifications\RescheduleRequestSubmitted;
+use App\Notifications\SessionRescheduledByAdmin;
 use App\Traits\LogsAuditEvents;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -51,7 +53,12 @@ class RescheduleService
         $this->conflicts->assertNoConflict($student, $session->teacher_id, [$newTime], $session->duration_min, [$session->id]);
     }
 
-    public function request(ClassSession $session, User $requester, string $requesterRole, Carbon $proposedAt, ?string $reason = null): RescheduleRequest
+    /**
+     * $proposedAt قد تكون null — "تبليغ غياب طارئ" بلا موعد بديل مقترح (المعلم/الطالب
+     * يعجز عن حضور الجلسة ويريد فقط إبلاغ الإدارة لتنسيق البديل لاحقاً عبر approve()
+     * بموعد بديل). عندها يصبح $reason إلزامياً دائماً (لا شيء آخر يشرح الطلب للأدمن).
+     */
+    public function request(ClassSession $session, User $requester, string $requesterRole, ?Carbon $proposedAt, ?string $reason = null): RescheduleRequest
     {
         if (in_array($session->status, ['completed', 'cancelled', 'no_show_student', 'no_show_teacher'], true)) {
             throw ValidationException::withMessages([
@@ -72,14 +79,22 @@ class RescheduleService
         // بطلب طالب أو معلم واحد يكسر جدول بقية الطلاب بلا أي تنسيق بينهم، ولا
         // مسار موافقة جماعي لذلك حالياً. القرار المعماري: تغيير الموعد متاح فقط
         // لجلسات الباقات الفردية.
-        if ($session->loadMissing('booking.package')->booking?->package?->session_format === 'group') {
+        // جلسات الدورة التدريبية مشتركة بين كل المسجّلين فيها — نفس منطق الباقة الجماعية
+        if ($session->course_id !== null || $session->loadMissing('booking.package')->booking?->package?->session_format === 'group') {
             throw ValidationException::withMessages([
                 'session' => ['طلبات تغيير الموعد متاحة فقط لجلسات الباقات الفردية'],
             ]);
         }
 
         $this->assertSessionIsPaid($session, $requester, $requesterRole);
-        $this->assertNewTimeHasNoConflict($session, $proposedAt);
+
+        if ($proposedAt) {
+            $this->assertNewTimeHasNoConflict($session, $proposedAt);
+        } elseif (empty($reason)) {
+            throw ValidationException::withMessages([
+                'reason' => ['السبب إلزامي عند تبليغ غياب بلا موعد بديل مقترح'],
+            ]);
+        }
 
         $freeWindowHours = (int) $this->settings->get('reschedule_free_window_hours', 24);
         $hoursBeforeSession = max(0, now()->diffInHours($session->scheduled_at, false));
@@ -231,6 +246,15 @@ class RescheduleService
 
         $newTime = $alternativeAt ?? $rescheduleRequest->proposed_scheduled_at;
 
+        // طلب "تبليغ غياب" (proposed_scheduled_at فارغة أصلاً — لا موعد مقترح من
+        // صاحب الطلب) لا يملك شيئاً تُطبَّق الموافقة البسيطة عليه؛ الأدمن مُلزَم
+        // بتمرير $alternativeAt بعد تنسيقه فعلياً مع الطرفين خارج المنصة.
+        if (! $newTime) {
+            throw ValidationException::withMessages([
+                'alternative_scheduled_at' => ['هذا طلب تبليغ غياب بلا موعد مقترح — يجب تحديد موعد بديل للموافقة عليه'],
+            ]);
+        }
+
         $rescheduleRequest->loadMissing('session');
         $session = $rescheduleRequest->session;
 
@@ -242,6 +266,9 @@ class RescheduleService
             'original_scheduled_at' => $session->original_scheduled_at ?? $session->scheduled_at,
             'scheduled_at' => $newTime,
             'status' => 'scheduled',
+            // التذكير السابق (إن أُرسل) يحمل الموعد القديم، وبقاء reminder_sent_at
+            // مضبوطاً يمنع SendSessionRemindersJob من إرسال تذكير بالموعد الجديد.
+            'reminder_sent_at' => null,
         ]);
 
         $rescheduleRequest->update([
@@ -257,17 +284,145 @@ class RescheduleService
             'new_scheduled_at' => $newTime->toDateTimeString(),
         ], $notes, $admin->id);
 
-        // صاحب الطلب (requester) — طالب أو معلم، أيهما أرسله فعلياً — هو من
-        // ينتظر القرار، بصرف النظر عمّن أنشأ الجلسة أصلاً.
-        if ($requester = $rescheduleRequest->loadMissing('requester')->requester) {
-            $this->notifications->send(
-                $requester,
-                new RescheduleRequestReviewed($rescheduleRequest->status, $newTime),
+        // يُبلَّغ الطرفان معاً — الطالب والمعلم — لا صاحب الطلب وحده: نفس سبب
+        // reject() بالضبط (الموعد الجديد يخص جدول الطرفين كليهما، لا صاحب الطلب
+        // فقط). قبل هذا الإصلاح كان الطرف الآخر (الذي لم يُرسل الطلب) لا يُبلَّغ
+        // إطلاقاً رغم أن جلسته هو أيضاً تغيّر موعدها فعلياً.
+        $rescheduleRequest->loadMissing(['session.teacher.user', 'session.booking.student.user']);
+
+        collect([
+            $rescheduleRequest->session?->teacher?->user,
+            $rescheduleRequest->session?->booking?->student?->user,
+        ])
+            ->filter()
+            ->unique('id')
+            ->each(fn (User $party) => $this->notifications->send(
+                $party,
+                new RescheduleRequestReviewed($rescheduleRequest->status, $newTime, adminNotes: $notes),
                 'reschedule.approved',
-            );
-        }
+            ));
 
         return $rescheduleRequest->fresh();
+    }
+
+    /**
+     * تعديل مباشر لموعد جلسة من الأدمن، بلا طلب تغيير موعد مسبق، ولأي نوع جلسة
+     * (فردية/جماعية/دورة). رابط الجلسة لا يتأثر إطلاقاً: روابط BBB مبنية من
+     * meetingID وكلمة المرور فقط (لا وقت فيها)، فلا تُلمَس حقول BBB وروابط الانضمام.
+     *
+     * القيود تحمي المستحقات المالية ورصيد الحصص:
+     *   - جلسة scheduled لم تبدأ بعد فقط — الجلسة المنتهية/الملغاة قد تكون ضمن
+     *     مستحقات صُرفت فعلاً.
+     *   - الموعد الجديد في المستقبل — وإلا يحوّلها completeEndedSessions إلى
+     *     completed خلال دقيقة فتدخل المستحقات دون أن تُعقد.
+     *   - لا حضور/غياب مسجَّل عليها (present/absent/partial) — هذا خصم فعلي من
+     *     رصيد الطالب على جلسة لم تُعقد بعد بموعدها الجديد.
+     *   - اعتذار الطالب المسبق (excused) كان عن الموعد القديم، فيُعاد إلى registered.
+     */
+    public function adminReschedule(ClassSession $session, User $admin, Carbon $newTime, ?string $notes = null): ClassSession
+    {
+        if ($session->status !== 'scheduled') {
+            throw ValidationException::withMessages([
+                'session' => ['لا يمكن تعديل موعد جلسة منتهية أو ملغاة'],
+            ]);
+        }
+
+        if (now()->gte($session->scheduled_at)) {
+            throw ValidationException::withMessages([
+                'session' => ['لا يمكن تعديل موعد جلسة بدأت بالفعل أو انتهت'],
+            ]);
+        }
+
+        if ($newTime->lte(now())) {
+            throw ValidationException::withMessages([
+                'scheduled_at' => ['يجب أن يكون الموعد الجديد في المستقبل'],
+            ]);
+        }
+
+        if ($newTime->eq($session->scheduled_at)) {
+            throw ValidationException::withMessages([
+                'scheduled_at' => ['الموعد الجديد مطابق للموعد الحالي'],
+            ]);
+        }
+
+        if ($session->attendees()->whereIn('attendance', ['present', 'absent', 'partial'])->exists()) {
+            throw ValidationException::withMessages([
+                'session' => ['لا يمكن تعديل موعد جلسة سُجِّل عليها حضور أو غياب'],
+            ]);
+        }
+
+        $this->assertNoConflictForAllParties($session, $newTime);
+
+        $previousTime = $session->scheduled_at->copy();
+
+        DB::transaction(function () use ($session, $admin, $newTime, $notes, $previousTime) {
+            $session->update([
+                'original_scheduled_at' => $session->original_scheduled_at ?? $session->scheduled_at,
+                'scheduled_at' => $newTime,
+                'reminder_sent_at' => null,
+            ]);
+
+            $session->attendees()->where('attendance', 'excused')->update([
+                'attendance' => 'registered',
+                'absence_notified_at' => null,
+                'absence_reason' => null,
+                'deducted_from_balance' => false,
+            ]);
+
+            // أي طلب تغيير موعد معلّق على هذه الجلسة لم يعد له معنى بعد أن حسم
+            // الأدمن موعدها مباشرة — يُغلق بدل أن يبقى معلّقاً فيُعتمد لاحقاً خطأً
+            // فوق الموعد الجديد. الطرفان يصلهما إشعار الموعد الجديد أدناه.
+            RescheduleRequest::where('class_session_id', $session->id)
+                ->where('status', 'pending')
+                ->update([
+                    'status' => 'rejected',
+                    'rejection_reason' => 'تم تعديل موعد الجلسة مباشرة من الإدارة',
+                    'reviewed_by' => $admin->id,
+                    'reviewed_at' => now(),
+                ]);
+
+            $this->audit('session.rescheduled_by_admin', $session, [
+                'scheduled_at' => $previousTime->toDateTimeString(),
+            ], [
+                'scheduled_at' => $newTime->toDateTimeString(),
+            ], $notes, $admin->id);
+        });
+
+        $session->loadMissing(['teacher.user', 'attendees.student.user']);
+
+        collect([$session->teacher?->user])
+            ->merge($session->attendees->map(fn ($attendee) => $attendee->student?->user))
+            ->filter()
+            ->unique('id')
+            ->each(fn (User $party) => $this->notifications->send(
+                $party,
+                new SessionRescheduledByAdmin($previousTime, $newTime, $notes),
+                'session.rescheduled_by_admin',
+            ));
+
+        return $session->fresh();
+    }
+
+    /**
+     * assertNewTimeHasNoConflict يفحص طالب الحجز وحده (كافٍ لطلبات الباقات الفردية).
+     * تعديل الأدمن يشمل الجلسات الجماعية والدورات أيضاً، فيُفحص كل طالب باشتراك
+     * قائم على الجلسة — وجدول المعلم وحده إن لم يكن عليها أي طالب بعد.
+     */
+    private function assertNoConflictForAllParties(ClassSession $session, Carbon $newTime): void
+    {
+        $attendeesQuery = $session->attendees()->with('student');
+        ClassSession::constrainToLiveAttendee($attendeesQuery);
+        $students = $attendeesQuery->get()->pluck('student')->filter();
+
+        if ($students->isEmpty()) {
+            $this->conflicts->assertNoConflict(null, $session->teacher_id, [$newTime], $session->duration_min, [$session->id]);
+
+            return;
+        }
+
+        foreach ($students as $student) {
+            $this->conflicts->assertNoConflict($student, $session->teacher_id, [$newTime], $session->duration_min, [$session->id]);
+        }
     }
 
     public function reject(RescheduleRequest $rescheduleRequest, User $admin, string $reason): RescheduleRequest

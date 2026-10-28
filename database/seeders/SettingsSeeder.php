@@ -39,12 +39,11 @@ class SettingsSeeder extends Seeder
             ],
             [
                 'key' => 'default_currency',
-                'value' => 'USD',
+                'value' => 'AED',
                 'type' => 'string',
                 'group' => 'pricing',
                 'label_ar' => 'العملة الافتراضية',
             ],
-
             // ═══════ الحجز والمواعيد ═══════
             [
                 'key' => 'booking_payment_hold_minutes',
@@ -128,6 +127,14 @@ class SettingsSeeder extends Seeder
                 'type' => 'integer',
                 'group' => 'attendance',
                 'label_ar' => 'مهلة العودة بعد انقطاع الاتصال (دقيقة)',
+            ],
+            [
+                'key' => 'student_no_show_teacher_payout_percent',
+                'value' => '50',
+                'type' => 'decimal',
+                'group' => 'attendance',
+                'label_ar' => 'نسبة تعويض المعلم عند غياب الطالب (%)',
+                'description' => 'دخل المعلم الجلسة ولم يدخلها أي طالب ولم يُبلغ عن غيابه مسبقاً — يُصرف للمعلم هذه النسبة من مستحق الجلسة',
             ],
             [
                 'key' => 'teacher_no_show_warning_threshold',
@@ -323,6 +330,24 @@ class SettingsSeeder extends Seeder
                 'type' => 'integer',
                 'group' => 'sla',
                 'label_ar' => 'مهلة اعتراض الطلاب على تغيير الجدول (ساعة)',
+            ],
+
+            // ═══════ التواصل ═══════
+            [
+                'key' => 'contact_email',
+                'value' => 'taalam@t3allem.com',
+                'type' => 'string',
+                'group' => 'contact',
+                'label_ar' => 'البريد الإلكتروني للتواصل',
+                'description' => 'يظهر في صفحة تواصل معنا، الفوتر، وبيانات SEO الهيكلية (JSON-LD)',
+            ],
+            [
+                'key' => 'contact_address',
+                'value' => 'Sharjah Freezone',
+                'type' => 'string',
+                'group' => 'contact',
+                'label_ar' => 'العنوان',
+                'description' => 'يظهر في صفحة تواصل معنا وبيانات SEO الهيكلية (JSON-LD)',
             ],
         ];
 

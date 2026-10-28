@@ -29,7 +29,11 @@ class UpdateTeacherProfileRequest extends FormRequest
         $isTrainingCenter = $this->route('teacher')?->isTrainingCenter();
 
         return [
+            'name' => ['nullable', 'string', 'max:150'],
             'bio' => ['nullable', 'string', 'max:500'],
+            'teaching_philosophy_quote' => ['nullable', 'string', 'max:200'],
+            'teaching_philosophy_text' => ['nullable', 'string', 'max:600'],
+            'thank_you_message' => ['nullable', 'string', 'max:600'],
             'intro_youtube_id' => ['nullable', new ValidYoutubeVideo],
             'qualification' => ['nullable', Rule::in(['bachelor', 'master', 'phd', 'professional_cert', 'diploma'])],
             'experience_years' => ['nullable', Rule::in(['under_1', '1_3', '3_5', 'over_5'])],
@@ -37,6 +41,8 @@ class UpdateTeacherProfileRequest extends FormRequest
             'age_groups.*' => ['string', 'max:50'],
             'teaching_methods' => ['nullable', 'array', 'max:20'],
             'teaching_methods.*' => ['string', 'max:50'],
+            'exam_prep' => ['nullable', 'array', 'max:20'],
+            'exam_prep.*' => ['string', 'max:50'],
             'max_daily_sessions' => ['nullable', 'integer', 'min:1', 'max:24'],
 
             // أحرف فقط (بلا أرقام) — نفس قاعدة حقول الاسم الأخرى، على مستوى
@@ -56,6 +62,8 @@ class UpdateTeacherProfileRequest extends FormRequest
             'curriculum_ids.*' => ['integer', 'exists:curricula,id'],
             'language_ids' => ['nullable', 'array', 'max:20'],
             'language_ids.*' => ['integer', 'exists:languages,id'],
+            'major_ids' => ['nullable', 'array', 'max:20'],
+            'major_ids.*' => ['integer', 'exists:majors,id'],
         ];
     }
 }

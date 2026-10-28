@@ -155,6 +155,30 @@ class TeacherSearchTest extends TestCase
         $this->assertSame($expensive->id, $response->json('data.0.id'));
     }
 
+    /**
+     * فحص min_price/max_price يجب أن يتحقق من نفس الباقة لكلا الحدَّين معاً —
+     * لا فحصين منفصلين (EXISTS باقة ≥ الحد الأدنى، وEXISTS باقة ≤ الحد الأقصى
+     * بمعزل عن بعضهما). معلم لديه باقة رخيصة جداً وأخرى غالية جداً كلتاهما
+     * خارج النطاق [200,500] يجب ألا يظهر، رغم أن كل حد على حدة "محقَّق" بباقة مختلفة.
+     */
+    public function test_search_price_range_requires_the_same_package_to_satisfy_both_bounds(): void
+    {
+        $subject = Subject::create(['code' => 'ts-'.uniqid(), 'name_ar' => 'مادة']);
+
+        $straddling = $this->createTeacher('school', 'verified', ranking: 10);
+        $this->createPackage($straddling, $subject, 50); // أقل من الحد الأدنى
+        $this->createPackage($straddling, $subject, 1000); // أعلى من الحد الأقصى
+
+        $withinRange = $this->createTeacher('school', 'verified', ranking: 20);
+        $this->createPackage($withinRange, $subject, 300);
+
+        $response = $this->getJson('/api/teachers/search?min_price=200&max_price=500');
+
+        $response->assertStatus(200);
+        $this->assertCount(1, $response->json('data'));
+        $this->assertSame($withinRange->id, $response->json('data.0.id'));
+    }
+
     private function createPackage(Teacher $teacher, Subject $subject, float $studentPrice): Package
     {
         return Package::create([

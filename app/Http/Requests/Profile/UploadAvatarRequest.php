@@ -14,8 +14,9 @@ class UploadAvatarRequest extends FormRequest
     public function rules(): array
     {
         return [
-            // بدقة جيدة: 400×400 كحد أدنى، بلا حد أقصى للأبعاد — فقط حجم الملف (5 ميغابايت)
-            'avatar' => ['required', 'image', 'mimes:jpeg,jpg,png', 'max:5120', 'dimensions:min_width=400,min_height=400'],
+            // بدقة جيدة: 400×400 كحد أدنى، بلا حد أقصى للأبعاد. 50 ميغابايت — يتوافق
+            // مع حد PHP الفعلي في public/.user.ini (كلا الحدّين يجب أن يتطابقا).
+            'avatar' => ['required', 'image', 'mimes:jpeg,jpg,png', 'max:51200', 'dimensions:min_width=400,min_height=400'],
         ];
     }
 
@@ -35,7 +36,7 @@ class UploadAvatarRequest extends FormRequest
             'avatar.required' => 'يرجى اختيار صورة',
             'avatar.image' => 'الملف المُرسَل يجب أن يكون صورة',
             'avatar.mimes' => 'صيغة الصورة غير مدعومة — يُسمح فقط بصورة JPG أو PNG',
-            'avatar.max' => 'حجم الصورة أكبر من الحد المسموح (5 ميغابايت كحد أقصى)',
+            'avatar.max' => 'حجم الصورة أكبر من الحد المسموح (50 ميغابايت كحد أقصى)',
             'avatar.dimensions' => 'أبعاد الصورة صغيرة جداً — الحد الأدنى 400×400 بكسل',
         ];
     }

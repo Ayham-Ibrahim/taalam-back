@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Booking;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Booking\CreateManualBookingRequest;
+use App\Http\Requests\Booking\DeleteBookingRequest;
 use App\Http\Requests\Booking\RejectBookingRequest;
 use App\Http\Requests\Booking\RequestIndividualBookingRequest;
 use App\Models\Booking;
@@ -82,6 +83,7 @@ class BookingController extends Controller
             $student,
             $package,
             $request->validated('slots'),
+            $request->validated('coupon_code'),
         );
 
         return $this->success($booking, 'تم إرسال طلب الحجز، بانتظار موافقة المعلم', 201);
@@ -128,13 +130,31 @@ class BookingController extends Controller
         return $this->success(['checkout_url' => $checkoutUrl]);
     }
 
+    /** الطالب يطبّق كود خصم على حجزه المعلَّق قبل إكمال الدفع */
+    public function applyCoupon(Request $request, Booking $booking)
+    {
+        abort_unless($request->user()->loadMissing('student')->student?->id === $booking->student_id, 403);
+
+        $data = $request->validate(['coupon_code' => ['required', 'string', 'max:30']]);
+
+        $booking = $this->bookingService->applyCoupon(
+            $booking,
+            $data['coupon_code'],
+            fn ($payment) => $this->paymentService->discardOpenCheckoutSession($payment),
+        );
+
+        return $this->success($booking, 'تم تطبيق كود الخصم');
+    }
+
     public function joinGroup(Request $request, Package $package)
     {
         $this->authorize('create', Booking::class);
 
+        $couponCode = $request->validate(['coupon_code' => ['nullable', 'string', 'max:30']])['coupon_code'] ?? null;
+
         $student = $request->user()->loadMissing('student')->student;
 
-        $booking = $this->bookingService->joinGroupPackage($student, $package);
+        $booking = $this->bookingService->joinGroupPackage($student, $package, $couponCode);
         $checkoutUrl = $this->paymentService->createCheckoutSessionForBooking($booking);
 
         return $this->success([
@@ -167,8 +187,17 @@ class BookingController extends Controller
             $request->user(),
             $request->validated('reason'),
             $request->validated('slots'),
+            $request->validated('coupon_code'),
         );
 
         return $this->success($booking, 'تم إنشاء الحجز اليدوي بنجاح', 201);
+    }
+
+    /** حذف إداري لحجز لم يُدفع ثمنه بعد فقط — BookingService::delete يرفض أي حجز مدفوع. */
+    public function destroy(DeleteBookingRequest $request, Booking $booking)
+    {
+        $this->bookingService->delete($booking, $request->user(), $request->validated('reason'));
+
+        return $this->success(null, 'تم حذف الحجز بنجاح');
     }
 }

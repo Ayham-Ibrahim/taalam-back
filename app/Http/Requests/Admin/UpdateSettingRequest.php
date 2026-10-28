@@ -29,6 +29,12 @@ class UpdateSettingRequest extends FormRequest
 
                     if (mb_strlen((string) $value) > 5000) {
                         $fail('قيمة الإعداد طويلة جداً (الحد الأقصى 5000 حرف).');
+
+                        return;
+                    }
+
+                    if ($this->route('key') === 'contact_email' && ! filter_var($value, FILTER_VALIDATE_EMAIL)) {
+                        $fail('يرجى إدخال بريد إلكتروني صحيح.');
                     }
                 },
             ],

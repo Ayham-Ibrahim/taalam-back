@@ -24,6 +24,8 @@ class ClassSession extends Model
         'reminder_sent_at',
         'recording_url',
         'status',
+        'attendance_outcome',
+        'teacher_payout_percent',
         'started_at',
         'ended_at',
         'cancellation_reason',
@@ -32,9 +34,32 @@ class ClassSession extends Model
         'teacher_notes',
     ];
 
+    /**
+     * نتيجة الحضور التلقائي ونسبة مستحق المعلم شأن داخلي للأدمن والمستحقات — لا تظهر
+     * للطالب/المعلم في أي استجابة تُسلسِل الجلسة كاملة (علاقات sessions داخل الحجز مثلاً).
+     * ClassSessionResource يضيفها صراحة للأدمن فقط.
+     */
+    protected $hidden = [
+        'attendance_outcome',
+        'teacher_payout_percent',
+    ];
+
+    /** دخل المعلم وطالب واحد على الأقل — مستحق كامل */
+    public const OUTCOME_ATTENDED = 'attended';
+
+    /** دخل المعلم ولم يدخل أي طالب — نسبة التعويض من الإعداد */
+    public const OUTCOME_STUDENT_NO_SHOW = 'student_no_show';
+
+    /** لم يدخل المعلم — لا مستحق */
+    public const OUTCOME_TEACHER_ABSENT = 'teacher_absent';
+
+    /** بدأت قبل بدء تسجيل الانضمام (SessionJoinLog::trackingStartedAt) — لا دليل حضور، تُحتسب كاملة */
+    public const OUTCOME_UNTRACKED = 'untracked';
+
     protected function casts(): array
     {
         return [
+            'teacher_payout_percent' => 'decimal:2',
             'scheduled_at' => 'datetime',
             'original_scheduled_at' => 'datetime',
             'started_at' => 'datetime',
@@ -62,6 +87,12 @@ class ClassSession extends Model
     public function attendees()
     {
         return $this->hasMany(SessionAttendee::class);
+    }
+
+    /** سجل الانضمام (زر "انضم") — للعرض على الأدمن فقط، لا يدخل في أي منطق آخر */
+    public function joinLogs()
+    {
+        return $this->hasMany(SessionJoinLog::class);
     }
 
     public function makeupForSession()
@@ -136,5 +167,53 @@ class ClassSession extends Model
                 ->whereNull('enrollment_id')
                 ->orWhereHas('enrollment', fn ($e) => $e->whereNotIn('status', ['cancelled', 'withdrawn']))
             );
+    }
+
+    public const PAID_BOOKING_STATUSES = ['confirmed', 'active', 'completed'];
+
+    public const PAID_ENROLLMENT_STATUSES = ['confirmed', 'in_progress', 'completed'];
+
+    /**
+     * أضيق من constrainToLiveAttendee: الاشتراك القائم يكفي لظهور الجلسة في القوائم،
+     * أما الانضمام ورابط BBB والتذكير فتشترط اشتراكاً مدفوعاً فعلاً. حجز pending_payment
+     * "قائم" لكنه غير مدفوع — وغرفة جلسة المجموعة تُنشأ فور دفع أي طالب آخر، فلو كفى
+     * "القائم" لدخل غير الدافع مجاناً (أو احتفظ بالرابط الخام بعد انتهاء مهلته).
+     */
+    public static function constrainToPaidAttendee(Builder|HasMany $attendees): void
+    {
+        $attendees->where(fn ($q) => $q
+            ->whereHas('booking', fn ($b) => $b->whereIn('status', self::PAID_BOOKING_STATUSES))
+            ->orWhereHas('enrollment', fn ($e) => $e->whereIn('status', self::PAID_ENROLLMENT_STATUSES))
+        );
+    }
+
+    /**
+     * يضيف student_has_paid_access لكل جلسة في استعلام قائمة طالب (exists واحد ضمن
+     * نفس الاستعلام) — كي لا يسأل ClassSessionResource عن كل جلسة على حدة.
+     */
+    public function scopeWithStudentPaidAccess(Builder $query, User $user): Builder
+    {
+        $studentId = $user->isStudent() ? $user->loadMissing('student')->student?->id : null;
+
+        if ($studentId === null) {
+            return $query;
+        }
+
+        return $query->withExists(['attendees as student_has_paid_access' => function ($a) use ($studentId) {
+            $a->where('student_id', $studentId);
+            self::constrainToPaidAttendee($a);
+        }]);
+    }
+
+    public function studentHasPaidAccess(int $studentId): bool
+    {
+        if (array_key_exists('student_has_paid_access', $this->attributes)) {
+            return (bool) $this->attributes['student_has_paid_access'];
+        }
+
+        $query = $this->attendees()->where('student_id', $studentId);
+        self::constrainToPaidAttendee($query);
+
+        return $query->exists();
     }
 }

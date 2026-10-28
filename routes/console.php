@@ -1,6 +1,7 @@
 <?php
 
 use App\Jobs\CompleteEndedSessionsJob;
+use App\Jobs\CreateMissingBbbRoomsJob;
 use App\Jobs\ExpireStaleBookingsJob;
 use App\Jobs\FetchSessionRecordingsJob;
 use App\Jobs\SendSessionRemindersJob;
@@ -21,6 +22,9 @@ Schedule::job(new CompleteEndedSessionsJob)->everyMinute();
 
 // إرسال رابط الجلسة تلقائياً للطالب والمعلم قبل موعدها (session_reminder_minutes_before).
 Schedule::job(new SendSessionRemindersJob)->everyMinute();
+
+// شبكة أمان: إنشاء غرفة BBB لأي جلسة مدفوعة قادمة بقيت بلا رابط انضمام لأي سبب.
+Schedule::job(new CreateMissingBbbRoomsJob)->everyFiveMinutes();
 
 // جلب روابط تسجيلات الجلسات المنتهية من BBB فور توفّرها (تستغرق معالجتها وقتاً على BBB نفسه).
 Schedule::job(new FetchSessionRecordingsJob)->everyFifteenMinutes();

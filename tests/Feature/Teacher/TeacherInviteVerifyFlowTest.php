@@ -531,6 +531,63 @@ class TeacherInviteVerifyFlowTest extends TestCase
         $approve->assertStatus(200)->assertJsonPath('data.status', 'verified');
     }
 
+    /**
+     * إصلاح عطل مُبلَّغ عنه: معلم مستورَد عبر الإكسل (أو مدعوّ فردياً) يبقى
+     * status='invited' إلى أن يقبل دعوته بنفسه (لا كلمة مرور له أصلاً) — كان
+     * زر "إرسال طلب التوثيق" لا يظهر أبداً للأدمن أثناء إكماله ملف هذا المعلم
+     * نيابة عنه لأن submitForVerification كانت تشترط 'active_unverified'
+     * حصراً، فيبقى عالقاً عند 'invited' للأبد ولا يصل أبداً لحالة يمكن فيها
+     * اعتماده. يغطي هذا الاختبار المسار الكامل بدءاً من الدعوة الفعلية (لا
+     * إنشاء Teacher::create مباشرة بحالة active_unverified كما في الاختبار
+     * أعلاه) بلا أي قبول للدعوة إطلاقاً، ثم يتأكد أن قبولها لاحقاً لا يمحو ما
+     * أنجزه الأدمن (انظر تعليق TeacherService::acceptInvitation()).
+     */
+    public function test_admin_can_complete_and_verify_an_invited_teacher_who_never_accepted_their_invitation(): void
+    {
+        Notification::fake();
+        Storage::fake('local');
+
+        $admin = User::factory()->admin()->create();
+        $adminToken = $admin->createToken('t')->plainTextToken;
+
+        $this->as($adminToken)->postJson('/api/teachers', [
+            'name' => 'أستاذ مستورَد', 'email' => 'imported@example.com', 'teacher_type' => 'school',
+        ])->assertStatus(201);
+
+        $teacherUser = User::where('email', 'imported@example.com')->firstOrFail();
+        $teacher = Teacher::where('user_id', $teacherUser->id)->firstOrFail();
+        $this->assertSame('invited', $teacher->status);
+
+        $update = $this->as($adminToken)->putJson("/api/teachers/{$teacher->id}", ['bio' => 'أكمله الأدمن قبل أي قبول للدعوة']);
+        $update->assertStatus(200);
+
+        foreach (['identity', 'academic', 'experience'] as $type) {
+            $upload = $this->as($adminToken)->post("/api/teachers/{$teacher->id}/verification-documents", [
+                'type' => $type,
+                'file' => UploadedFile::fake()->create("{$type}.pdf", 50, 'application/pdf'),
+            ]);
+            $upload->assertStatus(201);
+            $this->as($adminToken)->postJson("/api/verification-documents/{$upload->json('data.id')}/approve")->assertStatus(200);
+        }
+
+        // العطل المُبلَّغ عنه تحديداً: كان هذا يفشل بـ422 "لا يمكن إرسال طلب التوثيق من هذه الحالة"
+        $submit = $this->as($adminToken)->postJson("/api/teachers/{$teacher->id}/submit-for-verification");
+        $submit->assertStatus(200);
+
+        $approve = $this->as($adminToken)->postJson("/api/teachers/{$teacher->id}/approve");
+        $approve->assertStatus(200)->assertJsonPath('data.status', 'verified');
+
+        // المعلم يقبل دعوته أخيراً — لا يجب أن يُعيد هذا حالته إلى active_unverified
+        $invitation = AccountInvitation::where('user_id', $teacherUser->id)->firstOrFail();
+        $accept = $this->postJson('/api/teachers/accept-invitation', [
+            'token' => $invitation->token,
+            'password' => 'Password123!',
+            'password_confirmation' => 'Password123!',
+        ]);
+        $accept->assertStatus(200);
+        $this->assertDatabaseHas('teachers', ['id' => $teacher->id, 'status' => 'verified']);
+    }
+
     /** التوسيع للأدمن يجب ألا يفتح المسار لأي معلم آخر غير صاحب الحساب */
     public function test_a_different_teacher_still_cannot_upload_documents_or_submit_for_verification_on_behalf_of_another_teacher(): void
     {

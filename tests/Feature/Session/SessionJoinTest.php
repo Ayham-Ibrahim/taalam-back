@@ -204,6 +204,44 @@ class SessionJoinTest extends TestCase
         $response->assertStatus(403);
     }
 
+    /**
+     * جلسة مجموعة غرفتها قائمة لأن طالباً آخر دفع — صاحب حجز pending_payment على
+     * نفس الجلسة يرى الجلسة لكن لا يدخلها ولا يستلم رابط BBB الخام.
+     */
+    public function test_a_student_with_an_unpaid_booking_cannot_join_or_see_the_raw_url_even_when_the_room_exists(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        [, $session] = $this->createBookingWithSession($teacher, now()->subMinutes(5));
+        [$unpaidUser] = $this->addAttendeeWithBookingStatus($session, 'pending_payment');
+
+        $token = $unpaidUser->createToken('t')->plainTextToken;
+
+        $this->as($token)->getJson("/api/class-sessions/{$session->id}/join")->assertStatus(403);
+
+        $show = $this->as($token)->getJson("/api/class-sessions/{$session->id}");
+        $show->assertStatus(200);
+        $this->assertNull($show->json('data.join_url_student'));
+
+        $index = $this->as($token)->getJson('/api/class-sessions');
+        $index->assertStatus(200);
+        $this->assertNull(collect($index->json('data'))->firstWhere('id', $session->id)['join_url_student']);
+    }
+
+    public function test_the_signed_reminder_link_shows_a_clean_page_for_an_unpaid_booking(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        [, $session] = $this->createBookingWithSession($teacher, now()->subMinutes(5));
+        [$unpaidUser] = $this->addAttendeeWithBookingStatus($session, 'pending_payment');
+
+        $url = \Illuminate\Support\Facades\URL::temporarySignedRoute(
+            'class-sessions.join-redirect',
+            now()->addHour(),
+            ['session' => $session->id, 'user' => $unpaidUser->id],
+        );
+
+        $this->get($url)->assertStatus(403)->assertViewIs('session-join-unavailable');
+    }
+
     public function test_join_fails_cleanly_when_no_join_url_was_ever_set(): void
     {
         [$teacher, $teacherUser] = $this->createVerifiedTeacher();
@@ -287,5 +325,39 @@ class SessionJoinTest extends TestCase
         ]);
 
         return [$booking, $session, $studentUser];
+    }
+
+    /**
+     * @return array{0: User, 1: Booking}
+     */
+    private function addAttendeeWithBookingStatus(ClassSession $session, string $status): array
+    {
+        $studentUser = User::factory()->student()->create();
+        $student = Student::create(['user_id' => $studentUser->id, 'education_type' => 'school']);
+        $owner = $session->booking;
+
+        $booking = Booking::create([
+            'reference' => 'BK-'.strtoupper(uniqid()),
+            'student_id' => $student->id,
+            'teacher_id' => $owner->teacher_id,
+            'package_id' => $owner->package_id,
+            'amount_paid' => 160,
+            'teacher_amount' => 100,
+            'platform_amount' => 60,
+            'margin_percent_snapshot' => 60,
+            'sessions_total' => 1,
+            'sessions_remaining' => 1,
+            'status' => $status,
+            'hold_expires_at' => now()->addMinutes(10),
+        ]);
+
+        SessionAttendee::create([
+            'class_session_id' => $session->id,
+            'student_id' => $student->id,
+            'booking_id' => $booking->id,
+            'attendance' => 'registered',
+        ]);
+
+        return [$studentUser, $booking];
     }
 }

@@ -69,6 +69,37 @@ class ReviewService
         ]);
     }
 
+    /**
+     * تقييم حر لمعلم بصرف النظر عن وجود جلسة — بلا شرط حضور ولا مهلة زمنية،
+     * بطلب صريح: الطالب يقدر يقيّم أي وقت بغضّ النظر عن تاريخ حجوزاته. تقييم
+     * واحد قابل للتعديل لكل طالب/معلم هنا (upsert)، منفصل تماماً عن تقييمات
+     * الجلسات الحقيقية (create() أعلاه) التي تبقى كما هي بلا أي تغيير — كلا
+     * المسارين يُحتسبان معاً في rating_avg/reviews_count عبر ReviewObserver.
+     */
+    public function createOrUpdateForTeacher(Student $student, Teacher $teacher, int $rating, ?string $comment): Review
+    {
+        $review = Review::where('student_id', $student->id)
+            ->where('teacher_id', $teacher->id)
+            ->whereNull('class_session_id')
+            ->first();
+
+        if ($review) {
+            $review->update(['rating' => $rating, 'comment' => $comment]);
+
+            return $review->fresh();
+        }
+
+        return Review::create([
+            'student_id' => $student->id,
+            'teacher_id' => $teacher->id,
+            'rating' => $rating,
+            'comment' => $comment,
+            // بلا مهلة تعديل — قابل للتعديل دوماً عبر إعادة الإرسال هنا (وأيضاً
+            // عبر update() العادي: فحص edit_deadline هناك يتجاوز قيمة null تلقائياً)
+            'edit_deadline' => null,
+        ]);
+    }
+
     public function update(Review $review, Student $student, int $rating, ?string $comment): Review
     {
         if ($review->student_id !== $student->id) {

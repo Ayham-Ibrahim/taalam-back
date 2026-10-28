@@ -7,6 +7,7 @@ use App\Models\Booking;
 use App\Models\ClassSession;
 use App\Models\Enrollment;
 use App\Models\Teacher;
+use App\Models\TeacherExperience;
 use App\Models\TeacherFaq;
 use App\Models\TeacherVideo;
 use App\Models\User;
@@ -70,13 +71,15 @@ class TeacherService
     }
 
     /**
-     * دخول فوري بلا خطوة قبول دعوة — الأدمن يضع كلمة المرور مباشرة، الحساب
+     * دخول فوري بلا خطوة قبول دعوة — الأدمن يضع كلمة المرور مباشرة (أو
+     * تُولَّد آلياً عند الاستيراد الجماعي، انظر TeacherImportService)، الحساب
      * نشط لحظياً بحالة active_unverified (نفس نقطة انطلاق acceptInvitation)
-     * فيرى المعلم عند أول دخول واجهة إكمال الملف + رفع الوثائق.
+     * فيرى المعلم عند أول دخول واجهة إكمال الملف + رفع الوثائق. بلا رابط دعوة
+     * منتهي الصلاحية إطلاقاً — كلمة المرور تصله بالبريد، يدخل متى شاء.
      */
-    public function createByAdmin(array $data, User $admin): Teacher
+    public function createByAdmin(array $data, User $admin, ?int $notificationDelaySeconds = null): Teacher
     {
-        return DB::transaction(function () use ($data, $admin) {
+        return DB::transaction(function () use ($data, $admin, $notificationDelaySeconds) {
             $user = User::create([
                 'name' => $data['name'],
                 'email' => $data['email'],
@@ -92,7 +95,12 @@ class TeacherService
                 'status' => 'active_unverified',
             ]);
 
-            $this->notifications->send($user, new AccountCreatedByAdmin('teacher', $data['password']), 'teacher.account_created');
+            $this->notifications->send(
+                $user,
+                new AccountCreatedByAdmin('teacher', $data['password']),
+                'teacher.account_created',
+                $notificationDelaySeconds,
+            );
 
             $this->audit('teacher.account_created', $teacher, [], [
                 'teacher_type' => $teacher->teacher_type,
@@ -146,7 +154,15 @@ class TeacherService
             $user->update(['password' => $password, 'is_active' => true]);
 
             $teacher = $user->teacher;
-            $teacher->update(['status' => 'active_unverified']);
+            // شرطي لا تعيين مباشر: الأدمن قد يكون أكمل ملف هذا المعلم بالكامل
+            // نيابة عنه وهو ما زال "invited" (submitForVerification تقبل هذه
+            // الحالة أيضاً الآن)، فتقدَّم حتى pending_verification أو verified
+            // قبل أن يقبل المعلم دعوته أصلاً. تعيين غير شرطي هنا كان يُرجِعه
+            // دائماً إلى active_unverified عند قبوله لاحقاً، ماحياً أي تقدُّم
+            // أحرزه الأدمن بصمت.
+            if ($teacher->status === 'invited') {
+                $teacher->update(['status' => 'active_unverified']);
+            }
 
             $invitation->update(['accepted_at' => now()]);
 
@@ -165,8 +181,17 @@ class TeacherService
         $subjectIds = $data['subject_ids'] ?? null;
         $curriculumIds = $data['curriculum_ids'] ?? null;
         $languageIds = $data['language_ids'] ?? null;
+        $majorIds = $data['major_ids'] ?? null;
+        $name = $data['name'] ?? null;
 
-        unset($data['subject_ids'], $data['curriculum_ids'], $data['language_ids']);
+        unset($data['subject_ids'], $data['curriculum_ids'], $data['language_ids'], $data['major_ids'], $data['name']);
+
+        // name يعيش على users لا teachers — Teacher::$fillable لا يتضمّنه أصلاً،
+        // فمررناه عبر fill() كان سيُتجاهَل بصمت دون أي تحديث فعلي.
+        if ($name !== null && $name !== '') {
+            $teacher->loadMissing('user');
+            $teacher->user->update(['name' => $name]);
+        }
 
         $teacher->fill($data);
         $teacher->save();
@@ -183,7 +208,15 @@ class TeacherService
             $teacher->languages()->sync($languageIds);
         }
 
-        return $teacher->fresh(['subjects', 'curricula', 'languages']);
+        // التخصص للمعلم الجامعي فقط — أي نوع آخر تُمسح تخصصاته بدل أن تبقى
+        // عالقة فيظهر بفلتر "تعليم جامعي" بالخطأ.
+        if ($teacher->teacher_type !== 'university') {
+            $teacher->majors()->detach();
+        } elseif ($majorIds !== null) {
+            $teacher->majors()->sync($majorIds);
+        }
+
+        return $teacher->fresh(['subjects', 'curricula', 'languages', 'majors', 'user']);
     }
 
     /** يُرفَض بعد الحد الأقصى (Teacher::MAX_VIDEOS) — لا حذف تلقائي للأقدم، على المعلم/الأدمن حذف واحد أولاً */
@@ -213,9 +246,89 @@ class TeacherService
         $video->delete();
     }
 
+    /** يُرفَض بعد الحد الأقصى (Teacher::MAX_FAQS) — نفس منطق addVideo() تماماً */
+    public function addFaq(Teacher $teacher, array $data): TeacherFaq
+    {
+        if ($teacher->faqs()->count() >= Teacher::MAX_FAQS) {
+            throw ValidationException::withMessages([
+                'faqs' => ['لا يمكن إضافة أكثر من '.Teacher::MAX_FAQS.' أسئلة — احذف سؤالاً قديماً أولاً.'],
+            ]);
+        }
+
+        $faq = $teacher->faqs()->create([
+            'question' => $data['question'],
+            'answer' => $data['answer'],
+            'sort_order' => ($teacher->faqs()->max('sort_order') ?? -1) + 1,
+        ]);
+
+        $this->audit('teacher.faq_added', $faq, [], ['question' => $faq->question]);
+
+        return $faq;
+    }
+
+    public function removeFaq(TeacherFaq $faq): void
+    {
+        $this->audit('teacher.faq_removed', $faq, ['question' => $faq->question], []);
+
+        $faq->delete();
+    }
+
+    public function addExperience(Teacher $teacher, array $data): TeacherExperience
+    {
+        if ($teacher->experiences()->count() >= Teacher::MAX_EXPERIENCES) {
+            throw ValidationException::withMessages([
+                'experiences' => ['لا يمكن إضافة أكثر من '.Teacher::MAX_EXPERIENCES.' خبرات — احذف خبرة قديمة أولاً.'],
+            ]);
+        }
+
+        $experience = $teacher->experiences()->create([
+            'title' => $data['title'],
+            'company' => $data['company'] ?? null,
+            'period' => $data['period'],
+            'location' => $data['location'] ?? null,
+            'description' => $data['description'] ?? null,
+            'sort_order' => ($teacher->experiences()->max('sort_order') ?? -1) + 1,
+        ]);
+
+        $this->audit('teacher.experience_added', $experience, [], ['title' => $experience->title]);
+
+        return $experience;
+    }
+
+    public function updateExperience(TeacherExperience $experience, array $data): TeacherExperience
+    {
+        $before = ['title' => $experience->title];
+
+        $experience->update([
+            'title' => $data['title'],
+            'company' => $data['company'] ?? null,
+            'period' => $data['period'],
+            'location' => $data['location'] ?? null,
+            'description' => $data['description'] ?? null,
+        ]);
+
+        $this->audit('teacher.experience_updated', $experience, $before, ['title' => $experience->title]);
+
+        return $experience;
+    }
+
+    public function removeExperience(TeacherExperience $experience): void
+    {
+        $this->audit('teacher.experience_removed', $experience, ['title' => $experience->title], []);
+
+        $experience->delete();
+    }
+
+    /**
+     * "invited" مقبولة هنا أيضاً — لا فقط "active_unverified" — كي يستطيع
+     * الأدمن إكمال ملف معلم مستورَد/مدعوّ لم يقبل دعوته بعد (لا كلمة مرور له
+     * أصلاً، فلا طريق له لقبولها والوصول لحالة active_unverified بنفسه) وإرسال
+     * طلب توثيقه نيابة عنه مباشرة؛ يقبل هو الدعوة لاحقاً بلا أي تأثير على ما
+     * أنجزه الأدمن (انظر تعليق acceptInvitation() أدناه).
+     */
     public function submitForVerification(Teacher $teacher): Teacher
     {
-        if ($teacher->status !== 'active_unverified') {
+        if (! in_array($teacher->status, ['invited', 'active_unverified'], true)) {
             throw ValidationException::withMessages([
                 'status' => ['لا يمكن إرسال طلب التوثيق من هذه الحالة'],
             ]);
@@ -290,12 +403,12 @@ class TeacherService
 
         $old = $teacher->only(['status']);
 
-        $teacher->update(['status' => 'suspended']);
+        $teacher->update(['status' => 'suspended', 'suspension_reason' => $reason]);
 
         // نفس منطق reject(): التعليق إجراء عقابي، يجب أن يقطع الجلسات النشطة
-        // فوراً لا أن ينتظر. المعلم لا يزال يستطيع تسجيل الدخول من جديد (تسجيل
-        // الدخول غير مشروط بالحالة)، فيحصل على توكن جديد إن احتاج التفاعل مع
-        // حسابه أثناء التعليق (مثلاً إعادة رفع وثيقة).
+        // فوراً لا أن ينتظر. المعلم لا يزال يستطيع تسجيل الدخول من جديد — لكن
+        // AuthService::login() يرفض الدخول طالما الحالة suspended ويعرض له
+        // suspension_reason، فلا يحصل على توكن جديد إلا بعد إعادة التفعيل.
         $teacher->loadMissing('user');
         $teacher->user?->tokens()->delete();
 
@@ -352,7 +465,7 @@ class TeacherService
 
         $old = $teacher->only(['status']);
 
-        $teacher->update(['status' => 'verified']);
+        $teacher->update(['status' => 'verified', 'suspension_reason' => null]);
 
         $this->audit('teacher.reactivated', $teacher, $old, ['status' => 'verified']);
 
@@ -432,9 +545,10 @@ class TeacherService
      */
     public function getStats(Teacher $teacher): array
     {
-        $teachingMinutes = ClassSession::where('teacher_id', $teacher->id)
-            ->where('status', 'completed')
-            ->sum('duration_min');
+        $completedSessions = ClassSession::where('teacher_id', $teacher->id)
+            ->where('status', 'completed');
+        $teachingMinutes = (clone $completedSessions)->sum('duration_min');
+        $completedSessionsCount = $completedSessions->count();
 
         $studentIds = Booking::where('teacher_id', $teacher->id)->whereNotNull('student_id')->pluck('student_id')
             ->merge(Enrollment::where('teacher_id', $teacher->id)->whereNotNull('student_id')->pluck('student_id'))
@@ -444,31 +558,16 @@ class TeacherService
             'rating_avg' => (float) $teacher->rating_avg,
             'reviews_count' => $teacher->reviews_count,
             'teaching_hours' => round($teachingMinutes / 60, 1),
+            'completed_sessions' => $completedSessionsCount,
             'total_students' => $studentIds->count(),
+            // نسبة الرضا المعروضة في ترويسة الملف العام: نسبة إتمام الحصص إن
+            // توفّرت، وإلا فمشتقّة من متوسط التقييم (تقييم/5). null إن لا هذا ولا ذاك.
+            'satisfaction_rate' => match (true) {
+                (float) $teacher->completion_rate > 0 => (int) round((float) $teacher->completion_rate),
+                (float) $teacher->rating_avg > 0 => (int) round(((float) $teacher->rating_avg / 5) * 100),
+                default => null,
+            },
         ];
-    }
-
-    /**
-     * أسئلة شائعة يكتبها المعلم بنفسه — نفس نمط addVideo/removeVideo تماماً
-     * (حد أقصى للعدد + تسجيل حدث عمل واضح).
-     */
-    public function addFaq(Teacher $teacher, array $data): TeacherFaq
-    {
-        if ($teacher->faqs()->count() >= Teacher::MAX_FAQS) {
-            throw ValidationException::withMessages([
-                'faqs' => ['لا يمكن إضافة أكثر من '.Teacher::MAX_FAQS.' أسئلة — احذف سؤالاً قديماً أولاً.'],
-            ]);
-        }
-
-        $faq = $teacher->faqs()->create([
-            'question' => $data['question'],
-            'answer' => $data['answer'],
-            'sort_order' => ($teacher->faqs()->max('sort_order') ?? -1) + 1,
-        ]);
-
-        $this->audit('teacher.faq_added', $faq, [], ['question' => $faq->question]);
-
-        return $faq;
     }
 
     public function updateFaq(TeacherFaq $faq, array $data): TeacherFaq
@@ -483,12 +582,5 @@ class TeacherService
         $this->audit('teacher.faq_updated', $faq, $old, ['question' => $faq->question, 'answer' => $faq->answer]);
 
         return $faq;
-    }
-
-    public function removeFaq(TeacherFaq $faq): void
-    {
-        $this->audit('teacher.faq_removed', $faq, ['question' => $faq->question], []);
-
-        $faq->delete();
     }
 }

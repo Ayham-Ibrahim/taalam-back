@@ -24,6 +24,7 @@ class CreateManualBookingRequest extends FormRequest
             // المقارنة الصحيحة تتم لاحقاً بتوقيت الطالب الفعلي (BookingService::assertSlotsNotInPast).
             'slots.*.date' => ['required_with:slots', 'date'],
             'slots.*.start_time' => ['required_with:slots', 'date_format:H:i'],
+            'coupon_code' => ['nullable', 'string', 'max:30'],
         ];
     }
 }

@@ -11,7 +11,7 @@ class Booking extends Model
     use SoftDeletes;
 
     protected $attributes = [
-        'currency' => 'USD',
+        'currency' => 'AED',
     ];
 
     protected $fillable = [
@@ -19,9 +19,11 @@ class Booking extends Model
         'student_id',
         'teacher_id',
         'package_id',
+        'coupon_id',
         'amount_paid',
         'teacher_amount',
         'platform_amount',
+        'discount_amount',
         'margin_percent_snapshot',
         'currency',
         'sessions_total',
@@ -51,6 +53,7 @@ class Booking extends Model
             'amount_paid' => 'decimal:2',
             'teacher_amount' => 'decimal:2',
             'platform_amount' => 'decimal:2',
+            'discount_amount' => 'decimal:2',
             'margin_percent_snapshot' => 'decimal:2',
             'expires_at' => 'date',
             'frozen_until' => 'date',
@@ -77,6 +80,11 @@ class Booking extends Model
     public function package()
     {
         return $this->belongsTo(Package::class);
+    }
+
+    public function coupon()
+    {
+        return $this->belongsTo(Coupon::class);
     }
 
     public function admin()
@@ -120,12 +128,24 @@ class Booking extends Model
     }
 
     /**
+     * مصدر الحقيقة الوحيد لسؤال "هل دُفع هذا الحجز فعلاً؟" — status وحده لا يكفي
+     * (pending_payment له صف Payment بحالة pending لا paid بعد؛ confirmed/active
+     * لا تُبلَغ إلا بعد أن يضبط PaymentService/webhook صف الدفع نفسه paid أولاً).
+     * مستخدَمة في BookingService::delete لمنع حذف حجز تم تحصيل ثمنه فعلياً —
+     * لا استرداد تلقائي في هذا النظام (راجع تعليق هجرة جدول payments).
+     */
+    public function hasPaidPayment(): bool
+    {
+        return $this->payments()->where('status', 'paid')->exists();
+    }
+
+    /**
      * يحصر الاستعلام بما يحق للمستخدم رؤيته حسب دوره — الأدمن يرى الكل، المعلم
      * حجوزات طلابه، الطالب حجوزاته فقط. مركزي كي لا يتكرر منطق الأدوار في كل Controller.
      */
     public function scopeVisibleTo(Builder $query, User $user): Builder
     {
-        if ($user->isAdmin()) {
+        if ($user->isFinance()) {
             return $query;
         }
 

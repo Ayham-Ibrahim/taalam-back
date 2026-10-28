@@ -17,6 +17,10 @@ class BigBlueButtonService
 {
     public function createMeeting(string $meetingId, string $meetingName, string $attendeePw, string $moderatorPw): bool
     {
+        if ($this->fakeRooms()) {
+            return true;
+        }
+
         if (! $this->isConfigured()) {
             return false;
         }
@@ -103,6 +107,10 @@ class BigBlueButtonService
      */
     public function meetingExists(string $meetingId): bool
     {
+        if ($this->fakeRooms()) {
+            return true;
+        }
+
         if (! $this->isConfigured()) {
             return false;
         }
@@ -180,6 +188,16 @@ class BigBlueButtonService
 
             return [];
         }
+    }
+
+    /**
+     * وضع الغرف الوهمية (BBB_FAKE_ROOMS) — للتطوير المحلي فقط: يُعتبر كل اجتماع
+     * مُنشأً وموجوداً بلا أي اتصال بخادم BBB، فينجح الانضمام ويُسجَّل الحضور.
+     * محصور بـ APP_ENV=local حتى لا يُفعَّل خطأً على الإنتاج.
+     */
+    private function fakeRooms(): bool
+    {
+        return app()->isLocal() && (bool) config('services.bbb.fake_rooms');
     }
 
     private function isConfigured(): bool

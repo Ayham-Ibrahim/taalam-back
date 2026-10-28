@@ -39,6 +39,11 @@ class CoursePolicy
         return $user->isAdmin() || $user->loadMissing('teacher')->teacher?->id === $course->teacher_id;
     }
 
+    public function enable(User $user): bool
+    {
+        return $user->isAdmin();
+    }
+
     public function approve(User $user): bool
     {
         return $user->isAdmin();

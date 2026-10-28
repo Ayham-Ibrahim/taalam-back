@@ -41,4 +41,16 @@ class ReviewPolicy
     {
         return $user->loadMissing('student')->student !== null;
     }
+
+    /** رفع ملف Excel بتقييمات يدوية لمعلم — ميزة مؤقتة لإدخال بيانات تاريخية */
+    public function import(User $user): bool
+    {
+        return $user->isAdmin();
+    }
+
+    /** حذف تقييم مُستورَد يدوياً فقط — التحقق الفعلي من is_seeded يتم في الـ Controller */
+    public function delete(User $user): bool
+    {
+        return $user->isAdmin();
+    }
 }

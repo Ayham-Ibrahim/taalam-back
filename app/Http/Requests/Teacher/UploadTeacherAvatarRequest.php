@@ -19,7 +19,9 @@ class UploadTeacherAvatarRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'avatar' => ['required', 'image', 'mimes:jpeg,jpg,png', 'max:5120', 'dimensions:min_width=400,min_height=400'],
+            // 50 ميغابايت — يتوافق مع حد PHP الفعلي في public/.user.ini (كلا
+            // الحدّين يجب أن يتطابقا).
+            'avatar' => ['required', 'image', 'mimes:jpeg,jpg,png', 'max:51200', 'dimensions:min_width=400,min_height=400'],
         ];
     }
 
@@ -34,7 +36,7 @@ class UploadTeacherAvatarRequest extends FormRequest
             'avatar.required' => 'يرجى اختيار صورة',
             'avatar.image' => 'الملف المُرسَل يجب أن يكون صورة',
             'avatar.mimes' => 'صيغة الصورة غير مدعومة — يُسمح فقط بصورة JPG أو PNG',
-            'avatar.max' => 'حجم الصورة أكبر من الحد المسموح (5 ميغابايت كحد أقصى)',
+            'avatar.max' => 'حجم الصورة أكبر من الحد المسموح (50 ميغابايت كحد أقصى)',
             'avatar.dimensions' => 'أبعاد الصورة صغيرة جداً — الحد الأدنى 400×400 بكسل',
         ];
     }

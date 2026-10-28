@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Rules\EmailHasMailExchangeRecord;
 use App\Rules\NotSpreadsheetFormula;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Maatwebsite\Excel\Facades\Excel;
@@ -16,10 +17,14 @@ use Maatwebsite\Excel\Facades\Excel;
 /**
  * استيراد جماعي للمعلمين من Excel/CSV. فشل صف واحد لا يوقف الدفعة — كل صف
  * مستقل بمعاملته الخاصة، والأخطاء تُجمَع وتُعاد للأدمن مع رقم الصف.
- * يوازي App\Services\StudentImportService تماماً — يعيد استخدام
- * TeacherService::invite() نفسه المستخدَم في الدعوة الفردية (User + Teacher
- * بحالة "invited" + AccountInvitation + إشعار TeacherInvited + سجل تدقيق)،
- * بدل تكرار تلك الخطوات هنا.
+ *
+ * يعيد استخدام TeacherService::createByAdmin() (لا invite()) — كلمة مرور
+ * تُولَّد عشوائياً لكل صف وتصل بالبريد فوراً (AccountCreatedByAdmin)،
+ * والحساب نشط بحالة active_unverified منذ اللحظة الأولى، بلا رابط دعوة
+ * منتهي الصلاحية إطلاقاً. قرار عمل صريح: معلم استُورد بالجملة قد لا يفتح
+ * بريده فوراً؛ رابط دعوة صالحاً 48 ساعة فقط (invite()) كان يعني أن الأدمن
+ * قد يُكمل ملفه الشخصي بالكامل ويعتمده خلال تلك الفترة، ثم ينتهي الرابط قبل
+ * أن يفتح المعلم بريده أصلاً فيعجز عن الدخول لحسابه الجاهز فعلياً.
  *
  * يعمل داخل ProcessTeacherImportJob (طابور) لا طلب HTTP مباشر — راجع تعليق
  * StudentImportService لتفصيل السبب؛ $batch هو مصدر الحقيقة الوحيد للتقدّم.
@@ -62,7 +67,8 @@ class TeacherImportService
 
             try {
                 $data = $this->validateRow($rowArray);
-                $teacher = $this->teacherService->invite($data, $admin, $this->notifications->bulkDelaySeconds($imported));
+                $data['password'] = Str::password(16);
+                $teacher = $this->teacherService->createByAdmin($data, $admin, $this->notifications->bulkDelaySeconds($imported));
                 $this->applyExtraFields($teacher, $data);
                 $imported++;
             } catch (ValidationException $e) {

@@ -79,7 +79,7 @@ class PackageController extends Controller
         $packages = Package::query()
             ->where('teacher_id', $teacher->id)
             ->where('status', 'active')
-            ->with(['subject:id,name_ar', 'stages', 'schedules'])
+            ->with(['subject:id,name_ar', 'curricula:id,name_ar', 'stages', 'schedules'])
             ->latest()
             ->paginate(20);
 
@@ -166,6 +166,15 @@ class PackageController extends Controller
         $package = $this->packageService->disable($package);
 
         return $this->success($this->resourceFor($package, $request->user()), 'تم تعطيل الباقة');
+    }
+
+    public function enable(Request $request, Package $package)
+    {
+        $this->authorize('enable', $package);
+
+        $package = $this->packageService->enable($package);
+
+        return $this->success($this->resourceFor($package, $request->user()), 'تمت إعادة تفعيل الباقة');
     }
 
     public function approve(ApprovePackageRequest $request, Package $package)

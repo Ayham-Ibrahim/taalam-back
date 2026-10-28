@@ -2,9 +2,11 @@
 
 namespace App\Services;
 
+use App\Jobs\CreateBbbRoomJob;
 use App\Models\Booking;
 use App\Models\ClassSession;
 use App\Models\SessionAttendee;
+use App\Models\SessionJoinLog;
 use App\Models\User;
 use App\Traits\LogsAuditEvents;
 use Illuminate\Support\Carbon;
@@ -14,6 +16,9 @@ use Illuminate\Support\Str;
 class SessionService
 {
     use LogsAuditEvents;
+
+    /** يُسمح بالانضمام قبل الموعد المجدول بهذه المدة — ريثما يستعد الطرفان قبل بدء الجلسة فعلياً. */
+    private const EARLY_JOIN_MINUTES = 5;
 
     public function __construct(
         private readonly SettingsService $settings,
@@ -79,8 +84,9 @@ class SessionService
 
         $now = now();
         $endsAt = $session->scheduled_at->clone()->addMinutes($session->duration_min);
+        $joinableFrom = $session->scheduled_at->clone()->subMinutes(self::EARLY_JOIN_MINUTES);
 
-        if ($now->lt($session->scheduled_at)) {
+        if ($now->lt($joinableFrom)) {
             return ['joinable' => false, 'message' => 'لم تبدأ هذه الجلسة بعد، يرجى الانتظار حتى موعدها ثم إعادة المحاولة.'];
         }
 
@@ -208,9 +214,17 @@ class SessionService
         return $session->fresh(['attendees']);
     }
 
+    /**
+     * الجلسة التعويضية كانت تُنشأ بلا أي سطر حضور وبلا غرفة BBB: لا يراها أي طالب
+     * (visibleTo تشترط سطر حضور)، ولا يمكن لأحد الانضمام إليها — ومع ذلك يحوّلها
+     * completeEndedSessions إلى completed بعد موعدها فتُحتسب ضمن مستحقات المعلم.
+     * تُنسخ الآن أسطر حضور الجلسة الأصلية (بنفس الحجز/التسجيل، بحالة registered)،
+     * وتُنشأ غرفتها فوراً إن كانت الأصلية مدفوعة أصلاً (لها غرفة)؛ غير ذلك يلتقطها
+     * createMissingRooms بمجرد اكتمال الدفع.
+     */
     public function createMakeupSession(ClassSession $original): ClassSession
     {
-        return ClassSession::create([
+        $makeup = ClassSession::create([
             'booking_id' => $original->booking_id,
             'course_id' => $original->course_id,
             'teacher_id' => $original->teacher_id,
@@ -221,6 +235,47 @@ class SessionService
             'is_makeup' => true,
             'makeup_for_session_id' => $original->id,
         ]);
+
+        foreach ($original->attendees()->get() as $attendee) {
+            SessionAttendee::create([
+                'class_session_id' => $makeup->id,
+                'student_id' => $attendee->student_id,
+                'booking_id' => $attendee->booking_id,
+                'enrollment_id' => $attendee->enrollment_id,
+                'attendance' => 'registered',
+            ]);
+        }
+
+        if ($original->bbb_meeting_id) {
+            CreateBbbRoomJob::dispatch($makeup->id)->afterCommit();
+        }
+
+        return $makeup;
+    }
+
+    /**
+     * شبكة أمان دورية (CreateMissingBbbRoomsJob): أي جلسة قادمة مدفوعة فعلاً (طالب
+     * واحد على الأقل حجزه/تسجيله مؤكَّد) لكن بلا غرفة BBB — لأي مسار لم يُنشئ غرفتها
+     * (حجز يدوي أو مجموعة أو تعويضية قبل إصلاحها، أو أي مسار مستقبلي يُنسى فيه ذلك)
+     * — تُنشأ غرفتها هنا، فيظهر رابطها ويصل تذكيرها كأي جلسة أخرى. جلسات pending_payment
+     * مستبعدة عمداً: الرابط ينتظر الدفع.
+     */
+    public function createMissingRooms(int $limit = 100): int
+    {
+        $sessions = ClassSession::query()
+            ->where('status', 'scheduled')
+            ->whereNull('bbb_meeting_id')
+            ->whereRaw('DATE_ADD(scheduled_at, INTERVAL duration_min MINUTE) > ?', [now()])
+            ->whereHas('attendees', fn ($a) => ClassSession::constrainToPaidAttendee($a))
+            ->orderBy('scheduled_at')
+            ->limit($limit)
+            ->get();
+
+        foreach ($sessions as $session) {
+            $this->createBbbRoom($session);
+        }
+
+        return $sessions->count();
     }
 
     /**
@@ -264,13 +319,70 @@ class SessionService
      * مكتملة" لأن لا جلسة تحمل هذه القيمة فعلياً)، تقييم الجلسة (ReviewService)،
      * ومنع تغيير موعد جلسة منتهية (RescheduleService، الذي أضاف فحصاً زمنياً
      * مستقلاً تحسّباً لهذا بالضبط). تُستدعى دورياً (CompleteEndedSessionsJob).
+     *
+     * الحالة تبقى 'completed' لكل جلسة منتهية كما كانت (لا أثر ظاهر للطالب/المعلم)، لكن
+     * تُحسم معها نتيجة الحضور التلقائي من session_join_logs ونسبة مستحق المعلم منها
+     * (راجع attendanceOutcome) — تُثبَّت النسبة لحظتها فلا يغيّر تعديل الإعداد لاحقاً
+     * جلسات سابقة. سجل الانضمام لا يُكتب إلا ضمن نافذة الجلسة (resolveJoinUrl)، فهو
+     * نهائي بمجرد انتهاء وقتها.
      */
     public function completeEndedSessions(): int
     {
-        return ClassSession::query()
+        $trackedSince = SessionJoinLog::trackingStartedAt();
+        $noShowPercent = (float) $this->settings->get('student_no_show_teacher_payout_percent', 50);
+        $completed = 0;
+
+        ClassSession::query()
             ->where('status', 'scheduled')
             ->whereRaw('DATE_ADD(scheduled_at, INTERVAL duration_min MINUTE) < ?', [now()])
-            ->update(['status' => 'completed']);
+            ->with('joinLogs')
+            ->chunkById(200, function ($sessions) use ($trackedSince, $noShowPercent, &$completed) {
+                foreach ($sessions as $session) {
+                    $outcome = $this->attendanceOutcome($session, $trackedSince);
+
+                    $completed += ClassSession::whereKey($session->id)
+                        ->where('status', 'scheduled')
+                        ->update([
+                            'status' => 'completed',
+                            'attendance_outcome' => $outcome,
+                            'teacher_payout_percent' => match ($outcome) {
+                                ClassSession::OUTCOME_STUDENT_NO_SHOW => $noShowPercent,
+                                ClassSession::OUTCOME_TEACHER_ABSENT => 0,
+                                ClassSession::OUTCOME_UNTRACKED => null,
+                                default => 100,
+                            },
+                        ]);
+                }
+            });
+
+        return $completed;
+    }
+
+    /**
+     * الحضور التلقائي فقط: "دخل" = له سجل في session_join_logs آخر انضمام فيه ضمن نافذة
+     * الجلسة الحالية (يُستبعد سجل من موعد سابق قبل تغيير الموعد). attendance اليدوي
+     * (ومنه excused) لا يدخل هنا — إلغاء الطالب الفعلي يتم بتغيير موعد الجلسة عبر الأدمن.
+     */
+    private function attendanceOutcome(ClassSession $session, ?Carbon $trackedSince): string
+    {
+        if ($trackedSince === null || $session->scheduled_at->lt($trackedSince)) {
+            return ClassSession::OUTCOME_UNTRACKED;
+        }
+
+        $windowStart = $session->scheduled_at->clone()->subMinutes(self::EARLY_JOIN_MINUTES);
+        $windowEnd = $session->scheduled_at->clone()->addMinutes($session->duration_min);
+
+        $joined = $session->joinLogs->filter(
+            fn (SessionJoinLog $log) => $log->last_joined_at->between($windowStart, $windowEnd)
+        );
+
+        if (! $joined->contains('role', 'teacher')) {
+            return ClassSession::OUTCOME_TEACHER_ABSENT;
+        }
+
+        return $joined->contains('role', 'student')
+            ? ClassSession::OUTCOME_ATTENDED
+            : ClassSession::OUTCOME_STUDENT_NO_SHOW;
     }
 
     /**

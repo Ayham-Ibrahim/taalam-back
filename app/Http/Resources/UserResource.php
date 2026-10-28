@@ -6,7 +6,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
- * علاقتا teacher/student لا تُحمَّلان دائماً — فقط عند تحميلهما صراحة حسب دور
+ * علاقات teacher/student/academicSupporter لا تُحمَّل دائماً — فقط عند تحميلها صراحة حسب دور
  * المستخدم (AuthService::login) — whenLoaded تمنع ظهور مفتاح فارغ حين لا داعي له.
  */
 class UserResource extends JsonResource
@@ -24,6 +24,10 @@ class UserResource extends JsonResource
             'timezone_auto' => $this->timezone_auto,
             'teacher' => $this->whenLoaded('teacher', fn () => $this->teacher ? new TeacherResource($this->teacher) : null),
             'student' => $this->whenLoaded('student', fn () => $this->student ? new StudentResource($this->student) : null),
+            'academicSupporter' => $this->whenLoaded('academicSupporter', fn () => $this->academicSupporter ? [
+                'id' => $this->academicSupporter->id,
+                'status' => $this->academicSupporter->status,
+            ] : null),
         ];
     }
 }

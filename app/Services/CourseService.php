@@ -89,7 +89,12 @@ class CourseService
         return $course;
     }
 
-    public function disable(Course $course): Course
+    /**
+     * $byOwner: المركز التدريبي يوقف دورته بنفسه فقط ما دام لا مشتركين فيها —
+     * بما فيهم من سجّل وينتظر الدفع (مقعده محجوز ولم يُحسب في enrolled_count بعد).
+     * الإدارة غير مقيّدة بذلك.
+     */
+    public function disable(Course $course, bool $byOwner = false): Course
     {
         if (! in_array($course->status, ['active', 'full', 'in_progress'], true)) {
             throw ValidationException::withMessages([
@@ -97,9 +102,34 @@ class CourseService
             ]);
         }
 
+        if ($byOwner && $course->enrollments()->whereIn('status', ['pending_payment', 'confirmed', 'in_progress'])->exists()) {
+            throw ValidationException::withMessages([
+                'status' => ['لا يمكن إيقاف الدورة لوجود طلاب مشتركين فيها'],
+            ]);
+        }
+
         $course->update(['status' => 'disabled']);
 
         $this->audit('course.disabled', $course);
+
+        return $course;
+    }
+
+    /**
+     * عكس disable() — تعود الدورة إلى active، وCourseObserver يحوّلها إلى full
+     * تلقائياً إن كانت مقاعدها ممتلئة.
+     */
+    public function enable(Course $course): Course
+    {
+        if ($course->status !== 'disabled') {
+            throw ValidationException::withMessages([
+                'status' => ['يمكن إعادة التفعيل فقط لدورة معطّلة'],
+            ]);
+        }
+
+        $course->update(['status' => 'active']);
+
+        $this->audit('course.enabled', $course);
 
         return $course;
     }

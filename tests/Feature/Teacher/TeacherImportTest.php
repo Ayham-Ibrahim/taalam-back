@@ -5,6 +5,7 @@ namespace Tests\Feature\Teacher;
 use App\Jobs\ProcessTeacherImportJob;
 use App\Models\ImportBatch;
 use App\Models\User;
+use App\Notifications\AccountCreatedByAdmin;
 use App\Services\SettingsService;
 use App\Services\TeacherImportService;
 use Database\Seeders\SettingsSeeder;
@@ -88,8 +89,15 @@ class TeacherImportTest extends TestCase
         $this->assertSame(4, $batch->errors[1]['row']);
 
         $this->assertDatabaseHas('users', ['email' => 'valid.teacher.import@example.com', 'role' => 'teacher']);
-        $this->assertDatabaseHas('teachers', ['teacher_type' => 'school', 'status' => 'invited']);
+        // active_unverified فوراً — لا "invited" بانتظار قبول دعوة قد لا تصل
+        // له في الوقت المناسب (رابط الدعوة القديم كان يمر خلال 48 ساعة فقط).
+        $this->assertDatabaseHas('teachers', ['teacher_type' => 'school', 'status' => 'active_unverified']);
         $this->assertDatabaseMissing('users', ['email' => 'invalid.type.import@example.com']);
+
+        $importedUser = User::where('email', 'valid.teacher.import@example.com')->firstOrFail();
+        $this->assertNotNull($importedUser->password);
+        $this->assertDatabaseMissing('account_invitations', ['user_id' => $importedUser->id]);
+        Notification::assertSentTo($importedUser, AccountCreatedByAdmin::class);
     }
 
     /**

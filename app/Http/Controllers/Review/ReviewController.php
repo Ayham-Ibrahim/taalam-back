@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Review;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Review\CreateReviewRequest;
 use App\Http\Requests\Review\HideReviewRequest;
+use App\Http\Requests\Review\ImportTeacherReviewsRequest;
 use App\Http\Requests\Review\ReportReviewRequest;
 use App\Http\Requests\Review\RespondToReviewRequest;
 use App\Http\Requests\Review\UpdateReviewRequest;
@@ -13,12 +14,16 @@ use App\Http\Resources\Review\MyReviewResource;
 use App\Models\ClassSession;
 use App\Models\Review;
 use App\Models\Teacher;
+use App\Services\ReviewImportService;
 use App\Services\ReviewService;
 use Illuminate\Http\Request;
 
 class ReviewController extends Controller
 {
-    public function __construct(private readonly ReviewService $reviewService) {}
+    public function __construct(
+        private readonly ReviewService $reviewService,
+        private readonly ReviewImportService $reviewImportService,
+    ) {}
 
     /** تقييمات الطالب الحالي هو نفسه — يغذّي تبويب "التقييمات" بلوحة تحكم الطالب */
     public function myReviews(Request $request)
@@ -59,6 +64,36 @@ class ReviewController extends Controller
         return $this->paginate($reviews);
     }
 
+    /**
+     * ملخص تقييم المعلم للعرض العام — متوسط دقيق + توزيع النجوم كنِسب مئوية،
+     * محسوب مباشرة من قاعدة البيانات (GROUP BY rating) لا من عيّنة الصفحة
+     * الأولى. rating_avg/reviews_count المخزَّنان على المعلم يحدَّثان تلقائياً
+     * عبر ReviewObserver عند كل إنشاء/تعديل/إخفاء تقييم.
+     */
+    public function ratingSummaryForTeacher(Teacher $teacher)
+    {
+        $counts = Review::where('teacher_id', $teacher->id)
+            ->where('is_hidden', false)
+            ->selectRaw('rating, COUNT(*) as total')
+            ->groupBy('rating')
+            ->pluck('total', 'rating');
+
+        $total = (int) $counts->sum();
+        $sum = collect(range(1, 5))->sum(fn ($star) => $star * (int) ($counts[$star] ?? 0));
+
+        $distribution = [];
+        foreach (range(1, 5) as $star) {
+            $starCount = (int) ($counts[$star] ?? 0);
+            $distribution[$star] = $total > 0 ? (int) round($starCount / $total * 100) : 0;
+        }
+
+        return $this->success([
+            'average' => $total > 0 ? round($sum / $total, 1) : 0,
+            'total' => $total,
+            'distribution' => $distribution,
+        ]);
+    }
+
     public function store(CreateReviewRequest $request, ClassSession $session)
     {
         $student = $request->user()->loadMissing('student')->student;
@@ -66,6 +101,21 @@ class ReviewController extends Controller
         $review = $this->reviewService->create(
             $student,
             $session,
+            (int) $request->validated('rating'),
+            $request->validated('comment'),
+        );
+
+        return $this->success($review, 'تم إرسال التقييم بنجاح', 201);
+    }
+
+    /** تقييم حر لمعلم بصرف النظر عن وجود جلسة — راجع ReviewService::createOrUpdateForTeacher */
+    public function storeForTeacher(CreateReviewRequest $request, Teacher $teacher)
+    {
+        $student = $request->user()->loadMissing('student')->student;
+
+        $review = $this->reviewService->createOrUpdateForTeacher(
+            $student,
+            $teacher,
             (int) $request->validated('rating'),
             $request->validated('comment'),
         );
@@ -117,5 +167,38 @@ class ReviewController extends Controller
         $review = $this->reviewService->report($review, $request->validated('reason'));
 
         return $this->success($review, 'تم الإبلاغ عن التقييم');
+    }
+
+    /** الأدمن يرفع ملف Excel/CSV بتقييمات يدوية لمعلم — ميزة مؤقتة (راجع ReviewImportService) */
+    public function importForTeacher(ImportTeacherReviewsRequest $request, Teacher $teacher)
+    {
+        $result = $this->reviewImportService->importForTeacher($teacher, $request->file('file'), $request->user());
+
+        return $this->success($result, 'اكتمل الاستيراد');
+    }
+
+    /** التقييمات المُستورَدة يدوياً لهذا المعلم فقط — لعرضها/حذفها من لوحة الأدمن */
+    public function seededForTeacher(Request $request, Teacher $teacher)
+    {
+        $this->authorize('import', Review::class);
+
+        $reviews = Review::where('teacher_id', $teacher->id)
+            ->where('is_seeded', true)
+            ->latest()
+            ->get();
+
+        return $this->success(AdminReviewResource::collection($reviews));
+    }
+
+    /** حذف تقييم مُستورَد يدوياً فقط — لا يسمح بحذف تقييمات طلاب حقيقية إطلاقاً */
+    public function destroy(Request $request, Review $review)
+    {
+        $this->authorize('delete', Review::class);
+
+        abort_unless($review->is_seeded, 403, 'لا يمكن حذف تقييم حقيقي من هنا');
+
+        $review->delete();
+
+        return $this->success(null, 'تم حذف التقييم');
     }
 }

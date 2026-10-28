@@ -37,6 +37,7 @@ class CourseEnrollmentFlowTest extends TestCase
         $enrollment = app(EnrollmentService::class)->initiateEnrollment($student, $course);
 
         $this->assertSame('pending_payment', $enrollment->status);
+        // provider_price=200 قبل الهامش، ثم ×1.5 = 300 للطالب، والمركز يستلم كامل سعره 200
         $this->assertEquals(300.0, (float) $enrollment->amount_paid);
         $this->assertEquals(200.0, (float) $enrollment->provider_amount);
         $this->assertEquals(100.0, (float) $enrollment->platform_amount);
@@ -54,6 +55,33 @@ class CourseEnrollmentFlowTest extends TestCase
             'status' => 'pending',
             'amount' => 300,
         ]);
+    }
+
+    /** الجدول يتسع لـ6 مواعيد خلال الفترة لكن الدورة 4 جلسات — تُولَّد أول 4 فقط بالترتيب الزمني */
+    public function test_enrollment_generates_no_more_sessions_than_course_total_sessions(): void
+    {
+        [$center] = $this->createVerifiedCenter();
+
+        // الاثنين والأربعاء لثلاثة أسابيع = 6 مواعيد ممكنة، والدورة total_sessions=4
+        $start = Carbon::now()->next(1)->startOfDay();
+        $end = $start->copy()->addDays(20);
+
+        $course = $this->createActiveCourse($center, teacherPrice: 200, margin: 50, start: $start, end: $end);
+        // الأربعاء أولاً عمداً — الترتيب الزمني لا يعتمد على ترتيب إدخال الجدول
+        $course->schedules()->create(['day_of_week' => 3, 'start_time' => '09:00', 'end_time' => '10:00']);
+        $course->schedules()->create(['day_of_week' => 1, 'start_time' => '09:00', 'end_time' => '10:00']);
+
+        app(EnrollmentService::class)->initiateEnrollment($this->createStudent(), $course);
+
+        $sessions = ClassSession::where('course_id', $course->id)->orderBy('sequence_no')->get();
+
+        $this->assertCount(4, $sessions);
+        $this->assertTrue($sessions->first()->scheduled_at->isSameDay($start));
+        $this->assertTrue($sessions->last()->scheduled_at->isSameDay($start->copy()->addDays(9)));
+        $this->assertSame(
+            $sessions->pluck('scheduled_at')->map->getTimestamp()->sort()->values()->all(),
+            $sessions->pluck('scheduled_at')->map->getTimestamp()->all(),
+        );
     }
 
     /**
@@ -232,6 +260,37 @@ class CourseEnrollmentFlowTest extends TestCase
         $this->assertFalse($ids->contains($otherEnrollment->id));
     }
 
+    /** نافذة تفاصيل الدورة لدى المركز تجلب مشتركي تلك الدورة فقط */
+    public function test_center_can_filter_own_enrollments_by_course_id(): void
+    {
+        [$center] = $this->createVerifiedCenter();
+        $centerToken = User::find($center->user_id)->createToken('t')->plainTextToken;
+
+        $start = Carbon::now()->next(1)->startOfDay();
+        $courseA = $this->createActiveCourse($center, teacherPrice: 100, margin: 50, start: $start, end: $start->copy()->addDays(6));
+        $courseB = $this->createActiveCourse($center, teacherPrice: 100, margin: 50, start: $start, end: $start->copy()->addDays(6));
+        $student = $this->createStudent();
+
+        $make = fn (Course $course, string $ref) => Enrollment::create([
+            'reference' => $ref,
+            'student_id' => $student->id,
+            'course_id' => $course->id,
+            'teacher_id' => $center->id,
+            'amount_paid' => 150,
+            'provider_amount' => 100,
+            'platform_amount' => 50,
+            'margin_percent_snapshot' => 50,
+            'status' => 'confirmed',
+        ]);
+        $inA = $make($courseA, 'EN-CA-'.rand(1000, 9999));
+        $inB = $make($courseB, 'EN-CB-'.rand(1000, 9999));
+
+        $ids = collect($this->as($centerToken)->getJson("/api/enrollments?course_id={$courseA->id}")->assertOk()->json('data'))->pluck('id');
+
+        $this->assertTrue($ids->contains($inA->id));
+        $this->assertFalse($ids->contains($inB->id));
+    }
+
     public function test_center_can_filter_own_enrollments_by_student_id(): void
     {
         [$center] = $this->createVerifiedCenter();
@@ -271,6 +330,139 @@ class CourseEnrollmentFlowTest extends TestCase
         $response->assertStatus(200);
         $ids = collect($response->json('data'))->pluck('id');
         $this->assertEquals([$enrollmentA->id], $ids->all());
+    }
+
+    /** الطالب المشترك يرى اشتراكه في قائمة دورات المركز العامة، وغيره (أو الزائر) لا */
+    public function test_public_course_list_shows_the_current_students_enrollment(): void
+    {
+        [$center] = $this->createVerifiedCenter();
+        $start = Carbon::now()->next(1)->startOfDay();
+        $course = $this->createActiveCourse($center, teacherPrice: 100, margin: 50, start: $start, end: $start->copy()->addDays(13));
+        $course->schedules()->create(['day_of_week' => 1, 'start_time' => '09:00', 'end_time' => '10:00']);
+
+        $enrolled = $this->createStudent();
+        $enrollment = app(EnrollmentService::class)->initiateEnrollment($enrolled, $course);
+        $other = $this->createStudent();
+
+        $this->as($enrolled->user->createToken('t')->plainTextToken)
+            ->getJson("/api/teachers/{$center->id}/courses")
+            ->assertStatus(200)
+            ->assertJsonPath('data.0.my_enrollment.id', $enrollment->id)
+            ->assertJsonPath('data.0.my_enrollment.status', 'pending_payment');
+
+        $this->as($other->user->createToken('t')->plainTextToken)
+            ->getJson("/api/teachers/{$center->id}/courses")
+            ->assertJsonPath('data.0.my_enrollment', null);
+
+        $this->app['auth']->forgetGuards();
+        $guest = $this->withHeaders(['Authorization' => ''])->getJson("/api/teachers/{$center->id}/courses");
+        $guest->assertStatus(200);
+        $this->assertArrayNotHasKey('my_enrollment', $guest->json('data.0'));
+    }
+
+    /** تسجيل انتهت مهلة دفعه دون دفع لا يُعرض كاشتراك قائم */
+    public function test_public_course_list_ignores_expired_pending_enrollment(): void
+    {
+        [$center] = $this->createVerifiedCenter();
+        $start = Carbon::now()->next(1)->startOfDay();
+        $course = $this->createActiveCourse($center, teacherPrice: 100, margin: 50, start: $start, end: $start->copy()->addDays(13));
+        $course->schedules()->create(['day_of_week' => 1, 'start_time' => '09:00', 'end_time' => '10:00']);
+
+        $student = $this->createStudent();
+        app(EnrollmentService::class)->initiateEnrollment($student, $course)
+            ->update(['hold_expires_at' => now()->subMinute()]);
+
+        $this->as($student->user->createToken('t')->plainTextToken)
+            ->getJson("/api/teachers/{$center->id}/courses")
+            ->assertJsonPath('data.0.my_enrollment', null);
+    }
+
+    /**
+     * دورة بدأت: الجلسات التي حلّ موعدها تُعرض كجلسات معطاة لا تُعوَّض — من
+     * المواعيد المخطَّطة قبل أول تسجيل، ومن class_sessions بعده، بنفس النتيجة.
+     */
+    public function test_public_course_list_reports_elapsed_sessions_of_a_started_course(): void
+    {
+        // الأربعاء 2026-11-04 ظهراً — الدورة بدأت الاثنين 2026-11-02، جلساتها الاثنين والأربعاء 09:00
+        Carbon::setTestNow(Carbon::parse('2026-11-04 12:00:00', 'UTC'));
+
+        [$center] = $this->createVerifiedCenter();
+        $start = Carbon::parse('2026-11-02');
+        $course = $this->createActiveCourse($center, teacherPrice: 100, margin: 50, start: $start, end: $start->copy()->addDays(13));
+        $course->update(['schedule_timezone' => 'UTC']);
+        $course->schedules()->create(['day_of_week' => 1, 'start_time' => '09:00', 'end_time' => '10:00']);
+        $course->schedules()->create(['day_of_week' => 3, 'start_time' => '09:00', 'end_time' => '10:00']);
+
+        $before = $this->getJson("/api/teachers/{$center->id}/courses")->assertStatus(200);
+        $this->assertSame([1, 2], array_column($before->json('data.0.elapsed_sessions'), 'sequence_no'));
+
+        // أول تسجيل يُنشئ class_sessions — يجب أن تبقى النتيجة نفسها
+        app(EnrollmentService::class)->initiateEnrollment($this->createStudent(), $course);
+        $this->assertSame(4, ClassSession::where('course_id', $course->id)->count());
+
+        $after = $this->getJson("/api/teachers/{$center->id}/courses")->assertStatus(200);
+        $this->assertSame([1, 2], array_column($after->json('data.0.elapsed_sessions'), 'sequence_no'));
+
+        Carbon::setTestNow();
+    }
+
+    /**
+     * دورة بدأت كل جلساتها المعلنة تُعدّ منتهية ولو لم يمضِ end_date بعد: تختفي من
+     * قائمة المركز ومن البحث بمجال الدورة، ويُرفض التسجيل فيها — بجلسات مُنشأة أو بدونها.
+     */
+    public function test_course_whose_sessions_all_started_is_hidden_and_not_enrollable(): void
+    {
+        // الأربعاء 2026-11-04 ظهراً — جلستا الدورة (الاثنين والأربعاء 09:00) بدأتا، وend_date بعد أسبوع
+        Carbon::setTestNow(Carbon::parse('2026-11-04 12:00:00', 'UTC'));
+
+        [$center] = $this->createVerifiedCenter();
+        $start = Carbon::parse('2026-11-02');
+        $course = $this->createActiveCourse($center, teacherPrice: 100, margin: 50, start: $start, end: $start->copy()->addDays(9));
+        $course->update(['schedule_timezone' => 'UTC', 'total_sessions' => 2]);
+        $course->schedules()->create(['day_of_week' => 1, 'start_time' => '09:00', 'end_time' => '10:00']);
+        $course->schedules()->create(['day_of_week' => 3, 'start_time' => '09:00', 'end_time' => '10:00']);
+
+        // بلا جلسات مُنشأة بعد: يُحكم بالمواعيد المخطَّطة
+        $this->assertTrue($course->fresh()->hasEnded());
+        $this->getJson("/api/teachers/{$center->id}/courses")->assertStatus(200)->assertJsonCount(0, 'data');
+
+        try {
+            app(EnrollmentService::class)->initiateEnrollment($this->createStudent(), $course->fresh());
+            $this->fail('Enrollment in an ended course should be rejected');
+        } catch (ValidationException $e) {
+            $this->assertArrayHasKey('course', $e->errors());
+        }
+
+        // بجلسات مُنشأة كلها ماضية: البحث بمجال الدورة لا يُطابق المركز
+        $course->sessions()->create(['teacher_id' => $center->id, 'sequence_no' => 1, 'scheduled_at' => '2026-11-02 09:00:00', 'duration_min' => 60, 'status' => 'scheduled']);
+        $course->sessions()->create(['teacher_id' => $center->id, 'sequence_no' => 2, 'scheduled_at' => '2026-11-04 09:00:00', 'duration_min' => 60, 'status' => 'scheduled']);
+
+        $this->getJson("/api/teachers/{$center->id}/courses")->assertJsonCount(0, 'data');
+        $ids = collect($this->getJson("/api/teachers/search?course_field_id={$course->course_field_id}")->json('data'))->pluck('id');
+        $this->assertNotContains($center->id, $ids->all());
+
+        Carbon::setTestNow();
+    }
+
+    /** المقابل: دورة لها جلسة قادمة تبقى ظاهرة ويُطابقها البحث بمجالها */
+    public function test_course_with_upcoming_session_stays_visible_in_list_and_search(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-11-04 12:00:00', 'UTC'));
+
+        [$center] = $this->createVerifiedCenter();
+        $start = Carbon::parse('2026-11-02');
+        $course = $this->createActiveCourse($center, teacherPrice: 100, margin: 50, start: $start, end: $start->copy()->addDays(9));
+        $course->update(['schedule_timezone' => 'UTC', 'total_sessions' => 3]);
+        $course->schedules()->create(['day_of_week' => 1, 'start_time' => '09:00', 'end_time' => '10:00']);
+        $course->schedules()->create(['day_of_week' => 3, 'start_time' => '09:00', 'end_time' => '10:00']);
+
+        app(EnrollmentService::class)->initiateEnrollment($this->createStudent(), $course);
+
+        $this->getJson("/api/teachers/{$center->id}/courses")->assertJsonCount(1, 'data');
+        $ids = collect($this->getJson("/api/teachers/search?course_field_id={$course->course_field_id}")->json('data'))->pluck('id');
+        $this->assertContains($center->id, $ids->all());
+
+        Carbon::setTestNow();
     }
 
     /**

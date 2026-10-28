@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\ClassSession;
+use App\Models\User;
 use App\Notifications\SessionReminder;
 use App\Services\NotificationService;
 use App\Services\SettingsService;
@@ -12,6 +13,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\URL;
 use Throwable;
 
 /**
@@ -39,7 +41,13 @@ class SendSessionRemindersJob implements ShouldQueue
             ->whereNull('reminder_sent_at')
             ->whereNotNull('join_url_student')
             ->whereBetween('scheduled_at', [now(), now()->addMinutes($minutesBefore)])
-            ->with(['teacher.user', 'attendees.student.user'])
+            // غير الدافع (pending_payment) وصاحب الحجز الباطل لا يستلمان رابطاً: الأول
+            // كان سيدخل به مجاناً، والثاني يصله رابط يعطيه 403 — نفس شرط بوابة join.
+            ->with([
+                'teacher.user',
+                'attendees' => fn ($a) => ClassSession::constrainToPaidAttendee($a),
+                'attendees.student.user',
+            ])
             ->get();
 
         foreach ($sessions as $session) {
@@ -58,7 +66,7 @@ class SendSessionRemindersJob implements ShouldQueue
             return;
         }
 
-        $this->sendSafely($notifications, $session, $teacherUser, $session->join_url_teacher);
+        $this->sendSafely($notifications, $session, $teacherUser, $this->trackedJoinUrl($session, $teacherUser));
     }
 
     private function notifyStudents(ClassSession $session, NotificationService $notifications): void
@@ -71,9 +79,22 @@ class SendSessionRemindersJob implements ShouldQueue
             $studentUser = $attendee->student?->user;
 
             if ($studentUser) {
-                $this->sendSafely($notifications, $session, $studentUser, $session->join_url_student);
+                $this->sendSafely($notifications, $session, $studentUser, $this->trackedJoinUrl($session, $studentUser));
             }
         }
+    }
+
+    /**
+     * رابط موقّع خاص بالمستلم يمرّ عبر المنصة (ClassSessionController::joinRedirect) بدل
+     * رابط BBB الخام — كي يُسجَّل انضمامه حتى لو دخل من البريد. صالح حتى نهاية الجلسة.
+     */
+    private function trackedJoinUrl(ClassSession $session, User $user): string
+    {
+        return URL::temporarySignedRoute(
+            'class-sessions.join-redirect',
+            $session->scheduled_at->clone()->addMinutes($session->duration_min),
+            ['session' => $session->id, 'user' => $user->id],
+        );
     }
 
     /**

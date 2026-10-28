@@ -3,19 +3,15 @@
 namespace App\Services;
 
 use App\Imports\StudentsImport;
-use App\Models\AccountInvitation;
 use App\Models\CourseField;
 use App\Models\Curriculum;
 use App\Models\ImportBatch;
 use App\Models\Major;
 use App\Models\Stage;
-use App\Models\Student;
 use App\Models\University;
 use App\Models\User;
-use App\Notifications\StudentImported;
 use App\Rules\EmailHasMailExchangeRecord;
 use App\Rules\NotSpreadsheetFormula;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -26,7 +22,15 @@ use Maatwebsite\Excel\Facades\Excel;
  * استيراد جماعي للطلاب من Excel/CSV. فشل صف واحد لا يوقف الدفعة — كل صف
  * مستقل بمعاملته الخاصة، والأخطاء تُجمَع وتُعاد للأدمن مع رقم الصف.
  *
- * يعمل الآن داخل ProcessStudentImportJob (طابور) لا طلب HTTP مباشر — ملفات
+ * يعيد استخدام StudentService::createByAdmin() (لا آلية دعوة برابط منتهي
+ * الصلاحية) — كلمة مرور تُولَّد عشوائياً لكل صف وتصل بالبريد فوراً
+ * (AccountCreatedByAdmin)، والحساب نشط منذ اللحظة الأولى؛ الحقول الأكاديمية
+ * (نوع التعليم/المنهج/المرحلة...) تُضبَط بعدها مباشرة عبر تحديث منفصل — نفس
+ * نمط TeacherImportService::applyExtraFields(). يوازي إصلاحاً مطابقاً طُبِّق
+ * على استيراد المعلمين (طالب/معلم مستورَد بالجملة قد لا يفتح بريده خلال مهلة
+ * الرابط القديمة فيعجز عن الدخول لحساب جاهز فعلياً).
+ *
+ * يعمل داخل ProcessStudentImportJob (طابور) لا طلب HTTP مباشر — ملفات
  * بآلاف الصفوف كانت تتجاوز مهلة المتصفح رغم اكتمالها فعلياً في الخلفية.
  * $batch (ImportBatch) هو مصدر الحقيقة الوحيد لتقدّم/نتيجة العملية الآن،
  * يتابعه الأدمن عبر GET /import-batches بدل انتظار استجابة الطلب الأصلي.
@@ -35,6 +39,7 @@ class StudentImportService
 {
     public function __construct(
         private readonly SettingsService $settings,
+        private readonly StudentService $studentService,
         private readonly NotificationService $notifications,
     ) {}
 
@@ -95,52 +100,32 @@ class StudentImportService
     private function importRow(array $row, User $admin, int $notificationIndex): void
     {
         $data = $this->validateRow($row);
+        $data['password'] = Str::password(16);
 
-        DB::transaction(function () use ($data, $admin, $notificationIndex) {
-            $user = User::create([
-                'name' => $data['name'],
-                'email' => $data['email'],
-                'phone' => $data['phone'] ?? null,
-                'role' => 'student',
-                'password' => null,
-            ]);
+        $student = $this->studentService->createByAdmin($data, $admin, $this->notifications->bulkDelaySeconds($notificationIndex));
 
-            Student::create([
-                'user_id' => $user->id,
-                // اختياري بالكامل الآن — يبقى NULL حتى يُكمل الطالب ملفه بنفسه
-                // (نفس آلية حساب ينشئه الأدمن مباشرة)، راجع validateRow().
-                'education_type' => $data['education_type'] ?? null,
-                'curriculum_id' => $data['curriculum_id'] ?? null,
-                'stage_id' => $data['stage_id'] ?? null,
-                'grade' => $data['grade'] ?? null,
-                'university_id' => $data['university_id'] ?? null,
-                'major_id' => $data['major_id'] ?? null,
-                'academic_level' => $data['academic_level'] ?? null,
-                'course_field_id' => $data['course_field_id'] ?? null,
-                'level' => $data['level'] ?? null,
-                'birth_date' => $data['birth_date'] ?? null,
-                'city' => $data['city'] ?? null,
-                'country' => $data['country'] ?? null,
-                'guardian_name' => $data['guardian_name'] ?? null,
-                'guardian_phone' => $data['guardian_phone'] ?? null,
-                'imported' => true,
-                'imported_by' => $admin->id,
-            ]);
-
-            $invitation = AccountInvitation::create([
-                'user_id' => $user->id,
-                'invited_by' => $admin->id,
-                'token' => Str::random(60),
-                'expires_at' => now()->addHours((int) $this->settings->get('invitation_link_expiry_hours', 48)),
-            ]);
-
-            $this->notifications->send(
-                $user,
-                new StudentImported($invitation),
-                'student.imported',
-                $this->notifications->bulkDelaySeconds($notificationIndex),
-            );
-        });
+        // الحقول الأكاديمية (نوع التعليم/المنهج/المرحلة...) ليست جزءاً من
+        // createByAdmin() المشتركة مع مسار الإنشاء اليدوي الفردي (الذي يتركها
+        // دوماً NULL عمداً ليُكملها الطالب بنفسه) — تُضبَط هنا مباشرة بعد
+        // الإنشاء بدل تعديل تلك الدالة المشتركة، فلا يتأثر ذلك المسار إطلاقاً.
+        $student->update([
+            'education_type' => $data['education_type'] ?? null,
+            'curriculum_id' => $data['curriculum_id'] ?? null,
+            'stage_id' => $data['stage_id'] ?? null,
+            'grade' => $data['grade'] ?? null,
+            'university_id' => $data['university_id'] ?? null,
+            'major_id' => $data['major_id'] ?? null,
+            'academic_level' => $data['academic_level'] ?? null,
+            'course_field_id' => $data['course_field_id'] ?? null,
+            'level' => $data['level'] ?? null,
+            'birth_date' => $data['birth_date'] ?? null,
+            'city' => $data['city'] ?? null,
+            'country' => $data['country'] ?? null,
+            'guardian_name' => $data['guardian_name'] ?? null,
+            'guardian_phone' => $data['guardian_phone'] ?? null,
+            'imported' => true,
+            'imported_by' => $admin->id,
+        ]);
     }
 
     /**

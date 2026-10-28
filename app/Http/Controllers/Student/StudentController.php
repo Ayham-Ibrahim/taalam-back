@@ -6,15 +6,20 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Student\AdminResetStudentPasswordRequest;
 use App\Http\Requests\Student\CreateStudentAccountRequest;
 use App\Http\Requests\Student\UpdateStudentProfileRequest;
+use App\Http\Requests\Student\UploadStudentAvatarRequest;
 use App\Http\Resources\Student\StudentIndexResource;
 use App\Http\Resources\Student\StudentProfileResource;
 use App\Models\Student;
+use App\Services\AuthService;
 use App\Services\StudentService;
 use Illuminate\Http\Request;
 
 class StudentController extends Controller
 {
-    public function __construct(private readonly StudentService $studentService) {}
+    public function __construct(
+        private readonly StudentService $studentService,
+        private readonly AuthService $authService,
+    ) {}
 
     /** الأدمن يضع كلمة المرور مباشرة — يوازي TeacherController::createAccount */
     public function store(CreateStudentAccountRequest $request)
@@ -68,5 +73,24 @@ class StudentController extends Controller
         $this->studentService->resetPasswordByAdmin($student, $request->validated('password'), $request->user());
 
         return $this->success(null, 'تم تغيير كلمة مرور الطالب بنجاح، وأُرسلت له عبر البريد الإلكتروني');
+    }
+
+    /** الأدمن يرفع صورة نيابة عن طالب — يوازي TeacherController::uploadAvatar تماماً */
+    public function uploadAvatar(UploadStudentAvatarRequest $request, Student $student)
+    {
+        $student->loadMissing('user');
+        $this->authService->updateAvatar($student->user, $request->file('avatar'));
+
+        return $this->success(new StudentProfileResource($student->fresh('user')), 'تم تحديث صورة الطالب بنجاح');
+    }
+
+    public function deleteAvatar(Student $student)
+    {
+        $this->authorize('update', $student);
+
+        $student->loadMissing('user');
+        $this->authService->deleteAvatar($student->user);
+
+        return $this->success(new StudentProfileResource($student->fresh('user')), 'تم حذف صورة الطالب بنجاح');
     }
 }

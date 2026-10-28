@@ -15,9 +15,13 @@ class Teacher extends Model
     /** حد تعسفي معقول يمنع نمواً غير محدود لقائمة الفيديوهات — سهل التعديل لاحقاً إن لزم */
     public const MAX_VIDEOS = 6;
 
-    /** نفس منطق MAX_VIDEOS — حدّ معقول لعدد الأسئلة الشائعة ونوافذ التوفّر الأسبوعية */
-    public const MAX_FAQS = 15;
+    /** نفس منطق MAX_VIDEOS تماماً — يمنع قائمة أسئلة شائعة غير منتهية */
+    public const MAX_FAQS = 10;
 
+    /** نفس المنطق أيضاً — سجل خبرات سابقة يديره المعلم بنفسه (عنوان + فترة نصية) */
+    public const MAX_EXPERIENCES = 10;
+
+    /** حدّ معقول لعدد نوافذ التوفّر الأسبوعية (3 نوافذ × 7 أيام) */
     public const MAX_AVAILABILITY_TIMES = 21;
 
     protected $fillable = [
@@ -26,6 +30,9 @@ class Teacher extends Model
         'qualification',
         'experience_years',
         'bio',
+        'teaching_philosophy_quote',
+        'teaching_philosophy_text',
+        'thank_you_message',
         'intro_video_path',
         'intro_video_seconds',
         'intro_youtube_id',
@@ -37,12 +44,14 @@ class Teacher extends Model
         'city',
         'age_groups',
         'teaching_methods',
+        'exam_prep',
         'timezone',
         'max_daily_sessions',
         'status',
         'verified_at',
         'verified_by',
         'rejection_reason',
+        'suspension_reason',
         'no_show_count',
         'ranking_score',
     ];
@@ -52,6 +61,7 @@ class Teacher extends Model
         return [
             'age_groups' => 'array',
             'teaching_methods' => 'array',
+            'exam_prep' => 'array',
             'verified_at' => 'datetime',
             'rating_avg' => 'decimal:2',
             'completion_rate' => 'decimal:2',
@@ -85,6 +95,12 @@ class Teacher extends Model
         return $this->belongsToMany(Language::class, 'teacher_language');
     }
 
+    /** تخصصات المعلم الجامعي — يُفلتَر بها في البحث عند اختيار "تعليم جامعي" */
+    public function majors()
+    {
+        return $this->belongsToMany(Major::class, 'teacher_major');
+    }
+
     public function verificationDocuments()
     {
         return $this->hasMany(VerificationDocument::class);
@@ -100,6 +116,11 @@ class Teacher extends Model
         return $this->hasMany(TeacherFaq::class)->orderBy('sort_order');
     }
 
+    public function experiences()
+    {
+        return $this->hasMany(TeacherExperience::class)->orderBy('sort_order');
+    }
+
     public function availabilityTimes()
     {
         return $this->hasMany(TeacherAvailabilityTime::class)
@@ -110,6 +131,12 @@ class Teacher extends Model
     public function badgeAwards()
     {
         return $this->hasMany(BadgeAward::class);
+    }
+
+    /** الشارات الفعّالة حالياً فقط (غير ملغاة) — هذا ما يُعرَض علناً بملف المعلم. */
+    public function activeBadgeAwards()
+    {
+        return $this->badgeAwards()->whereNull('revoked_at')->with('badge')->orderBy('granted_at');
     }
 
     public function packages()

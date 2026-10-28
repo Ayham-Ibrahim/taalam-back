@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources\Session;
 
+use App\Models\SessionJoinLog;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -16,8 +17,11 @@ class ClassSessionResource extends JsonResource
         $user = $request->user();
         $isAdmin = $user?->isAdmin() ?? false;
         $isTeacher = $isAdmin || $user?->loadMissing('teacher')->teacher?->id === $this->teacher_id;
-        $isStudent = $isAdmin || ($user?->loadMissing('student')->student
-            && $this->attendees->contains('student_id', $user->student->id));
+        // الرابط الخام يذهب لـ BBB مباشرة بلا أي فحص من المنصة، وكلمة مرور الحضور
+        // فيه مشتركة بين كل طلاب الجلسة — فيُعرض فقط لمن دفع فعلاً، وإلا نسخه صاحب
+        // حجز pending_payment ودخل به لاحقاً حتى بعد انتهاء مهلته.
+        $studentId = $user?->loadMissing('student')->student?->id;
+        $isStudent = $isAdmin || ($studentId && $this->resource->studentHasPaidAccess($studentId));
         $pendingRescheduleRequest = $this->relationLoaded('rescheduleRequests')
             ? $this->rescheduleRequests->first()
             : null;
@@ -32,6 +36,9 @@ class ClassSessionResource extends JsonResource
             'duration_min' => $this->duration_min,
             'original_scheduled_at' => $this->original_scheduled_at,
             'status' => $this->status,
+            // داخلي للأدمن فقط (ClassSession::$hidden) — لا أثر ظاهر للطالب/المعلم
+            'attendance_outcome' => $this->when($isAdmin, fn () => $this->attendance_outcome),
+            'teacher_payout_percent' => $this->when($isAdmin, fn () => $this->teacher_payout_percent),
             'started_at' => $this->started_at,
             'ended_at' => $this->ended_at,
             'cancellation_reason' => $this->cancellation_reason,
@@ -48,6 +55,13 @@ class ClassSessionResource extends JsonResource
             'course' => $this->whenLoaded('course'),
             'attendees' => $this->whenLoaded('attendees'),
             'reschedule_requests' => $this->whenLoaded('rescheduleRequests'),
+            // تُحمَّل للأدمن، ولصاحب الجلسة في show فقط (ClassSessionController) — غائبة كلياً عن الطلاب
+            'join_logs' => $this->whenLoaded('joinLogs'),
+            // هل بدأت الجلسة بعد بدء تسجيل الانضمام — وإلا فغياب سجلها لا يعني غياباً
+            'join_tracked' => $this->when(
+                $this->relationLoaded('joinLogs'),
+                fn () => ($since = SessionJoinLog::trackingStartedAt()) !== null && $this->scheduled_at?->gte($since),
+            ),
         ];
     }
 }

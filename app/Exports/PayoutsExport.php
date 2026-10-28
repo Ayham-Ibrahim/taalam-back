@@ -19,7 +19,12 @@ class PayoutsExport implements FromQuery, WithHeadings, WithMapping
     public function query()
     {
         return Payout::query()
-            ->with('teacher.user:id,name')
+            ->with([
+                'teacher.user:id,name',
+                // المادة تُستنتج من جلسات المستحقات: حجز فردي ← باقته، أو دورة ← مادتها
+                'items.session.booking.package.subject:id,name_ar',
+                'items.session.course.subject:id,name_ar',
+            ])
             ->when(! empty($this->filters['status']), fn ($q) => $q->where('status', $this->filters['status']))
             ->when(! empty($this->filters['teacher_id']), fn ($q) => $q->where('teacher_id', $this->filters['teacher_id']))
             ->latest();
@@ -30,6 +35,7 @@ class PayoutsExport implements FromQuery, WithHeadings, WithMapping
         return [
             'رقم المستحقات',
             'المعلم',
+            'المادة',
             'من',
             'إلى',
             'عدد الجلسات',
@@ -49,6 +55,7 @@ class PayoutsExport implements FromQuery, WithHeadings, WithMapping
         return [
             $payout->id,
             $payout->teacher?->user?->name,
+            $this->subjectsOf($payout),
             $payout->period_start->format('Y-m-d'),
             $payout->period_end->format('Y-m-d'),
             $payout->sessions_count,
@@ -61,6 +68,21 @@ class PayoutsExport implements FromQuery, WithHeadings, WithMapping
             $payout->paid_at?->format('Y-m-d H:i'),
             $payout->transfer_reference,
         ];
+    }
+
+    /** المواد المميّزة لكل جلسات المستحقات، مفصولة بفاصلة عربية — قد يعطي المعلم أكثر من مادة في فترة واحدة */
+    private function subjectsOf($payout): string
+    {
+        return $payout->items
+            ->map(function ($item) {
+                $session = $item->session;
+
+                return $session?->booking?->package?->subject?->name_ar ?? $session?->course?->subject?->name_ar;
+            })
+            ->filter()
+            ->unique()
+            ->values()
+            ->implode('، ');
     }
 
     private function statusLabel(string $status): string

@@ -18,6 +18,7 @@ class TeacherCourseResource extends JsonResource
             'title' => $this->title,
             'description' => $this->description,
             'course_field_id' => $this->course_field_id,
+            'course_field' => $this->whenLoaded('courseField'),
             'subject_id' => $this->subject_id,
             'level' => $this->level,
             'delivery_mode' => $this->delivery_mode,

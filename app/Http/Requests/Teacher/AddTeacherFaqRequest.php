@@ -19,11 +19,8 @@ class AddTeacherFaqRequest extends FormRequest
         ];
     }
 
-    public function messages(): array
+    public function attributes(): array
     {
-        return [
-            'question.required' => 'يرجى إدخال نص السؤال',
-            'answer.required' => 'يرجى إدخال نص الإجابة',
-        ];
+        return ['question' => 'السؤال', 'answer' => 'الإجابة'];
     }
 }

@@ -47,6 +47,23 @@ class SendSessionRemindersJobTest extends TestCase
         $this->assertNotNull($session->fresh()->reminder_sent_at);
     }
 
+    public function test_does_not_send_the_link_to_attendees_whose_booking_is_unpaid_or_expired(): void
+    {
+        $this->seed(SettingsSeeder::class);
+        Notification::fake();
+
+        [$teacher] = $this->createVerifiedTeacher();
+        [, $paidUser, $session] = $this->createConfirmedUpcomingSession($teacher, minutesUntilStart: 90);
+        $pendingUser = $this->addAttendeeWithBookingStatus($session, 'pending_payment');
+        $expiredUser = $this->addAttendeeWithBookingStatus($session, 'expired');
+
+        app(SendSessionRemindersJob::class)->handle(app(SettingsService::class), app(NotificationService::class));
+
+        Notification::assertSentTo($paidUser, SessionReminder::class);
+        Notification::assertNotSentTo($pendingUser, SessionReminder::class);
+        Notification::assertNotSentTo($expiredUser, SessionReminder::class);
+    }
+
     public function test_does_not_send_for_a_session_outside_the_window(): void
     {
         $this->seed(SettingsSeeder::class);
@@ -193,5 +210,35 @@ class SendSessionRemindersJobTest extends TestCase
         ]);
 
         return [$student, $studentUser, $session];
+    }
+
+    private function addAttendeeWithBookingStatus(ClassSession $session, string $status): User
+    {
+        $studentUser = User::factory()->student()->create();
+        $student = Student::create(['user_id' => $studentUser->id, 'education_type' => 'school']);
+        $owner = $session->booking;
+
+        $booking = Booking::create([
+            'reference' => 'BK-'.strtoupper(uniqid()),
+            'student_id' => $student->id,
+            'teacher_id' => $owner->teacher_id,
+            'package_id' => $owner->package_id,
+            'amount_paid' => 160,
+            'teacher_amount' => 100,
+            'platform_amount' => 60,
+            'margin_percent_snapshot' => 60,
+            'sessions_total' => 1,
+            'sessions_remaining' => 1,
+            'status' => $status,
+        ]);
+
+        SessionAttendee::create([
+            'class_session_id' => $session->id,
+            'student_id' => $student->id,
+            'booking_id' => $booking->id,
+            'attendance' => 'registered',
+        ]);
+
+        return $studentUser;
     }
 }

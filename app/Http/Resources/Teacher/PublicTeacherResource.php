@@ -19,11 +19,15 @@ class PublicTeacherResource extends JsonResource
             'status' => $this->status,
             'display_name_en' => $this->display_name_en,
             'bio' => $this->bio,
+            'teaching_philosophy_quote' => $this->teaching_philosophy_quote,
+            'teaching_philosophy_text' => $this->teaching_philosophy_text,
+            'thank_you_message' => $this->thank_you_message,
             'city' => $this->city,
             'qualification' => $this->qualification,
             'experience_years' => $this->experience_years,
             'age_groups' => $this->age_groups,
             'teaching_methods' => $this->teaching_methods,
+            'exam_prep' => $this->exam_prep,
             'logo_path' => $this->logo_path,
             'intro_video_path' => $this->intro_video_path,
             'intro_video_seconds' => $this->intro_video_seconds,
@@ -33,6 +37,16 @@ class PublicTeacherResource extends JsonResource
             ])),
             'faqs' => $this->whenLoaded('faqs', fn () => $this->faqs->map(fn ($f) => [
                 'id' => $f->id, 'question' => $f->question, 'answer' => $f->answer,
+            ])),
+            'experiences' => $this->whenLoaded('experiences', fn () => $this->experiences->map(fn ($e) => [
+                'id' => $e->id, 'title' => $e->title, 'company' => $e->company,
+                'period' => $e->period, 'location' => $e->location, 'description' => $e->description,
+            ])),
+            'badges' => $this->whenLoaded('activeBadgeAwards', fn () => $this->activeBadgeAwards->map(fn ($award) => [
+                'award_id' => $award->id,
+                'code' => $award->badge->code,
+                'name_ar' => $award->badge->name_ar,
+                'icon' => $award->badge->icon,
             ])),
             /**
              * أوقات التوفّر الأسبوعية معروضة للعرض فقط ("أوقات التوفر هذا الأسبوع")
@@ -61,6 +75,9 @@ class PublicTeacherResource extends JsonResource
             ])),
             'languages' => $this->whenLoaded('languages', fn () => $this->languages->map(fn ($l) => [
                 'code' => $l->code, 'name_ar' => $l->name_ar,
+            ])),
+            'majors' => $this->whenLoaded('majors', fn () => $this->majors->map(fn ($m) => [
+                'id' => $m->id, 'name_ar' => $m->name_ar,
             ])),
             /**
              * مُشتقّة من باقاته الفعلية القابلة للحجز (package_stage وعمود

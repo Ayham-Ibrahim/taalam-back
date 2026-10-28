@@ -7,15 +7,17 @@ namespace App\Services;
  * (PackageApprovalService و CourseApprovalService كلاهما يستدعيان هذه الخدمة).
  *
  * الصيغة محسومة معمارياً — سعر بالوحدة (بالساعة دائماً للباقات، أو للدورة
- * حسب pricing_mode) يُضرب بعدد الوحدات (units) قبل هامش المنصة:
+ * حسب pricing_mode) يُضرب بعدد الوحدات (units) قبل هامش المنصة، ثم تُضاف
+ * نسبة المنصة فوق سعر المعلم (لا تُخصم منه) — المعلم يستلم سعره كاملاً دوماً:
  *   provider_total   = unit_price × units
  *   student_price    = provider_total × (1 + margin/100)
  *   platform_revenue = student_price - provider_total
+ *   provider_net      = provider_total (المعلم يستلم كامل سعره، لا خصم عليه)
  */
 class PricingService
 {
     /**
-     * @return array{student_price: float, platform_revenue: float, provider_total: float}
+     * @return array{student_price: float, platform_revenue: float, provider_total: float, provider_net: float}
      */
     public function calculateStudentPrice(float $unitPrice, float $marginPercent, float $units = 1): array
     {
@@ -27,6 +29,7 @@ class PricingService
             'student_price' => $studentPrice,
             'platform_revenue' => $platformRevenue,
             'provider_total' => $providerTotal,
+            'provider_net' => $providerTotal,
         ];
     }
 }

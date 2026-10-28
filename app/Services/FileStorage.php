@@ -55,6 +55,19 @@ class FileStorage
                     $allowedExtensions = ['pdf', 'jpeg', 'jpg', 'png'];
                     break;
 
+                // غاليري نماذج أعمال الداعم الأكاديمي — صورة/PDF للمعاينة المباشرة
+                // + PPT/Excel (حديث وقديم) للتنزيل فقط، لا معاينة مباشرة لهذين بالمتصفح.
+                case 'gallery':
+                    $allowedMimeTypes = [
+                        'application/pdf', 'image/jpeg', 'image/png',
+                        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                        'application/vnd.ms-powerpoint',
+                        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        'application/vnd.ms-excel',
+                    ];
+                    $allowedExtensions = ['pdf', 'jpeg', 'jpg', 'png', 'pptx', 'ppt', 'xlsx', 'xls'];
+                    break;
+
                 default:
                     self::throwValidationError('file', 'ان الملف الذي ارسلته غير امن');
             }
