@@ -26,6 +26,7 @@ class ClassSession extends Model
         'status',
         'attendance_outcome',
         'teacher_payout_percent',
+        'teacher_compensation_amount',
         'started_at',
         'ended_at',
         'cancellation_reason',
@@ -42,15 +43,16 @@ class ClassSession extends Model
     protected $hidden = [
         'attendance_outcome',
         'teacher_payout_percent',
+        'teacher_compensation_amount',
     ];
 
     /** دخل المعلم وطالب واحد على الأقل — مستحق كامل */
     public const OUTCOME_ATTENDED = 'attended';
 
-    /** دخل المعلم ولم يدخل أي طالب — نسبة التعويض من الإعداد */
+    /** دخل المعلم ولم يدخل أي طالب — تعويض ثابت من الإعداد (teacher_compensation_amount) بدل مستحقها */
     public const OUTCOME_STUDENT_NO_SHOW = 'student_no_show';
 
-    /** لم يدخل المعلم — لا مستحق */
+    /** لم يدخل المعلم خلال المهلة (student_no_show_after_minutes) — لا مستحق، ولو دخل بعدها */
     public const OUTCOME_TEACHER_ABSENT = 'teacher_absent';
 
     /** بدأت قبل بدء تسجيل الانضمام (SessionJoinLog::trackingStartedAt) — لا دليل حضور، تُحتسب كاملة */
@@ -63,6 +65,7 @@ class ClassSession extends Model
     {
         return [
             'teacher_payout_percent' => 'decimal:2',
+            'teacher_compensation_amount' => 'decimal:2',
             'scheduled_at' => 'datetime',
             'original_scheduled_at' => 'datetime',
             'started_at' => 'datetime',
@@ -178,7 +181,7 @@ class ClassSession extends Model
     }
 
     /**
-     * الحجوزات التي تُحتسب حصتها في مستحق كل جلسة (PayoutService/TeacherSessionsReportService).
+     * الحجوزات التي تُحتسب حصتها في مستحق كل جلسة (PayoutService) وعائد المنصة منها (TeacherSessionsReportService).
      * المنضم لاحقاً لمجموعة يُسجَّل في أصلية فاتته وفي تعويضيتها معاً (BookingService::sessionsFor)
      * — حصته تُصرف عن التعويضية وحدها: سطر حضوره في أصلية لها تعويضية، أُنشئ بعد بدئها،
      * لا يُحتسب. فلا يتجاوز مستحق المعلم من حجزه sessions_total جلسة.

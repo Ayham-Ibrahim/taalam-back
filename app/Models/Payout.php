@@ -2,7 +2,9 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Carbon;
 
 class Payout extends Model
 {
@@ -38,6 +40,19 @@ class Payout extends Model
             'approved_at' => 'datetime',
             'paid_at' => 'datetime',
         ];
+    }
+
+    /**
+     * فلتر الشهر (YYYY-MM): كشف تتقاطع فترته مع الشهر — فيه جلسة واحدة على الأقل منه. كشف الزر يمتد
+     * من أقدم جلسة غير مصروفة حتى يوم الضغط، فقد يظهر في أكثر من شهر.
+     */
+    public function scopeOverlappingMonth(Builder $query, string $month): Builder
+    {
+        $start = Carbon::createFromFormat('!Y-m', $month);
+
+        return $query
+            ->whereDate('period_start', '<=', $start->copy()->endOfMonth()->toDateString())
+            ->whereDate('period_end', '>=', $start->toDateString());
     }
 
     public function teacher()

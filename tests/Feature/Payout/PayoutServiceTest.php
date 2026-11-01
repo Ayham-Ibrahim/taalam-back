@@ -101,7 +101,7 @@ class PayoutServiceTest extends TestCase
             app(PayoutService::class)->generateForPeriod($teacher, now()->subDay(), now()->addDay());
         } catch (ValidationException $e) {
             $blocked = true;
-            $this->assertSame('لا توجد جلسات مكتملة غير مدفوعة لهذا المعلم ضمن هذه الفترة', $e->errors()['period'][0]);
+            $this->assertSame('لا توجد مستحقات غير مدفوعة لهذا المعلم ضمن هذه الفترة', $e->errors()['period'][0]);
         }
         $this->assertTrue($blocked, 'Expected generation to be blocked before the completion job runs');
 
@@ -501,8 +501,14 @@ class PayoutServiceTest extends TestCase
         $service = app(PayoutService::class);
         $this->assertEquals(100.0, (float) $service->generateForPeriod($teacher, now()->subDays(11), now()->subDays(9))->gross_amount);
 
-        $this->assertEquals(0.0, (float) $service->generateForPeriod($teacher, now()->subDay(), now()->addDay())->gross_amount);
-        $this->assertDatabaseMissing('payout_items', ['class_session_id' => $extra->id]);
+        // الجلسة الزائدة وحدها بلا مستحق — لا كشف فارغ
+        $this->expectException(ValidationException::class);
+        try {
+            $service->generateForPeriod($teacher, now()->subDay(), now()->addDay());
+        } finally {
+            $this->assertDatabaseMissing('payout_items', ['class_session_id' => $extra->id]);
+            $this->assertDatabaseCount('payouts', 1);
+        }
     }
 
     /** المجموعة: السقف على حصة كل حجز لا على الجلسة — من استنفد سقفه تسقط حصته وحدها */
@@ -539,31 +545,22 @@ class PayoutServiceTest extends TestCase
         $service->generateForPeriod($teacher, now()->subDay(), now()->addDay());
     }
 
-    public function test_approve_and_mark_paid_flow_enforces_order(): void
+    /** حالتان فقط: غير مدفوع عند التوليد، ثم مدفوع مباشرة — بلا اعتماد، ومرة واحدة فقط */
+    public function test_a_generated_payout_is_unpaid_and_is_marked_paid_directly_once(): void
     {
         [$teacher] = $this->createVerifiedTeacher('school');
         $this->createCompletedPackageSession($teacher, teacherPrice: 100, sessionsTotal: 4);
-        $admin = User::factory()->admin()->create();
 
         $payout = app(PayoutService::class)->generateForPeriod($teacher, now()->subDay(), now()->addDay());
+        $this->assertSame('pending', $payout->status);
 
-        $this->expectException(ValidationException::class);
-        app(PayoutService::class)->markPaid($payout, 'REF-123');
-    }
-
-    public function test_full_approve_then_paid_flow_succeeds_in_order(): void
-    {
-        [$teacher] = $this->createVerifiedTeacher('school');
-        $this->createCompletedPackageSession($teacher, teacherPrice: 100, sessionsTotal: 4);
-        $admin = User::factory()->admin()->create();
-
-        $payout = app(PayoutService::class)->generateForPeriod($teacher, now()->subDay(), now()->addDay());
-        $approved = app(PayoutService::class)->approve($payout, $admin);
-        $this->assertSame('approved', $approved->status);
-
-        $paid = app(PayoutService::class)->markPaid($approved, 'REF-123');
+        $paid = app(PayoutService::class)->markPaid($payout, 'REF-123');
         $this->assertSame('paid', $paid->status);
         $this->assertSame('REF-123', $paid->transfer_reference);
+        $this->assertNotNull($paid->paid_at);
+
+        $this->expectException(ValidationException::class);
+        app(PayoutService::class)->markPaid($paid, 'REF-456');
     }
 
     /**

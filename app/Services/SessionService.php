@@ -400,8 +400,8 @@ class SessionService
      *
      * الحالة تبقى 'completed' لكل جلسة منتهية كما كانت (لا أثر ظاهر للطالب/المعلم)، لكن
      * تُحسم معها نتيجة الحضور التلقائي من session_join_logs ونسبة مستحق المعلم منها
-     * (راجع attendanceOutcome) — تُثبَّت النسبة لحظتها فلا يغيّر تعديل الإعداد لاحقاً
-     * جلسات سابقة. سجل الانضمام لا يُكتب إلا ضمن نافذة الجلسة (resolveJoinUrl)، فهو
+     * (راجع attendanceOutcome)، ولغياب الطلاب مبلغ التعويض الثابت بدل النسبة — يُثبَّتان
+     * لحظتها فلا يغيّر تعديل الإعداد لاحقاً جلسات سابقة. سجل الانضمام لا يُكتب إلا ضمن نافذة الجلسة (resolveJoinUrl)، فهو
      * نهائي بمجرد انتهاء وقتها.
      *
      * جلسة بلا أي حاضر باشتراك مدفوع (حجز expired/cancelled/غير مدفوع — سطر الحضور يبقى
@@ -412,7 +412,8 @@ class SessionService
     public function completeEndedSessions(): int
     {
         $trackedSince = SessionJoinLog::trackingStartedAt();
-        $noShowPercent = (float) $this->settings->get('student_no_show_teacher_payout_percent', 50);
+        $noShowCompensation = (float) $this->settings->get('student_no_show_teacher_compensation_amount', 0);
+        $lateMinutes = (int) $this->settings->get('student_no_show_after_minutes', 20);
         $completed = 0;
 
         ClassSession::query()
@@ -424,12 +425,12 @@ class SessionService
                 'attendees as has_any_attendee',
                 'booking as has_paid_booking' => fn ($q) => $q->whereIn('status', ClassSession::PAID_BOOKING_STATUSES),
             ])
-            ->chunkById(200, function ($sessions) use ($trackedSince, $noShowPercent, &$completed) {
+            ->chunkById(200, function ($sessions) use ($trackedSince, $noShowCompensation, $lateMinutes, &$completed) {
                 foreach ($sessions as $session) {
                     $isPaid = $session->has_any_attendee ? $session->has_paid_attendee : $session->has_paid_booking;
 
                     $outcome = $isPaid
-                        ? $this->attendanceOutcome($session, $trackedSince)
+                        ? $this->attendanceOutcome($session, $trackedSince, $lateMinutes)
                         : ClassSession::OUTCOME_NO_PAID_ATTENDEE;
 
                     $completed += ClassSession::whereKey($session->id)
@@ -438,12 +439,17 @@ class SessionService
                             'status' => 'completed',
                             'attendance_outcome' => $outcome,
                             'teacher_payout_percent' => match ($outcome) {
-                                ClassSession::OUTCOME_STUDENT_NO_SHOW => $noShowPercent,
+                                ClassSession::OUTCOME_STUDENT_NO_SHOW,
                                 ClassSession::OUTCOME_TEACHER_ABSENT,
                                 ClassSession::OUTCOME_NO_PAID_ATTENDEE => 0,
                                 ClassSession::OUTCOME_UNTRACKED => null,
                                 default => 100,
                             },
+                            // غياب الطلاب: مبلغ ثابت مرة واحدة للجلسة بدل مستحقها، يتحمّله هامش المنصة.
+                            // لا تعويض عن جلسة تعويضية — يُصرف مرة واحدة على الأصلية لكل سلسلة تعويض
+                            'teacher_compensation_amount' => $outcome === ClassSession::OUTCOME_STUDENT_NO_SHOW && ! $session->is_makeup
+                                ? $noShowCompensation
+                                : null,
                         ]);
                 }
             });
@@ -455,8 +461,13 @@ class SessionService
      * الحضور التلقائي فقط: "دخل" = له سجل في session_join_logs آخر انضمام فيه ضمن نافذة
      * الجلسة الحالية (يُستبعد سجل من موعد سابق قبل تغيير الموعد). attendance اليدوي
      * (ومنه excused) لا يدخل هنا — إلغاء الطالب الفعلي يتم بتغيير موعد الجلسة عبر الأدمن.
+     *
+     * المعلم والطالب على نفس المهلة: يُعدّ حاضراً فقط من دخل خلال أول $lateMinutes دقيقة من بدء
+     * الجلسة (student_no_show_after_minutes). المعلم لم يدخل حتى المهلة → غياب المعلم (لا مستحق)،
+     * ولو دخل بعدها وحضر الطلاب. دخل المعلم في المهلة ولم يدخل أي طالب حتى المهلة → غياب الطلاب
+     * (تعويض ثابت للمعلم)، ولو دخل طالب بعدها.
      */
-    private function attendanceOutcome(ClassSession $session, ?Carbon $trackedSince): string
+    private function attendanceOutcome(ClassSession $session, ?Carbon $trackedSince, int $lateMinutes): string
     {
         if ($trackedSince === null || $session->scheduled_at->lt($trackedSince)) {
             return ClassSession::OUTCOME_UNTRACKED;
@@ -464,18 +475,27 @@ class SessionService
 
         $windowStart = $session->scheduled_at->clone()->subMinutes(self::EARLY_JOIN_MINUTES);
         $windowEnd = $session->scheduled_at->clone()->addMinutes($session->duration_min);
+        $deadline = $session->scheduled_at->clone()->addMinutes($lateMinutes);
 
-        $joined = $session->joinLogs->filter(
-            fn (SessionJoinLog $log) => $log->last_joined_at->between($windowStart, $windowEnd)
-        );
+        $joinedOnTime = fn (string $role) => $session->joinLogs->contains(fn (SessionJoinLog $log) => $log->role === $role
+            && $log->last_joined_at->between($windowStart, $windowEnd)
+            && $this->firstJoinInWindow($log, $windowStart)->lte($deadline));
 
-        if (! $joined->contains('role', 'teacher')) {
+        if (! $joinedOnTime('teacher')) {
             return ClassSession::OUTCOME_TEACHER_ABSENT;
         }
 
-        return $joined->contains('role', 'student')
-            ? ClassSession::OUTCOME_ATTENDED
-            : ClassSession::OUTCOME_STUDENT_NO_SHOW;
+        return $joinedOnTime('student') ? ClassSession::OUTCOME_ATTENDED : ClassSession::OUTCOME_STUDENT_NO_SHOW;
+    }
+
+    /**
+     * أول دخول ضمن نافذة الجلسة الحالية. السجل واحد لكل مستخدم في الجلسة (أول وآخر دخول فقط)، فإن
+     * كان أول دخول من موعد سابق قبل تغيير الموعد لا يُعرف أول دخول في الموعد الحالي — يُؤخذ آخر
+     * دخول (المعروف أنه ضمن النافذة)، وهو تقدير متأخر لا مبكر.
+     */
+    private function firstJoinInWindow(SessionJoinLog $log, Carbon $windowStart): Carbon
+    {
+        return $log->first_joined_at->gte($windowStart) ? $log->first_joined_at : $log->last_joined_at;
     }
 
     /**

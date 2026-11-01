@@ -16,11 +16,12 @@ use App\Services\SessionService;
 use App\Services\SettingsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
 /**
  * الحضور التلقائي (session_join_logs) يحسم عند انتهاء الجلسة نسبة مستحق المعلم منها:
- * دخل الطرفان → كاملة، دخل المعلم وحده دون إبلاغ مسبق من الطالب → نسبة الإعداد،
+ * دخل الطرفان → كاملة، دخل المعلم وحده → تعويض ثابت من الإعداد بدل مستحقها،
  * لم يدخل المعلم → صفر. الحالة تبقى 'completed' كما كانت (لا أثر ظاهر للطالب/المعلم).
  */
 class AutomaticAttendancePayoutTest extends TestCase
@@ -34,6 +35,8 @@ class AutomaticAttendancePayoutTest extends TestCase
         // الجلسات يجب أن تبدأ بعد إنشاء جدول session_join_logs (trackingStartedAt) وإلا
         // تُعدّ untracked — الجدول أُنشئ لحظة تشغيل الاختبارات، فنتقدم بالزمن.
         $this->travel(2)->days();
+
+        app(SettingsService::class)->set('student_no_show_teacher_compensation_amount', 30);
     }
 
     public function test_teacher_and_student_joined_gives_the_full_amount(): void
@@ -52,7 +55,8 @@ class AutomaticAttendancePayoutTest extends TestCase
         $this->assertEquals(100.0, (float) $this->generatePayout($teacher)->gross_amount);
     }
 
-    public function test_teacher_joined_and_student_did_not_gives_the_configured_percent(): void
+    /** دخل المعلم وحده → التعويض الثابت من الإعداد بدل مستحق الجلسة (100) */
+    public function test_teacher_joined_and_student_did_not_gives_the_configured_fixed_compensation(): void
     {
         [$teacher, $teacherUser] = $this->createTeacher();
         [$session] = $this->createEndedSession($teacher);
@@ -63,26 +67,55 @@ class AutomaticAttendancePayoutTest extends TestCase
         $session->refresh();
         $this->assertSame('completed', $session->status);
         $this->assertSame(ClassSession::OUTCOME_STUDENT_NO_SHOW, $session->attendance_outcome);
-        $this->assertEquals(50, (float) $session->teacher_payout_percent);
-        $this->assertEquals(50.0, (float) $this->generatePayout($teacher)->gross_amount);
+        $this->assertEquals(0, (float) $session->teacher_payout_percent);
+        $this->assertEquals(30, (float) $session->teacher_compensation_amount);
+        $this->assertEquals(30.0, (float) $this->generatePayout($teacher)->gross_amount);
     }
 
-    public function test_changing_the_percent_affects_only_sessions_completed_afterwards(): void
+    public function test_only_a_student_no_show_gets_the_compensation(): void
+    {
+        [$teacher, $teacherUser] = $this->createTeacher();
+        [$session, $studentUser] = $this->createEndedSession($teacher);
+        $this->logJoin($session, $teacherUser, 'teacher');
+        $this->logJoin($session, $studentUser, 'student');
+
+        app(SessionService::class)->completeEndedSessions();
+
+        $this->assertNull($session->fresh()->teacher_compensation_amount);
+    }
+
+    /** التعويض الثابت يُصرف مرة واحدة على الأصلية — لا تعويض عن جلسة تعويضية لم يحضرها الطلاب */
+    public function test_a_makeup_session_student_no_show_gets_no_compensation(): void
+    {
+        [$teacher, $teacherUser] = $this->createTeacher();
+        [$session] = $this->createEndedSession($teacher);
+        $session->update(['is_makeup' => true]);
+        $this->logJoin($session, $teacherUser, 'teacher');
+
+        app(SessionService::class)->completeEndedSessions();
+
+        $session->refresh();
+        $this->assertSame(ClassSession::OUTCOME_STUDENT_NO_SHOW, $session->attendance_outcome);
+        $this->assertNull($session->teacher_compensation_amount);
+        $this->assertNoPayoutGenerated($teacher);
+    }
+
+    public function test_changing_the_compensation_affects_only_sessions_completed_afterwards(): void
     {
         [$teacher, $teacherUser] = $this->createTeacher();
         [$first] = $this->createEndedSession($teacher);
         $this->logJoin($first, $teacherUser, 'teacher');
         app(SessionService::class)->completeEndedSessions();
 
-        app(SettingsService::class)->set('student_no_show_teacher_payout_percent', 30);
+        app(SettingsService::class)->set('student_no_show_teacher_compensation_amount', 15);
 
         [$second] = $this->createEndedSession($teacher);
         $this->logJoin($second, $teacherUser, 'teacher');
         app(SessionService::class)->completeEndedSessions();
 
-        $this->assertEquals(50, (float) $first->fresh()->teacher_payout_percent);
-        $this->assertEquals(30, (float) $second->fresh()->teacher_payout_percent);
-        $this->assertEquals(80.0, (float) $this->generatePayout($teacher)->gross_amount);
+        $this->assertEquals(30, (float) $first->fresh()->teacher_compensation_amount);
+        $this->assertEquals(15, (float) $second->fresh()->teacher_compensation_amount);
+        $this->assertEquals(45.0, (float) $this->generatePayout($teacher)->gross_amount);
     }
 
     public function test_teacher_who_did_not_join_gets_nothing(): void
@@ -97,9 +130,7 @@ class AutomaticAttendancePayoutTest extends TestCase
         $this->assertSame('completed', $session->status);
         $this->assertSame(ClassSession::OUTCOME_TEACHER_ABSENT, $session->attendance_outcome);
 
-        $payout = $this->generatePayout($teacher);
-        $this->assertEquals(0.0, (float) $payout->gross_amount);
-        $this->assertDatabaseMissing('payout_items', ['class_session_id' => $session->id]);
+        $this->assertNoPayoutGenerated($teacher);
     }
 
     /** الحضور اليدوي (ومنه excused) لا يدخل في التصنيف — الحكم لسجل الدخول وحده */
@@ -113,7 +144,7 @@ class AutomaticAttendancePayoutTest extends TestCase
         app(SessionService::class)->completeEndedSessions();
 
         $this->assertSame(ClassSession::OUTCOME_STUDENT_NO_SHOW, $session->fresh()->attendance_outcome);
-        $this->assertEquals(50.0, (float) $this->generatePayout($teacher)->gross_amount);
+        $this->assertEquals(30.0, (float) $this->generatePayout($teacher)->gross_amount);
     }
 
     /** سجل انضمام من موعد سابق للجلسة (قبل تغيير موعدها) لا يُعدّ حضوراً */
@@ -127,6 +158,118 @@ class AutomaticAttendancePayoutTest extends TestCase
         app(SessionService::class)->completeEndedSessions();
 
         $this->assertSame(ClassSession::OUTCOME_STUDENT_NO_SHOW, $session->fresh()->attendance_outcome);
+    }
+
+    /** الطالب يُعدّ حاضراً فقط إن دخل خلال أول 20 دقيقة (student_no_show_after_minutes) */
+    public function test_a_student_joining_after_the_first_twenty_minutes_counts_as_a_no_show(): void
+    {
+        [$teacher, $teacherUser] = $this->createTeacher();
+        [$session, $studentUser] = $this->createEndedSession($teacher);
+        $this->logJoin($session, $teacherUser, 'teacher');
+        $this->logJoin($session, $studentUser, 'student', $session->scheduled_at->clone()->addMinutes(25));
+
+        app(SessionService::class)->completeEndedSessions();
+
+        $session->refresh();
+        $this->assertSame(ClassSession::OUTCOME_STUDENT_NO_SHOW, $session->attendance_outcome);
+        $this->assertEquals(30, (float) $session->teacher_compensation_amount);
+        $this->assertEquals(30.0, (float) $this->generatePayout($teacher)->gross_amount);
+    }
+
+    public function test_a_student_joining_within_the_first_twenty_minutes_attends(): void
+    {
+        [$teacher, $teacherUser] = $this->createTeacher();
+        [$session, $studentUser] = $this->createEndedSession($teacher);
+        $this->logJoin($session, $teacherUser, 'teacher', $session->scheduled_at->clone()->addMinutes(20));
+        $this->logJoin($session, $studentUser, 'student', $session->scheduled_at->clone()->addMinutes(20));
+
+        app(SessionService::class)->completeEndedSessions();
+
+        $this->assertSame(ClassSession::OUTCOME_ATTENDED, $session->fresh()->attendance_outcome);
+        $this->assertEquals(100.0, (float) $this->generatePayout($teacher)->gross_amount);
+    }
+
+    /** المعلم على نفس المهلة: دخل بعد الدقيقة 20 → غياب المعلم ولا مستحق، ولو حضر الطالب في وقته */
+    public function test_a_teacher_joining_after_the_first_twenty_minutes_counts_as_absent(): void
+    {
+        [$teacher, $teacherUser] = $this->createTeacher();
+        [$session, $studentUser] = $this->createEndedSession($teacher);
+        $this->logJoin($session, $teacherUser, 'teacher', $session->scheduled_at->clone()->addMinutes(25));
+        $this->logJoin($session, $studentUser, 'student');
+
+        app(SessionService::class)->completeEndedSessions();
+
+        $session->refresh();
+        $this->assertSame(ClassSession::OUTCOME_TEACHER_ABSENT, $session->attendance_outcome);
+        $this->assertNull($session->teacher_compensation_amount);
+        $this->assertNoPayoutGenerated($teacher);
+    }
+
+    /** مهلة المعلم بأول دخول كالطالب: دخل في الدقيقة 10 ثم عاد في الدقيقة 40 حاضر */
+    public function test_the_teacher_deadline_is_checked_against_the_first_join_not_the_last(): void
+    {
+        [$teacher, $teacherUser] = $this->createTeacher();
+        [$session, $studentUser] = $this->createEndedSession($teacher);
+        $this->logJoin(
+            $session,
+            $teacherUser,
+            'teacher',
+            $session->scheduled_at->clone()->addMinutes(40),
+            firstAt: $session->scheduled_at->clone()->addMinutes(10),
+        );
+        $this->logJoin($session, $studentUser, 'student');
+
+        app(SessionService::class)->completeEndedSessions();
+
+        $this->assertSame(ClassSession::OUTCOME_ATTENDED, $session->fresh()->attendance_outcome);
+    }
+
+    /** المعلم والطالب كلاهما بعد المهلة → غياب المعلم (يُفحص أولاً)، لا تعويض غياب طلاب */
+    public function test_a_late_teacher_and_a_late_student_count_as_teacher_absent(): void
+    {
+        [$teacher, $teacherUser] = $this->createTeacher();
+        [$session, $studentUser] = $this->createEndedSession($teacher);
+        $this->logJoin($session, $teacherUser, 'teacher', $session->scheduled_at->clone()->addMinutes(30));
+        $this->logJoin($session, $studentUser, 'student', $session->scheduled_at->clone()->addMinutes(30));
+
+        app(SessionService::class)->completeEndedSessions();
+
+        $this->assertSame(ClassSession::OUTCOME_TEACHER_ABSENT, $session->fresh()->attendance_outcome);
+        $this->assertNoPayoutGenerated($teacher);
+    }
+
+    /** المهلة بأول دخول: طالب دخل في الدقيقة 10 ثم عاد في الدقيقة 40 حاضر */
+    public function test_the_deadline_is_checked_against_the_first_join_not_the_last(): void
+    {
+        [$teacher, $teacherUser] = $this->createTeacher();
+        [$session, $studentUser] = $this->createEndedSession($teacher);
+        $this->logJoin($session, $teacherUser, 'teacher');
+        $this->logJoin(
+            $session,
+            $studentUser,
+            'student',
+            $session->scheduled_at->clone()->addMinutes(40),
+            firstAt: $session->scheduled_at->clone()->addMinutes(10),
+        );
+
+        app(SessionService::class)->completeEndedSessions();
+
+        $this->assertSame(ClassSession::OUTCOME_ATTENDED, $session->fresh()->attendance_outcome);
+    }
+
+    /** المهلة نفسها للطرفين — رفعها إلى 30 يجعل دخول الدقيقة 25 حضوراً للمعلم والطالب معاً */
+    public function test_the_join_deadline_is_configurable(): void
+    {
+        app(SettingsService::class)->set('student_no_show_after_minutes', 30);
+
+        [$teacher, $teacherUser] = $this->createTeacher();
+        [$session, $studentUser] = $this->createEndedSession($teacher);
+        $this->logJoin($session, $teacherUser, 'teacher', $session->scheduled_at->clone()->addMinutes(25));
+        $this->logJoin($session, $studentUser, 'student', $session->scheduled_at->clone()->addMinutes(25));
+
+        app(SessionService::class)->completeEndedSessions();
+
+        $this->assertSame(ClassSession::OUTCOME_ATTENDED, $session->fresh()->attendance_outcome);
     }
 
     /** جلسة بدأت قبل بدء تسجيل الانضمام لا دليل حضور لها — تبقى كاملة كما كانت */
@@ -159,7 +302,7 @@ class AutomaticAttendancePayoutTest extends TestCase
         $this->assertSame('completed', $session->status);
         $this->assertSame(ClassSession::OUTCOME_NO_PAID_ATTENDEE, $session->attendance_outcome);
         $this->assertEquals(0, (float) $session->teacher_payout_percent);
-        $this->assertEquals(0.0, (float) $this->generatePayout($teacher)->gross_amount);
+        $this->assertNoPayoutGenerated($teacher);
     }
 
     /** untracked كانت تُحتسب كاملة — لكن ليس لحجز ملغى */
@@ -172,7 +315,7 @@ class AutomaticAttendancePayoutTest extends TestCase
         app(SessionService::class)->completeEndedSessions();
 
         $this->assertSame(ClassSession::OUTCOME_NO_PAID_ATTENDEE, $session->fresh()->attendance_outcome);
-        $this->assertEquals(0.0, (float) $this->generatePayout($teacher, $session->scheduled_at)->gross_amount);
+        $this->assertNoPayoutGenerated($teacher, $session->scheduled_at);
     }
 
     /** جلسة أُغلقت سابقاً كمكتملة ثم أُلغي حجزها — المستحقات نفسها تستبعد الحجز غير المدفوع */
@@ -186,8 +329,7 @@ class AutomaticAttendancePayoutTest extends TestCase
 
         $attendee->booking->update(['status' => 'cancelled']);
 
-        $this->assertEquals(0.0, (float) $this->generatePayout($teacher)->gross_amount);
-        $this->assertDatabaseMissing('payout_items', ['class_session_id' => $session->id]);
+        $this->assertNoPayoutGenerated($teacher);
     }
 
     /** جلسة مجموعة: حجز مدفوع وآخر انتهت مهلته — يُصرف نصيب المدفوع وحده لا المجموع */
@@ -254,6 +396,7 @@ class AutomaticAttendancePayoutTest extends TestCase
             $this->assertSame('completed', $response->json('data.status'));
             $this->assertArrayNotHasKey('attendance_outcome', $response->json('data'));
             $this->assertArrayNotHasKey('teacher_payout_percent', $response->json('data'));
+            $this->assertArrayNotHasKey('teacher_compensation_amount', $response->json('data'));
         }
 
         $this->assertArrayNotHasKey('attendance_outcome', $session->fresh()->toArray());
@@ -272,7 +415,19 @@ class AutomaticAttendancePayoutTest extends TestCase
         return app(PayoutService::class)->generateForPeriod($teacher, $around->clone()->subDay(), $around->clone()->addDay());
     }
 
-    private function logJoin(ClassSession $session, User $user, string $role, ?Carbon $at = null): void
+    /** لا كشف بلا مستحق موجب — كان يُنشأ كشف فارغ بصفر يتكرر في كل توليد */
+    private function assertNoPayoutGenerated(Teacher $teacher, ?Carbon $around = null): void
+    {
+        try {
+            $this->generatePayout($teacher, $around);
+            $this->fail('Expected no payout to be generated');
+        } catch (ValidationException) {
+        }
+
+        $this->assertDatabaseMissing('payouts', ['teacher_id' => $teacher->id]);
+    }
+
+    private function logJoin(ClassSession $session, User $user, string $role, ?Carbon $at = null, ?Carbon $firstAt = null): void
     {
         $at ??= $session->scheduled_at->clone()->addMinutes(2);
 
@@ -281,7 +436,7 @@ class AutomaticAttendancePayoutTest extends TestCase
             'user_id' => $user->id,
             'role' => $role,
             'student_id' => $role === 'student' ? $user->student->id : null,
-            'first_joined_at' => $at,
+            'first_joined_at' => $firstAt ?? $at,
             'last_joined_at' => $at,
             'join_count' => 1,
         ]);

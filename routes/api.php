@@ -268,8 +268,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('payouts', [PayoutController::class, 'index']);
     Route::get('payouts/{payout}', [PayoutController::class, 'show']);
     Route::get('payouts/{payout}/invoice', [PayoutController::class, 'downloadInvoice']);
-    Route::post('teachers/{teacher}/payouts/generate', [PayoutController::class, 'generate']);
-    Route::post('payouts/{payout}/approve', [PayoutController::class, 'approve']);
+    // زر الأدمن والمحاسب: كشف لكل معلم بكل مستحقاته غير المصروفة حتى لحظة الضغط — مسار حرفي ثابت، لا يتعارض
+    // مع payouts/{payout}. التوليد لمعلم واحد بفترة حرة (teachers/{teacher}/payouts/generate) أُزيل:
+    // كان يُنتج كشوفاً متداخلة ومتكررة لنفس المعلم بفترات مختلفة.
+    Route::post('payouts/generate', [PayoutController::class, 'generate']);
     Route::post('payouts/{payout}/mark-paid', [PayoutController::class, 'markPaid']);
 
     // ترتيب مقصود: export قبل أي مسار بمعرّف لاحقاً لنفس السابقة أعلاه (export/{id})

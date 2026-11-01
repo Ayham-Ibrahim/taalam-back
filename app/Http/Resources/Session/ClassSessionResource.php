@@ -39,6 +39,7 @@ class ClassSessionResource extends JsonResource
             // داخلي للأدمن فقط (ClassSession::$hidden) — لا أثر ظاهر للطالب/المعلم
             'attendance_outcome' => $this->when($isAdmin, fn () => $this->attendance_outcome),
             'teacher_payout_percent' => $this->when($isAdmin, fn () => $this->teacher_payout_percent),
+            'teacher_compensation_amount' => $this->when($isAdmin, fn () => $this->teacher_compensation_amount),
             // {amount, paid} أو null — يضبطه ClassSessionController::index للأدمن فقط
             'teacher_payout_amount' => $this->when(
                 $isAdmin && array_key_exists('payout_amount', $this->resource->getAttributes()),

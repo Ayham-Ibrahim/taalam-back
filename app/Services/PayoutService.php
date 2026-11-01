@@ -9,9 +9,9 @@ use App\Models\Payout;
 use App\Models\PayoutItem;
 use App\Models\SessionAttendee;
 use App\Models\Teacher;
-use App\Models\User;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class PayoutService
@@ -19,46 +19,84 @@ class PayoutService
     /**
      * نتائج الحضور التي تستهلك مكاناً من السقف — total_sessions للدورة، وsessions_total لكل
      * حجز باقة: جلسة عُقدت فعلاً، أو بلا دليل غياب (untracked/NULL قبل الحضور التلقائي).
-     * student_no_show تُصرف بنسبتها خارج السقف، وteacher_absent/no_paid_attendee لا تُصرف
+     * student_no_show يُصرف تعويضها الثابت (أو نسبتها قبله) خارج السقف، وteacher_absent/no_paid_attendee لا تُصرف
      * ولا تستهلك مكاناً.
      */
     private const SLOT_OUTCOMES = [ClassSession::OUTCOME_ATTENDED, ClassSession::OUTCOME_UNTRACKED];
 
-    public function generateForPeriod(Teacher $teacher, Carbon $periodStart, Carbon $periodEnd): Payout
+    /**
+     * زر توليد المستحقات لدى الأدمن (POST payouts/generate) — الطريق الوحيد لإنشاء كشوف المستحقات:
+     * كشف لكل معلم بكل جلساته المكتملة غير المصروفة حتى لحظة الضغط، أياً كان تاريخها، وتسوياته
+     * المستحقة. معلم بلا مستحق موجب يُتخطى بلا كشف. آمن التكرار: ضغطة ثانية لا تجد إلا ما اكتمل
+     * بعد الأولى. معاملة وقفل مستقلان لكل معلم — ضغطتان متزامنتان لا تصرفان نفس الجلسة مرتين.
+     *
+     * @return int عدد الكشوف المُنشأة
+     */
+    public function generateAll(?Carbon $until = null): int
+    {
+        $until ??= now();
+
+        $teacherIds = ClassSession::query()
+            ->where('status', 'completed')
+            ->where('scheduled_at', '<=', $until)
+            ->distinct()
+            ->pluck('teacher_id');
+
+        $created = 0;
+
+        foreach (Teacher::whereIn('id', $teacherIds)->get() as $teacher) {
+            try {
+                $this->generateForPeriod($teacher, null, $until);
+                $created++;
+            } catch (ValidationException) {
+                // لا مستحق موجب لهذا المعلم
+            }
+        }
+
+        return $created;
+    }
+
+    /**
+     * معاملة واحدة: فشل في المنتصف لا يترك كشفاً بلا بنود أو بنوداً بلا مجموع. وقفل صف
+     * المعلم أول استعلام فيها: توليدان متزامنان لنفس المعلم يُنفَّذان بالتتابع، فيقرأ الثاني
+     * الجلسات والتسويات بعد حفظ الأول ولا يصرفها مرتين. لو سبقت قراءةٌ القفلَ لبقيت لقطتها
+     * القديمة بعد الانتظار (REPEATABLE READ). $periodStart = null: كل غير المصروف حتى $periodEnd
+     * (زر التوليد)، وبداية الكشف أقدم جلسة فيه.
+     */
+    public function generateForPeriod(Teacher $teacher, ?Carbon $periodStart, Carbon $periodEnd): Payout
+    {
+        return DB::transaction(function () use ($teacher, $periodStart, $periodEnd) {
+            Teacher::whereKey($teacher->id)->lockForUpdate()->first();
+
+            return $this->createPayout($teacher, $periodStart, $periodEnd);
+        });
+    }
+
+    /**
+     * لا كشف بلا بند موجب: جلسات غاب عنها المعلم، أو بلا اشتراك مدفوع، أو خارج السقف وحدها كانت
+     * تُنشئ كشفاً بصفر بلا بنود — يبقى قابلاً للاعتماد والتحويل، وتعود جلساته في كل توليد تالٍ
+     * لأنها لم تُصرف، فيتكرر الكشف الفارغ كل شهر.
+     */
+    private function createPayout(Teacher $teacher, ?Carbon $periodStart, Carbon $periodEnd): Payout
     {
         $alreadyPaidSessionIds = PayoutItem::whereHas('payout', fn ($q) => $q->where('teacher_id', $teacher->id))
             ->pluck('class_session_id');
 
         $sessions = ClassSession::where('teacher_id', $teacher->id)
             ->where('status', 'completed')
-            ->whereBetween('scheduled_at', [$periodStart->copy()->startOfDay(), $periodEnd->copy()->endOfDay()])
+            ->when(
+                $periodStart === null,
+                fn ($q) => $q->where('scheduled_at', '<=', $periodEnd),
+                fn ($q) => $q->whereBetween('scheduled_at', [$periodStart->copy()->startOfDay(), $periodEnd->copy()->endOfDay()]),
+            )
             ->whereNotIn('id', $alreadyPaidSessionIds)
             ->with('course')
             ->get();
-
-        $settlements = $this->lateJoinSettlements($teacher);
-
-        if ($sessions->isEmpty() && $settlements === []) {
-            throw ValidationException::withMessages([
-                'period' => ['لا توجد جلسات مكتملة غير مدفوعة لهذا المعلم ضمن هذه الفترة'],
-            ]);
-        }
-
-        $payout = Payout::create([
-            'teacher_id' => $teacher->id,
-            'period_start' => $periodStart->toDateString(),
-            'period_end' => $periodEnd->toDateString(),
-            'gross_amount' => 0,
-            'net_amount' => 0,
-            'sessions_count' => 0,
-            'status' => 'pending',
-        ]);
 
         $amounts = $this->payableAmounts($sessions, afterPreviousPayouts: true);
 
         $gross = 0.0;
         $count = 0;
-        $now = now();
         $items = [];
 
         foreach ($sessions as $session) {
@@ -69,68 +107,56 @@ class PayoutService
                 continue;
             }
 
-            $items[] = [
-                'payout_id' => $payout->id,
-                'class_session_id' => $session->id,
-                'type' => PayoutItem::TYPE_SESSION,
-                'amount' => $amount,
-                'created_at' => $now,
-                'updated_at' => $now,
-            ];
-
+            $items[] = ['class_session_id' => $session->id, 'type' => PayoutItem::TYPE_SESSION, 'amount' => $amount];
             $gross += $amount;
             $count++;
         }
 
         // تسويات التسجيل/الانضمام المتأخر تُضاف لأول دفعة تالية بصرف النظر عن فترتها — جلساتها صُرفت سابقاً
-        foreach ($settlements as $sessionId => $amount) {
-            $items[] = [
-                'payout_id' => $payout->id,
-                'class_session_id' => $sessionId,
-                'type' => PayoutItem::TYPE_SETTLEMENT,
-                'amount' => $amount,
-                'created_at' => $now,
-                'updated_at' => $now,
-            ];
-
+        foreach ($this->lateJoinSettlements($teacher) as $sessionId => $amount) {
+            $items[] = ['class_session_id' => $sessionId, 'type' => PayoutItem::TYPE_SETTLEMENT, 'amount' => $amount];
             $gross += $amount;
         }
 
-        if ($items !== []) {
-            PayoutItem::insert($items);
+        if ($items === []) {
+            throw ValidationException::withMessages([
+                'period' => ['لا توجد مستحقات غير مدفوعة لهذا المعلم ضمن هذه الفترة'],
+            ]);
         }
 
-        $payout->update([
+        // زر التوليد: من أقدم جلسة في الكشف (جلسة أو تسوية) — قد تسبق آخر كشف إن فاتته
+        $periodStart ??= ClassSession::whereIn('id', array_column($items, 'class_session_id'))->min('scheduled_at');
+
+        $payout = Payout::create([
+            'teacher_id' => $teacher->id,
+            'period_start' => Carbon::parse($periodStart)->toDateString(),
+            'period_end' => $periodEnd->toDateString(),
             'gross_amount' => round($gross, 2),
             'net_amount' => round($gross, 2),
             'sessions_count' => $count,
+            'status' => 'pending',
         ]);
+
+        $now = now();
+
+        PayoutItem::insert(array_map(fn (array $item) => $item + [
+            'payout_id' => $payout->id,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ], $items));
 
         return $payout->fresh(['items']);
     }
 
-    public function approve(Payout $payout, User $admin): Payout
+    /**
+     * للكشف حالتان فقط: غير مدفوع (pending) عند التوليد، ومدفوع (paid) بهذا الزر مع مرجع التحويل —
+     * لا خطوة اعتماد وسيطة. التحويل مرة واحدة: كشف مدفوع لا يُعاد تحويله.
+     */
+    public function markPaid(Payout $payout, string $transferReference): Payout
     {
         if ($payout->status !== 'pending') {
             throw ValidationException::withMessages([
-                'status' => ['يمكن اعتماد المستحقات فقط من حالة قيد الانتظار'],
-            ]);
-        }
-
-        $payout->update([
-            'status' => 'approved',
-            'approved_at' => now(),
-            'approved_by' => $admin->id,
-        ]);
-
-        return $payout->fresh();
-    }
-
-    public function markPaid(Payout $payout, string $transferReference): Payout
-    {
-        if ($payout->status !== 'approved') {
-            throw ValidationException::withMessages([
-                'status' => ['يجب اعتماد المستحقات أولاً قبل تحويلها'],
+                'status' => ['هذا الكشف مدفوع بالفعل'],
             ]);
         }
 
@@ -151,11 +177,12 @@ class PayoutService
      * جماعية مصروفة بالاشتراكات المدفوعة الحالية بنفس نسبة حضورها المثبَّتة، ويُرجع الفرق
      * عمّا صُرف لها فعلاً (كل بنودها السابقة، جلسة وتسويات). لا فرق سالب — الصرف السابق
      * لا يُسترد. الباقة الفردية مستثناة: حجز واحد ثابت لا ينضم إليه أحد. أربعة استعلامات
-     * ثابتة بغض النظر عن عدد الجلسات.
+     * ثابتة بغض النظر عن عدد الجلسات. عامة كي يعرض تقرير حصص المعلمين التسويات المستحقة
+     * التي لم تُولَّد في كشف بعد (TeacherSessionsReportService).
      *
      * @return array<int, float> [class_session_id => amount]
      */
-    private function lateJoinSettlements(Teacher $teacher): array
+    public function lateJoinSettlements(Teacher $teacher): array
     {
         $paidBySession = PayoutItem::query()
             ->whereHas('payout', fn ($q) => $q->where('teacher_id', $teacher->id))
@@ -394,12 +421,262 @@ class PayoutService
     }
 
     /**
+     * حصص الحجوزات التي سقطت بسقف الحجز في جلسات الباقة المعطاة — كي يستبعدها عائد المنصة
+     * في تقرير حصص المعلمين كما سقطت من مستحق المعلم. المصروفة: السقف من الصفر على كل
+     * جلسات حجوزاتها المصروفة (كتسويات lateJoinSettlements)، والمكتملة غير المصروفة: بعد
+     * ما استُهلك في دفعات سابقة (كـ sessionPayoutAmounts). الأماكن تُوزَّع على كل جلسات
+     * الحجز لا على المعطاة وحدها، فجلسة خارج نطاق التقرير تستهلك مكانها.
+     *
+     * @return array<int, array<int, true>> [session_id => [booking_id => true]]
+     */
+    public function bookingSharesBeyondCap(Collection $sessions): array
+    {
+        $bookingIds = array_keys($this->bookingShares($sessions)['limits']);
+
+        if ($bookingIds === []) {
+            return [];
+        }
+
+        $related = ClassSession::query()
+            ->where('status', 'completed')
+            ->whereNull('course_id')
+            ->where(fn ($q) => $q
+                ->whereIn('booking_id', $bookingIds)
+                ->orWhereHas('attendees', fn ($a) => $a->whereIn('booking_id', $bookingIds)))
+            ->get(['id', 'booking_id', 'course_id', 'scheduled_at', 'attendance_outcome']);
+
+        $paidIds = PayoutItem::whereIn('class_session_id', $related->pluck('id'))->pluck('class_session_id')->flip();
+        [$paid, $pending] = $related->partition(fn (ClassSession $s) => $paidIds->has($s->id));
+
+        $paidShares = $this->bookingShares($paid);
+        $pendingShares = $this->bookingShares($pending);
+
+        return $this->sharesBeyondBookingCap($paid, $paidShares['shares'], $paidShares['limits'], [])
+            + $this->sharesBeyondBookingCap(
+                $pending,
+                $pendingShares['shares'],
+                $pendingShares['limits'],
+                $this->usedBookingSlots(array_keys($pendingShares['limits'])),
+            );
+    }
+
+    /**
+     * ما يُصرف للمعلم من حجز/دورة زيادةً على قيمة عقده (teacher_amount للحجز، مستحق المركز من
+     * كل تسجيلاتها المدفوعة للدورة) — يتحمّله هامش المنصة، فيُخصم من عائدها في تقرير حصص
+     * المعلمين. ينشأ من جلسات student_no_show المحسومة بنسبة قبل التعويض الثابت: تُصرف بنسبتها
+     * خارج السقف، ثم تملأ تعويضيتها مكانها كاملة (حجز 400: ثلاث جلسات + 50 عن غياب الطالب +
+     * تعويضية = 450). التعويض الثابت خارج العقد أصلاً — يخصمه التقرير كاملاً (compensations)
+     * ولا يدخل هنا. الزيادة تُنسب للجلسة
+     * التي تجاوز عندها المصروف المتراكم قيمة العقد بترتيب الموعد، على كل جلسات الحجز/الدورة
+     * المكتملة لا المعطاة وحدها — المصروفة بالسقف من الصفر (كتسويات lateJoinSettlements)،
+     * والمكتملة غير المصروفة بعد ما استُهلك في دفعات سابقة (كـ sessionPayoutAmounts).
+     *
+     * @return array<int, float> [class_session_id => amount]
+     */
+    public function compensationBeyondContract(Collection $sessions): array
+    {
+        $courseIds = $sessions->pluck('course_id')->filter()->unique()->values();
+        $bookingIds = array_keys($this->bookingShares($sessions)['limits']);
+
+        if ($courseIds->isEmpty() && $bookingIds === []) {
+            return [];
+        }
+
+        $related = ClassSession::query()
+            ->where('status', 'completed')
+            ->where(fn ($q) => $q
+                ->whereIn('course_id', $courseIds)
+                ->orWhere(fn ($b) => $b
+                    ->whereNull('course_id')
+                    ->where(fn ($r) => $r
+                        ->whereIn('booking_id', $bookingIds)
+                        ->orWhereHas('attendees', fn ($a) => $a->whereIn('booking_id', $bookingIds)))))
+            ->with('course')
+            ->get();
+
+        $paidIds = PayoutItem::whereIn('class_session_id', $related->pluck('id'))->pluck('class_session_id')->flip();
+        [$paid, $pending] = $related->partition(fn (ClassSession $s) => $paidIds->has($s->id));
+
+        $paidContributions = $this->contractContributions($paid, afterPreviousPayouts: false);
+        $pendingContributions = $this->contractContributions($pending, afterPreviousPayouts: true);
+        $amounts = $paidContributions['amounts'] + $pendingContributions['amounts'];
+        $values = $paidContributions['values'] + $pendingContributions['values'];
+
+        $spent = [];
+        $beyond = [];
+
+        foreach ($related->sortBy([['scheduled_at', 'asc'], ['id', 'asc']]) as $session) {
+            foreach ($amounts[$session->id] ?? [] as $contract => $amount) {
+                $before = $spent[$contract] ?? 0.0;
+                $spent[$contract] = $before + $amount;
+                $excess = max(0, $spent[$contract] - $values[$contract]) - max(0, $before - $values[$contract]);
+
+                if ($excess > 0) {
+                    $beyond[$session->id] = ($beyond[$session->id] ?? 0.0) + $excess;
+                }
+            }
+        }
+
+        return array_map(fn (float $amount) => round($amount, 2), $beyond);
+    }
+
+    /**
+     * نصيب كل عقد (دورة أو حجز باقة) من مستحق كل جلسة بعد النسبة والسقفين — نفس payableAmounts
+     * لكن مفصّلاً لكل عقد مع قيمته الكلية، كي تُقارن compensationBeyondContract المصروف منه بها.
+     *
+     * @return array{amounts: array<int, array<string, float>>, values: array<string, float>}
+     *         amounts: [session_id => ['course:id'|'booking:id' => amount]]، values: [contract => قيمة العقد]
+     */
+    private function contractContributions(Collection $sessions, bool $afterPreviousPayouts): array
+    {
+        $courseValues = $this->courseSessionValues($sessions);
+        ['shares' => $shares, 'limits' => $limits] = $this->bookingShares($sessions);
+
+        $beyondCourse = $this->sessionsBeyondCourseCap($sessions, $afterPreviousPayouts ? $this->usedCourseSlots($sessions) : collect());
+        $beyondBooking = $this->sharesBeyondBookingCap(
+            $sessions,
+            $shares,
+            $limits,
+            $afterPreviousPayouts ? $this->usedBookingSlots(array_keys($limits)) : [],
+        );
+
+        $amounts = [];
+        $values = [];
+
+        foreach ($sessions as $session) {
+            $percent = $this->payablePercent($session) / 100;
+
+            if ($session->course_id !== null) {
+                $contract = 'course:'.$session->course_id;
+                $value = $courseValues[$session->id] ?? 0.0;
+                $values[$contract] = $value * ($session->course?->total_sessions ?? 0);
+
+                if (! isset($beyondCourse[$session->id])) {
+                    $amounts[$session->id][$contract] = $value * $percent;
+                }
+
+                continue;
+            }
+
+            foreach (array_diff_key($shares[$session->id] ?? [], $beyondBooking[$session->id] ?? []) as $bookingId => $share) {
+                $amounts[$session->id]['booking:'.$bookingId] = $share * $percent;
+            }
+
+            foreach ($shares[$session->id] ?? [] as $bookingId => $share) {
+                $values['booking:'.$bookingId] = $share * $limits[$bookingId];
+            }
+        }
+
+        return ['amounts' => $amounts, 'values' => $values];
+    }
+
+    /**
      * نسبة الحضور التلقائي المثبَّتة عند انتهاء الجلسة (SessionService::completeEndedSessions):
      * جزئية عند غياب الطالب، صفر عند غياب المعلم. NULL = جلسة لم تُقيَّم (قبل الحضور التلقائي) → كاملة
      */
     private function payablePercent(ClassSession $session): float
     {
         return $session->teacher_payout_percent === null ? 100.0 : (float) $session->teacher_payout_percent;
+    }
+
+    /**
+     * تعويض غياب الطلاب الثابت لكل جلسة — مثبَّت عند انتهائها (teacher_compensation_amount)، مرة
+     * واحدة للجلسة أياً كان عدد حجوزاتها، خارج السقف وخارج قيمة العقد (يتحمّله هامش المنصة).
+     * جلسات غياب الطلاب المحسومة قبله بنسبة من مستحقها (payablePercent) لا تعويض ثابت لها.
+     *
+     * جلسة لها تعويضية (غير ملغاة) لا يُصرف تعويضها: الطلاب يأخذون الجلسة كاملة في التعويضية
+     * والمعلم يُصرف له عنها. فإن كان صُرف في كشف قبل إنشاء التعويضية — والصرف لا يُسترد — يبقى
+     * على الأصلية ويُخصم من مستحق التعويضية (قيمة سالبة عليها)، فالنتيجة واحدة أياً كان التوقيت.
+     *
+     * الجلسة التعويضية لا تعويض لها (completeEndedSessions)، فالتعويض الوحيد في سلسلة التعويض
+     * (أصلية ← تعويضية ← تعويضيتها...) على أصليتها الأولى، ويُخصم المصروف منه من كل تعويضية في
+     * السلسلة: الوسيطة فائتة بلا مستحق فلا يؤثر فيها (لا مستحق سالب)، والتي عُقدت — ولا تعويضية
+     * لها بعدها — يُخصم منها. كان يُخصم من الأصلية المباشرة وحدها، فتعويضية ثانية بعد تعويضية
+     * فائتة تُصرف كاملة فوق التعويض المصروف. استعلام إضافي لكل مستوى في السلسلة.
+     *
+     * @return array<int, float> [class_session_id => amount] موجب على الأصلية، سالب على تعويضيتها
+     */
+    public function compensations(Collection $sessions): array
+    {
+        $own = $sessions
+            ->filter(fn (ClassSession $s) => (float) ($s->teacher_compensation_amount ?? 0) > 0)
+            ->mapWithKeys(fn (ClassSession $s) => [$s->id => (float) $s->teacher_compensation_amount]);
+
+        $rootOf = $this->makeupRoots($sessions->filter(fn (ClassSession $s) => $s->makeup_for_session_id !== null));
+
+        if ($own->isEmpty() && $rootOf === []) {
+            return [];
+        }
+
+        // تعويض الأصليات الأولى لسلاسل التعويضيات في هذه الجلسات — المصروف منه فقط يُخصم من التعويضية
+        $originalCompensation = $rootOf === [] ? collect() : ClassSession::whereIn('id', array_unique($rootOf))
+            ->where('teacher_compensation_amount', '>', 0)
+            ->pluck('teacher_compensation_amount', 'id');
+
+        $hasMakeup = $own->isEmpty() ? collect() : ClassSession::whereIn('makeup_for_session_id', $own->keys())
+            ->where('status', '!=', 'cancelled')
+            ->pluck('makeup_for_session_id')
+            ->flip();
+
+        $paid = PayoutItem::whereIn('class_session_id', $own->keys()->merge($originalCompensation->keys())->unique())
+            ->where('type', PayoutItem::TYPE_SESSION)
+            ->pluck('class_session_id')
+            ->flip();
+
+        $result = [];
+
+        foreach ($sessions as $session) {
+            $amount = 0.0;
+
+            if ($own->has($session->id) && (! $hasMakeup->has($session->id) || $paid->has($session->id))) {
+                $amount += $own[$session->id];
+            }
+
+            $originalId = $rootOf[$session->id] ?? null;
+
+            if ($originalId !== null && $originalCompensation->has($originalId) && $paid->has($originalId)) {
+                $amount -= (float) $originalCompensation[$originalId];
+            }
+
+            if ($amount != 0.0) {
+                $result[$session->id] = $amount;
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * الأصلية الأولى (غير التعويضية) لكل تعويضية — صعوداً عبر makeup_for_session_id.
+     *
+     * @return array<int, int> [makeup_session_id => root_session_id]
+     */
+    private function makeupRoots(Collection $makeups): array
+    {
+        $rootOf = $makeups->mapWithKeys(fn (ClassSession $s) => [$s->id => $s->makeup_for_session_id])->all();
+        $parentOf = [];
+        $checked = [];
+        $toCheck = array_values(array_unique($rootOf));
+
+        while ($toCheck !== []) {
+            $checked += array_flip($toCheck);
+            $found = ClassSession::whereIn('id', $toCheck)
+                ->whereNotNull('makeup_for_session_id')
+                ->pluck('makeup_for_session_id', 'id')
+                ->all();
+            $parentOf += $found;
+            $toCheck = array_values(array_diff(array_unique($found), array_keys($checked)));
+        }
+
+        foreach ($rootOf as $makeupId => $rootId) {
+            while (isset($parentOf[$rootId])) {
+                $rootId = $parentOf[$rootId];
+            }
+
+            $rootOf[$makeupId] = $rootId;
+        }
+
+        return $rootOf;
     }
 
     /**
@@ -423,6 +700,7 @@ class PayoutService
             $limits,
             $afterPreviousPayouts ? $this->usedBookingSlots(array_keys($limits)) : [],
         );
+        $compensations = $this->compensations($sessions);
 
         $result = [];
 
@@ -437,7 +715,8 @@ class PayoutService
             }
 
             $result[$session->id] = [
-                'amount' => round($value * $this->payablePercent($session) / 100, 2),
+                // الخصم من التعويضية لا يتجاوز مستحقها — لا مستحق سالب
+                'amount' => max(0.0, round($value * $this->payablePercent($session) / 100 + ($compensations[$session->id] ?? 0.0), 2)),
                 'capped' => $capped,
             ];
         }

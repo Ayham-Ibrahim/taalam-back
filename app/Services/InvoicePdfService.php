@@ -73,16 +73,12 @@ class InvoicePdfService
     }
 
     /**
-     * كشف مستحقات (لا فاتورة طالب) — لا معنى له قبل الاعتماد (pending قابلة
-     * للتعديل بالكامل، لا رقم رسمي يُصدَر عنها بعد). قالب منفصل عن invoices.pdf
-     * (بند واحد ثابت) لأن كشف المستحقات يحتاج سطراً لكل جلسة ضمن الفترة.
+     * كشف مستحقات (لا فاتورة طالب) — متاح بحالتيه (غير مدفوع/مدفوع): بنوده ثابتة منذ التوليد، والحالة
+     * ومرجع التحويل يظهران فيه. قالب منفصل عن invoices.pdf (بند واحد ثابت) لأن كشف المستحقات يحتاج
+     * سطراً لكل جلسة ضمن الفترة.
      */
     public function forPayout(Payout $payout): string
     {
-        if (! in_array($payout->status, ['approved', 'paid'], true)) {
-            throw new RuntimeException('لا يتوفر كشف مستحقات قبل اعتمادها');
-        }
-
         $payout->loadMissing(['teacher.user', 'items.session.course', 'items.session.booking.package']);
 
         $items = $payout->items->map(function (PayoutItem $item) {
@@ -101,7 +97,7 @@ class InvoicePdfService
             'teacherName' => $payout->teacher?->user?->name,
             'periodStart' => $payout->period_start->format('Y-m-d'),
             'periodEnd' => $payout->period_end->format('Y-m-d'),
-            'issueDate' => ($payout->paid_at ?? $payout->approved_at ?? $payout->created_at)->format('Y-m-d'),
+            'issueDate' => ($payout->paid_at ?? $payout->created_at)->format('Y-m-d'),
             'sessionsCount' => $payout->sessions_count,
             'items' => $items,
             'grossAmount' => (float) $payout->gross_amount,
@@ -116,7 +112,7 @@ class InvoicePdfService
     private function payoutStatusLabel(string $status): string
     {
         return match ($status) {
-            'approved' => 'معتمدة',
+            'pending' => 'غير مدفوعة',
             'paid' => 'مدفوعة',
             default => $status,
         };
