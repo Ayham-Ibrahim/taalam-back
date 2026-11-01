@@ -133,6 +133,12 @@ class PackageController extends Controller
             ->whereBetween('scheduled_at', [$dayStart, $dayEnd])
             ->where(fn ($q) => $q->whereDoesntHave('attendees')
                 ->orWhereHas('attendees', fn ($a) => ClassSession::constrainToLiveAttendee($a)))
+            // جلسات هذه الباقة الجماعية نفسها (أنشأها أول منضم) ليست "انشغالاً" لمن
+            // ينضم إليها لاحقاً — سيحضرها هو نفسه. نفس استثناء excludeSessionIds في
+            // BookingService::joinGroupPackage، وإلا تظهر الباقة متعارضة مع نفسها.
+            ->when($package->session_format === 'group', fn ($q) => $q->where(fn ($q2) => $q2
+                ->whereNull('booking_id')
+                ->orWhereDoesntHave('booking', fn ($b) => $b->where('package_id', $package->id))))
             ->get(['scheduled_at', 'duration_min'])
             ->filter(fn (ClassSession $session) => $session->scheduled_at->copy()->addMinutes($session->duration_min)->gt(now()))
             ->values();

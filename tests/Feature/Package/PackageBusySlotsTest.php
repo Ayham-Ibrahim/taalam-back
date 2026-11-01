@@ -172,6 +172,47 @@ class PackageBusySlotsTest extends TestCase
     }
 
     /**
+     * جلسات الباقة الجماعية نفسها (أنشأها أول منضم) ليست انشغالاً لطالب ينضم إليها
+     * لاحقاً — كانت تظهر فتعرض الواجهة الباقة "متعارضة مع جلسة أخرى للمعلم" وتمنع
+     * الانضمام. جلسة أخرى للمعلم في نفس اليوم تبقى ظاهرة كالمعتاد.
+     */
+    public function test_a_group_packages_own_sessions_are_not_busy_for_that_package(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        $package = $this->createActiveIndividualPackage($teacher);
+        $package->update(['session_format' => 'group', 'capacity' => 5]);
+
+        $day = Carbon::now('UTC')->addWeek()->startOfDay();
+        $package->schedules()->create([
+            'date' => $day->toDateString(),
+            'day_of_week' => $day->dayOfWeek,
+            'start_time' => '10:00',
+            'end_time' => '11:00',
+        ]);
+
+        app(BookingService::class)->joinGroupPackage($this->createStudent(), $package);
+
+        $otherSession = ClassSession::create([
+            'teacher_id' => $teacher->id,
+            'sequence_no' => 1,
+            'scheduled_at' => $day->copy()->setTime(15, 0),
+            'duration_min' => 60,
+            'status' => 'scheduled',
+        ]);
+
+        $newcomer = $this->createStudent();
+        $token = User::find($newcomer->user_id)->createToken('t')->plainTextToken;
+
+        $slots = $this->as($token)
+            ->getJson("/api/packages/{$package->id}/busy-slots?date=".$day->toDateString())
+            ->assertStatus(200)
+            ->json('data');
+
+        $this->assertCount(1, $slots);
+        $this->assertSame($otherSession->scheduled_at->toIso8601String(), $slots[0]['start']);
+    }
+
+    /**
      * @return array{0: Teacher, 1: string}
      */
     private function createVerifiedTeacher(): array
