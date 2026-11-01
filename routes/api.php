@@ -31,6 +31,7 @@ use App\Http\Controllers\Reschedule\RescheduleRequestController;
 use App\Http\Controllers\Review\ReviewController;
 use App\Http\Controllers\Session\ClassSessionController;
 use App\Http\Controllers\Session\SessionAttendanceController;
+use App\Http\Controllers\Student\SiblingController;
 use App\Http\Controllers\Student\StudentController;
 use App\Http\Controllers\Student\StudentImportController;
 use App\Http\Controllers\SupportPackagePurchase\SupportPackagePurchaseController;
@@ -63,6 +64,13 @@ Route::middleware(['auth:sanctum', 'throttle:uploads'])->post('me/avatar', [Prof
 Route::middleware('auth:sanctum')->delete('me/avatar', [ProfileController::class, 'deleteAvatar']);
 Route::middleware('auth:sanctum')->put('me/profile', [ProfileController::class, 'updateProfile']);
 Route::middleware(['auth:sanctum', 'throttle:password-change'])->put('me/password', [ProfileController::class, 'updatePassword']);
+
+// حسابات الإخوة — الطالب الأساسي يضيف إخوته ويبدّل بين حسابات العائلة (SiblingAccountService)
+Route::middleware('auth:sanctum')->group(function () {
+    Route::get('me/siblings', [SiblingController::class, 'index']);
+    Route::post('me/siblings', [SiblingController::class, 'store']);
+    Route::post('me/switch-account/{user}', [SiblingController::class, 'switch']);
+});
 
 Route::post('teachers/accept-invitation', [TeacherController::class, 'acceptInvitation']);
 
