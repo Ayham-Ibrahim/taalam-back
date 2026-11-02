@@ -40,6 +40,8 @@ class RegisterStudentRequest extends FormRequest
             'birth_date' => ['nullable', 'date', 'before:today'],
             'guardian_name' => ['nullable', 'string', 'max:150'],
             'guardian_phone' => ['nullable', 'string', 'max:25'],
+            // موافقة صريحة على سياسة الطالب (legal_pages: student-policy) — تُحفظ في users.policy_accepted_at
+            'accept_policy' => ['accepted'],
         ];
     }
 
@@ -56,6 +58,7 @@ class RegisterStudentRequest extends FormRequest
             'university_id' => 'الجامعة',
             'major_id' => 'التخصص',
             'course_field_id' => 'مجال الدورة',
+            'accept_policy' => 'الموافقة على سياسة الطالب',
         ];
     }
 }

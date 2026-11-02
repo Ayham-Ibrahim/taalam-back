@@ -89,7 +89,7 @@ class BookingService
     /**
      * المعلم يوافق على طلب حجز فردي — عندها فقط تُنشأ الجلسات (من requested_slots،
      * موعد مستقل لكل جلسة) ويُنشأ الدفع المعلَّق. الطالب يكمل الدفع بعدها عبر
-     * BookingController::checkout.
+     * BookingController::checkout. الباقة المجانية تُؤكَّد فوراً بلا دفع.
      */
     public function approveIndividualRequest(Booking $booking, User $teacher): Booking
     {
@@ -126,12 +126,21 @@ class BookingService
                 $this->registerAttendee($session, $booking->student, booking: $booking);
             }
 
+            // باقة فردية مجانية (student_price = 0): لا شيء يُدفع، وStripe يرفض جلسة دفع بمبلغ
+            // صفر — فموافقة المعلم تؤكّد الحجز مباشرة عبر confirmBooking (نفس ما يفعله webhook
+            // الدفع: confirmed + غرف BBB) بلا Payment معلَّق ولا مهلة دفع.
+            $isFree = (float) $booking->package->student_price <= 0;
+
             $booking->update([
                 'status' => 'pending_payment',
-                'hold_expires_at' => now()->addMinutes((int) $this->settings->get('booking_payment_hold_minutes', 15)),
+                'hold_expires_at' => $isFree ? null : now()->addMinutes((int) $this->settings->get('booking_payment_hold_minutes', 15)),
             ]);
 
-            $this->createPendingPayment($booking);
+            if ($isFree) {
+                $this->confirmBooking($booking);
+            } else {
+                $this->createPendingPayment($booking);
+            }
 
             $this->audit('booking.request_approved', $booking, [], [], null, $teacher->id);
 
@@ -469,7 +478,8 @@ class BookingService
             $sessions = $this->sessionsFor($package, $booking);
             // $sessions قد تكون موجودة مسبقاً (انضمام ثانٍ فما فوق لنفس المجموعة) —
             // استبعادها من فحص تعارض المعلم، وإلا تُرفَض بحجة "تعارضها" مع نفسها.
-            $this->conflicts->assertNoConflict($student, $package->teacher_id, $sessions->pluck('scheduled_at'), $this->defaultSessionDurationMinutes(), $sessions->pluck('id')->all());
+            // تعارض جدول الطالب نفسه لا يمنع الانضمام هنا (تحذير في الواجهة فقط) — جدول المعلم يبقى مفحوصاً.
+            $this->conflicts->assertNoConflict($student, $package->teacher_id, $sessions->pluck('scheduled_at'), $this->defaultSessionDurationMinutes(), $sessions->pluck('id')->all(), checkStudentSchedule: false);
 
             foreach ($sessions as $session) {
                 $this->registerAttendee($session, $student, booking: $booking);
@@ -747,6 +757,11 @@ class BookingService
      * المعلم صراحةً من روزنامة (لا تكرار أسبوعي تلقائي) — PackageService يضمن
      * أن عدد الصفوف يساوي sessions_count بالضبط، فكل صف يصبح جلسة واحدة مرتّبة
      * زمنياً. الفردية لا تملك جدولاً زمنياً على الإطلاق — انظر sessionsFromSlots.
+     *
+     * المنضم لاحقاً لا يُسجَّل في الملغاة (لا تُعقد)، ويُسجَّل في التعويضية كبقية
+     * المجموعة — حصته تُصرف عنها بدل أصليتها التي فاتته (ClassSession::payableBookingIdsBySession)،
+     * فلا يتجاوز مستحقه منه sessions_total. الفحص على وجود الجلسات يسبق الفلترة عمداً كي
+     * لا يُعاد توليدها من الجدول إن لم يبقَ منها شيء صالح.
      */
     private function sessionsFor(Package $package, Booking $ownerBooking): Collection
     {
@@ -755,7 +770,9 @@ class BookingService
             ->get();
 
         if ($existing->isNotEmpty()) {
-            return $existing;
+            return $existing
+                ->reject(fn (ClassSession $session) => $session->status === 'cancelled')
+                ->values();
         }
 
         $schedules = $package->schedules()->orderBy('date')->orderBy('start_time')->get();
@@ -769,12 +786,8 @@ class BookingService
         $durationMinutes = $this->defaultSessionDurationMinutes();
 
         return $schedules->values()->map(function ($schedule, int $index) use ($ownerBooking, $package, $durationMinutes) {
-            // start_time أُدخِل بمنطقة المعلم وقت إنشاء الباقة (Package::schedule_timezone) — لا UTC
-            // ساذجة. schedule->date كائن Carbon مُحوَّل مسبقاً (date cast) لا نص خام — toDateString()
-            // ضروري هنا، وإلا Carbon::parse يتجاهل $tz تماماً (نفس ملاحظة approveIndividualRequest).
-            $scheduledAt = Carbon::parse($this->dateString($schedule->date), $package->schedule_timezone ?? 'UTC')
-                ->setTimeFromTimeString((string) $schedule->start_time)
-                ->setTimezone(config('app.timezone'));
+            // نفس اللحظة التي يعرضها StudentPackageResource للطالب (starts_at) — مصدر واحد
+            $scheduledAt = $schedule->startsAt($package->schedule_timezone);
 
             return $ownerBooking->sessions()->create([
                 'teacher_id' => $package->teacher_id,

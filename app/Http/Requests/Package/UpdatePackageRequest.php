@@ -2,12 +2,15 @@
 
 namespace App\Http\Requests\Package;
 
+use App\Http\Requests\Package\Concerns\ValidatesTrialPackage;
 use App\Rules\CapacityMatchesFormat;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
 class UpdatePackageRequest extends FormRequest
 {
+    use ValidatesTrialPackage;
+
     public function authorize(): bool
     {
         return $this->user()->can('update', $this->route('package'));
@@ -23,11 +26,19 @@ class UpdatePackageRequest extends FormRequest
         $this->merge([
             'description' => is_string($this->description) ? trim($this->description) : $this->description,
         ]);
+
+        $this->prepareTrialPackage();
+    }
+
+    protected function isTrialPackage(): bool
+    {
+        // بلا is_trial في الطلب تبقى قيمة الباقة الحالية
+        return $this->has('is_trial') ? $this->boolean('is_trial') : (bool) $this->route('package')?->is_trial;
     }
 
     public function rules(): array
     {
-        return [
+        return $this->withTrialPackageRules([
             'title' => ['required', 'string', 'max:180'],
             'description' => ['required', 'string', 'max:2000'],
             'subject_id' => ['required', 'integer', 'exists:subjects,id'],
@@ -47,12 +58,12 @@ class UpdatePackageRequest extends FormRequest
             'schedules.*.date' => ['nullable', 'required_if:session_format,group', 'date', 'after_or_equal:today'],
             'schedules.*.start_time' => ['nullable', 'required_if:session_format,group', 'date_format:H:i'],
             'schedules.*.day_of_week' => ['nullable', 'required_if:session_format,individual', 'integer', 'min:0', 'max:6'],
-        ];
+        ]);
     }
 
     public function messages(): array
     {
-        return [
+        return $this->withTrialPackageMessages([
             'title.required' => 'عنوان الباقة مطلوب',
             'title.max' => 'عنوان الباقة يجب ألا يتجاوز 180 حرفاً',
             'description.required' => 'الوصف حقل إلزامي ولا يمكن أن يكون فارغاً',
@@ -97,6 +108,6 @@ class UpdatePackageRequest extends FormRequest
             'schedules.*.day_of_week.integer' => 'اليوم المختار غير صالح',
             'schedules.*.day_of_week.min' => 'اليوم المختار غير صالح',
             'schedules.*.day_of_week.max' => 'اليوم المختار غير صالح',
-        ];
+        ]);
     }
 }

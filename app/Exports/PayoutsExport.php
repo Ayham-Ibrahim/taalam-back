@@ -27,6 +27,7 @@ class PayoutsExport implements FromQuery, WithHeadings, WithMapping
             ])
             ->when(! empty($this->filters['status']), fn ($q) => $q->where('status', $this->filters['status']))
             ->when(! empty($this->filters['teacher_id']), fn ($q) => $q->where('teacher_id', $this->filters['teacher_id']))
+            ->when(! empty($this->filters['month']), fn ($q) => $q->overlappingMonth($this->filters['month']))
             ->latest();
     }
 
@@ -44,7 +45,6 @@ class PayoutsExport implements FromQuery, WithHeadings, WithMapping
             'الصافي',
             'العملة',
             'الحالة',
-            'تاريخ الاعتماد',
             'تاريخ الدفع',
             'الرقم المرجعي للتحويل',
         ];
@@ -64,7 +64,6 @@ class PayoutsExport implements FromQuery, WithHeadings, WithMapping
             (float) $payout->net_amount,
             $payout->currency,
             $this->statusLabel($payout->status),
-            $payout->approved_at?->format('Y-m-d H:i'),
             $payout->paid_at?->format('Y-m-d H:i'),
             $payout->transfer_reference,
         ];
@@ -88,11 +87,8 @@ class PayoutsExport implements FromQuery, WithHeadings, WithMapping
     private function statusLabel(string $status): string
     {
         return match ($status) {
-            'pending' => 'قيد الانتظار',
-            'approved' => 'معتمدة',
-            'processing' => 'قيد المعالجة',
+            'pending' => 'غير مدفوعة',
             'paid' => 'مدفوعة',
-            'on_hold' => 'موقوفة',
             default => $status,
         };
     }

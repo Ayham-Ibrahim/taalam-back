@@ -3,12 +3,15 @@
 namespace App\Http\Requests\Package;
 
 use App\Models\Package;
+use App\Http\Requests\Package\Concerns\ValidatesTrialPackage;
 use App\Rules\CapacityMatchesFormat;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
 class CreatePackageRequest extends FormRequest
 {
+    use ValidatesTrialPackage;
+
     public function authorize(): bool
     {
         return $this->user()->can('create', Package::class);
@@ -24,11 +27,18 @@ class CreatePackageRequest extends FormRequest
         $this->merge([
             'description' => is_string($this->description) ? trim($this->description) : $this->description,
         ]);
+
+        $this->prepareTrialPackage();
+    }
+
+    protected function isTrialPackage(): bool
+    {
+        return $this->boolean('is_trial');
     }
 
     public function rules(): array
     {
-        return [
+        return $this->withTrialPackageRules([
             'title' => ['required', 'string', 'max:180'],
             'description' => ['required', 'string', 'max:2000'],
             'subject_id' => ['required', 'integer', 'exists:subjects,id'],
@@ -56,12 +66,12 @@ class CreatePackageRequest extends FormRequest
             'schedules.*.date' => ['nullable', 'required_if:session_format,group', 'date', 'after_or_equal:today'],
             'schedules.*.start_time' => ['nullable', 'required_if:session_format,group', 'date_format:H:i'],
             'schedules.*.day_of_week' => ['nullable', 'required_if:session_format,individual', 'integer', 'min:0', 'max:6'],
-        ];
+        ]);
     }
 
     public function messages(): array
     {
-        return [
+        return $this->withTrialPackageMessages([
             'title.required' => 'عنوان الباقة مطلوب',
             'title.max' => 'عنوان الباقة يجب ألا يتجاوز 180 حرفاً',
             'description.required' => 'الوصف حقل إلزامي ولا يمكن أن يكون فارغاً',
@@ -106,6 +116,6 @@ class CreatePackageRequest extends FormRequest
             'schedules.*.day_of_week.integer' => 'اليوم المختار غير صالح',
             'schedules.*.day_of_week.min' => 'اليوم المختار غير صالح',
             'schedules.*.day_of_week.max' => 'اليوم المختار غير صالح',
-        ];
+        ]);
     }
 }

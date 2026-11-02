@@ -255,6 +255,130 @@ class ClassSessionListTest extends TestCase
         $this->assertFalse($cancelledIds->contains($scheduled->id));
     }
 
+    /** فلاتر الأدمن بنتيجة الحضور التلقائي — كل جلسة منتهية completed، فالنتيجة هي ما يفرّقها */
+    public function test_admin_outcome_filters_split_completed_sessions_by_what_happened(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        $completed = fn (string $status, ?string $outcome) => tap(
+            $this->createBookingWithSession($teacher, now()->subDays(2)),
+            function (array $pair) use ($status, $outcome) {
+                $this->attendeeFor($pair[1], $pair[0]);
+                $pair[1]->update(['status' => $status, 'attendance_outcome' => $outcome]);
+            },
+        )[1];
+
+        $attended = $completed('completed', ClassSession::OUTCOME_ATTENDED);
+        $legacy = $completed('completed', null);
+        $teacherAbsent = $completed('completed', ClassSession::OUTCOME_TEACHER_ABSENT);
+        $teacherAbsentCompensated = $completed('completed', ClassSession::OUTCOME_TEACHER_ABSENT);
+        $legacyTeacherNoShow = $completed('no_show_teacher', null);
+        $studentNoShow = $completed('completed', ClassSession::OUTCOME_STUDENT_NO_SHOW);
+        $unpaid = $completed('completed', ClassSession::OUTCOME_NO_PAID_ATTENDEE);
+        $cancelled = $completed('cancelled', null);
+        [, $upcoming] = $this->createBookingWithSession($teacher, now()->addDay());
+
+        ClassSession::create([
+            'teacher_id' => $teacher->id,
+            'booking_id' => $teacherAbsentCompensated->booking_id,
+            'scheduled_at' => now()->addDays(3),
+            'status' => 'scheduled',
+            'is_makeup' => true,
+            'makeup_for_session_id' => $teacherAbsentCompensated->id,
+        ]);
+
+        $adminToken = User::factory()->admin()->create()->createToken('t')->plainTextToken;
+        $ids = fn (string $status) => collect($this->as($adminToken)->getJson("/api/class-sessions?status={$status}&per_page=50")->json('data'))
+            ->pluck('id')->sort()->values()->all();
+        $sorted = fn (ClassSession ...$sessions) => collect($sessions)->pluck('id')->sort()->values()->all();
+
+        $this->assertSame($sorted($attended, $legacy), $ids('held'));
+        $this->assertSame($sorted($teacherAbsent, $teacherAbsentCompensated, $legacyTeacherNoShow), $ids('teacher_absent'));
+        $this->assertSame($sorted($studentNoShow), $ids('student_no_show'));
+        $this->assertSame($sorted($teacherAbsent, $studentNoShow), $ids('needs_makeup'));
+        $this->assertSame($sorted($unpaid, $cancelled), $ids('not_held'));
+        $this->assertNotContains($upcoming->id, $ids('held'));
+    }
+
+    /**
+     * مبلغ المعلم من كل جلسة للأدمن (مستحق الحجز 100 ÷ 4 جلسات = 25): المصروفة بمبلغها
+     * الفعلي، المكتملة غير المصروفة بقيمتها × نسبتها، القادمة null. مخفي عن المعلم.
+     */
+    public function test_admin_sees_each_sessions_teacher_payout_amount(): void
+    {
+        [$teacher, $teacherToken] = $this->createVerifiedTeacher();
+        [$paidBooking, $paid] = $this->createBookingWithSession($teacher, now()->subDays(3));
+        $this->attendeeFor($paid, $paidBooking);
+        $paid->update(['status' => 'completed', 'attendance_outcome' => ClassSession::OUTCOME_ATTENDED, 'teacher_payout_percent' => 100]);
+        app(\App\Services\PayoutService::class)->generateForPeriod($teacher, now()->subDays(4), now()->subDays(2));
+
+        [$halfBooking, $half] = $this->createBookingWithSession($teacher, now()->subDay());
+        $this->attendeeFor($half, $halfBooking);
+        $half->update(['status' => 'completed', 'attendance_outcome' => ClassSession::OUTCOME_STUDENT_NO_SHOW, 'teacher_payout_percent' => 50]);
+
+        [, $upcoming] = $this->createBookingWithSession($teacher, now()->addDay());
+
+        $adminToken = User::factory()->admin()->create()->createToken('t')->plainTextToken;
+        $rows = collect($this->as($adminToken)->getJson('/api/class-sessions')->json('data'))->keyBy('id');
+
+        $this->assertEquals(['amount' => 25, 'paid' => true, 'capped' => false], $rows[$paid->id]['teacher_payout_amount']);
+        $this->assertEquals(['amount' => 12.5, 'paid' => false, 'capped' => false], $rows[$half->id]['teacher_payout_amount']);
+        $this->assertNull($rows[$upcoming->id]['teacher_payout_amount']);
+
+        $teacherRows = collect($this->as($teacherToken)->getJson('/api/class-sessions')->json('data'));
+        $this->assertFalse($teacherRows->contains(fn ($row) => array_key_exists('teacher_payout_amount', $row)));
+    }
+
+    /**
+     * قائمة الأدمن تُخفي جلسة لا طالب مدفوع فيها (حجز منتهي المهلة أو ملغى أو بانتظار الدفع)،
+     * وتُبقي جلسة المجموعة التي دفع فيها طالب واحد، وجلسة الدورة قبل أول تسجيل. المعلم لا يتأثر.
+     */
+    public function test_admin_list_hides_sessions_without_a_paid_booking(): void
+    {
+        [$teacher, $teacherToken] = $this->createVerifiedTeacher();
+        [$paidBooking, $paid] = $this->createBookingWithSession($teacher, now()->subDay());
+        $this->attendeeFor($paid, $paidBooking);
+
+        $unpaid = [];
+        foreach (['expired', 'cancelled', 'pending_payment'] as $status) {
+            [$booking, $session] = $this->createBookingWithSession($teacher, now()->subDay());
+            $this->attendeeFor($session, $booking);
+            $booking->update(['status' => $status]);
+            $unpaid[] = $session->id;
+        }
+
+        [$groupOwner, $group] = $this->createBookingWithSession($teacher, now()->subDay(), 'group');
+        $this->attendeeFor($group, $groupOwner)->booking->update(['status' => 'expired']);
+        [$groupPaid] = $this->createBookingWithSession($teacher, now()->addDays(9), 'group');
+        $this->attendeeFor($group, $groupPaid);
+
+        [$center] = $this->createVerifiedTeacher('training_center');
+        $courseSession = $this->createTrainingSession($center, now()->addDays(3));
+
+        $adminToken = User::factory()->admin()->create()->createToken('t')->plainTextToken;
+        $ids = collect($this->as($adminToken)->getJson('/api/class-sessions?per_page=50')->json('data'))->pluck('id');
+
+        $this->assertTrue($ids->contains($paid->id));
+        $this->assertTrue($ids->contains($group->id));
+        $this->assertTrue($ids->contains($courseSession->id));
+        foreach ($unpaid as $id) {
+            $this->assertFalse($ids->contains($id));
+        }
+
+        // المعلم يرى جلسة الحجز بانتظار الدفع كما كان (visibleTo لا يُخفي إلا المنتهي/الملغى)
+        $teacherIds = collect($this->as($teacherToken)->getJson('/api/class-sessions?per_page=50')->json('data'))->pluck('id');
+        $this->assertTrue($teacherIds->contains($unpaid[2]));
+    }
+
+    /** نتيجة الحضور مخفية عن المعلم — مفاتيح الأدمن لا تفرز له شيئاً */
+    public function test_outcome_filters_are_ignored_for_non_admins(): void
+    {
+        [$teacher, $token] = $this->createVerifiedTeacher();
+        [, $session] = $this->createBookingWithSession($teacher, now()->subDay());
+        $session->update(['status' => 'completed', 'attendance_outcome' => ClassSession::OUTCOME_TEACHER_ABSENT]);
+
+        $this->as($token)->getJson('/api/class-sessions?status=teacher_absent')->assertOk()->assertJsonCount(0, 'data');
+    }
+
     /**
      * reschedule_pending ليست قيمة تُخزَّن فعلياً في class_sessions.status أبداً
      * (لا مكان في الكود يضبطها) — هي حالة مُشتقّة بالكامل من وجود RescheduleRequest

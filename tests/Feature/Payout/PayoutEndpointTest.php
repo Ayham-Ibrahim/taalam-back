@@ -17,7 +17,7 @@ class PayoutEndpointTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_admin_can_generate_a_payout_via_http_with_a_period_and_sees_the_unified_list_shape(): void
+    public function test_a_generated_payout_appears_in_the_unified_list_shape(): void
     {
         $admin = User::factory()->admin()->create();
         $adminToken = $admin->createToken('t')->plainTextToken;
@@ -26,12 +26,7 @@ class PayoutEndpointTest extends TestCase
         $teacher = Teacher::create(['user_id' => $teacherUser->id, 'teacher_type' => 'school', 'status' => 'verified']);
         $this->createCompletedPackageSession($teacher, teacherPrice: 100, sessionsTotal: 4);
 
-        $generate = $this->withHeader('Authorization', "Bearer {$adminToken}")->postJson(
-            "/api/teachers/{$teacher->id}/payouts/generate",
-            ['period_start' => now()->subDay()->toDateString(), 'period_end' => now()->addDay()->toDateString()],
-        );
-
-        $generate->assertStatus(201);
+        $this->generatePayout($teacher);
 
         $list = $this->withHeader('Authorization', "Bearer {$adminToken}")->getJson('/api/payouts');
         $list->assertStatus(200);
@@ -42,21 +37,27 @@ class PayoutEndpointTest extends TestCase
         $list->assertJsonPath('data.0.status', 'pending');
     }
 
-    public function test_generate_payout_without_a_period_is_rejected(): void
+    /** التوليد لمعلم واحد بفترة حرة أُزيل — الكشوف تُولَّد لكل المعلمين بزر واحد (payouts/generate) */
+    public function test_per_teacher_payout_generation_endpoint_is_removed(): void
     {
         $admin = User::factory()->admin()->create();
-        $adminToken = $admin->createToken('t')->plainTextToken;
 
         $teacherUser = User::factory()->teacher()->create();
         $teacher = Teacher::create(['user_id' => $teacherUser->id, 'teacher_type' => 'school', 'status' => 'verified']);
+        $this->createCompletedPackageSession($teacher, teacherPrice: 100, sessionsTotal: 4);
 
-        $response = $this->withHeader('Authorization', "Bearer {$adminToken}")
-            ->postJson("/api/teachers/{$teacher->id}/payouts/generate", []);
+        $this->as($admin->createToken('t')->plainTextToken)
+            ->postJson("/api/teachers/{$teacher->id}/payouts/generate", [
+                'period_start' => now()->subDay()->toDateString(),
+                'period_end' => now()->addDay()->toDateString(),
+            ])
+            ->assertStatus(404);
 
-        $response->assertStatus(422);
+        $this->assertDatabaseCount('payouts', 0);
     }
 
-    public function test_invoice_is_rejected_for_a_pending_payout_and_available_once_approved(): void
+    /** الكشف متاح بحالتيه — لا خطوة اعتماد قبله */
+    public function test_invoice_is_available_for_an_unpaid_payout(): void
     {
         $admin = User::factory()->admin()->create();
         $adminToken = $admin->createToken('t')->plainTextToken;
@@ -65,22 +66,14 @@ class PayoutEndpointTest extends TestCase
         $teacher = Teacher::create(['user_id' => $teacherUser->id, 'teacher_type' => 'school', 'status' => 'verified']);
         $this->createCompletedPackageSession($teacher, teacherPrice: 100, sessionsTotal: 4);
 
-        $generate = $this->as($adminToken)->postJson(
-            "/api/teachers/{$teacher->id}/payouts/generate",
-            ['period_start' => now()->subDay()->toDateString(), 'period_end' => now()->addDay()->toDateString()],
-        );
-        $payoutId = $generate->json('data.id');
-
-        $this->as($adminToken)->getJson("/api/payouts/{$payoutId}/invoice")->assertStatus(422);
-
-        $this->as($adminToken)->postJson("/api/payouts/{$payoutId}/approve")->assertStatus(200);
+        $payoutId = $this->generatePayout($teacher);
 
         $response = $this->as($adminToken)->get("/api/payouts/{$payoutId}/invoice");
         $response->assertStatus(200);
         $response->assertHeader('content-type', 'application/pdf');
     }
 
-    public function test_teacher_can_download_their_own_approved_payout_invoice_but_not_another_teachers(): void
+    public function test_teacher_can_download_their_own_payout_invoice_but_not_another_teachers(): void
     {
         $admin = User::factory()->admin()->create();
         $adminToken = $admin->createToken('t')->plainTextToken;
@@ -89,12 +82,7 @@ class PayoutEndpointTest extends TestCase
         $teacher = Teacher::create(['user_id' => $teacherUser->id, 'teacher_type' => 'school', 'status' => 'verified']);
         $this->createCompletedPackageSession($teacher, teacherPrice: 100, sessionsTotal: 4);
 
-        $generate = $this->as($adminToken)->postJson(
-            "/api/teachers/{$teacher->id}/payouts/generate",
-            ['period_start' => now()->subDay()->toDateString(), 'period_end' => now()->addDay()->toDateString()],
-        );
-        $payoutId = $generate->json('data.id');
-        $this->as($adminToken)->postJson("/api/payouts/{$payoutId}/approve")->assertStatus(200);
+        $payoutId = $this->generatePayout($teacher);
 
         $this->as($teacherUser->createToken('t')->plainTextToken)
             ->get("/api/payouts/{$payoutId}/invoice")
@@ -117,10 +105,7 @@ class PayoutEndpointTest extends TestCase
         $teacherUser = User::factory()->teacher()->create();
         $teacher = Teacher::create(['user_id' => $teacherUser->id, 'teacher_type' => 'school', 'status' => 'verified']);
         $this->createCompletedPackageSession($teacher, teacherPrice: 100, sessionsTotal: 4);
-        $this->as($adminToken)->postJson(
-            "/api/teachers/{$teacher->id}/payouts/generate",
-            ['period_start' => now()->subDay()->toDateString(), 'period_end' => now()->addDay()->toDateString()],
-        )->assertStatus(201);
+        $this->generatePayout($teacher);
 
         $response = $this->as($adminToken)->get('/api/payouts/export');
         $response->assertStatus(200);
@@ -149,7 +134,47 @@ class PayoutEndpointTest extends TestCase
             ->first();
 
         $this->assertSame('مادة', $row[2]);
-        $this->assertCount(14, $row);
+        $this->assertCount(13, $row);
+    }
+
+    public function test_payout_details_list_its_items_with_attendance_only_for_finance(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $adminToken = $admin->createToken('t')->plainTextToken;
+
+        $teacherUser = User::factory()->teacher()->create();
+        $teacher = Teacher::create(['user_id' => $teacherUser->id, 'teacher_type' => 'school', 'status' => 'verified']);
+        $this->createCompletedPackageSession($teacher, teacherPrice: 100, sessionsTotal: 4);
+
+        $payoutId = $this->generatePayout($teacher);
+
+        $this->as($adminToken)->getJson("/api/payouts/{$payoutId}")
+            ->assertStatus(200)
+            ->assertJsonPath('data.providerName', $teacherUser->name)
+            ->assertJsonPath('data.grossAmount', 100)
+            ->assertJsonPath('data.totalAmount', 100)
+            ->assertJsonCount(1, 'data.items')
+            ->assertJsonPath('data.items.0.type', 'session')
+            ->assertJsonPath('data.items.0.amount', 100)
+            ->assertJsonPath('data.items.0.title', 'باقة')
+            ->assertJsonPath('data.items.0.kind', 'individual')
+            ->assertJsonPath('data.items.0.isMakeup', false)
+            ->assertJsonPath('data.items.0.payoutPercent', null);
+
+        $teacherItem = $this->as($teacherUser->createToken('t')->plainTextToken)
+            ->getJson("/api/payouts/{$payoutId}")
+            ->assertStatus(200)
+            ->json('data.items.0');
+
+        $this->assertArrayNotHasKey('attendanceOutcome', $teacherItem);
+        $this->assertArrayNotHasKey('payoutPercent', $teacherItem);
+
+        $otherTeacherUser = User::factory()->teacher()->create();
+        Teacher::create(['user_id' => $otherTeacherUser->id, 'teacher_type' => 'school', 'status' => 'verified']);
+
+        $this->as($otherTeacherUser->createToken('t')->plainTextToken)
+            ->getJson("/api/payouts/{$payoutId}")
+            ->assertStatus(403);
     }
 
     public function test_mark_paid_requires_a_transfer_reference_and_succeeds_when_provided(): void
@@ -161,13 +186,10 @@ class PayoutEndpointTest extends TestCase
         $teacher = Teacher::create(['user_id' => $teacherUser->id, 'teacher_type' => 'school', 'status' => 'verified']);
         $this->createCompletedPackageSession($teacher, teacherPrice: 100, sessionsTotal: 4);
 
-        $generate = $this->withHeader('Authorization', "Bearer {$adminToken}")->postJson(
-            "/api/teachers/{$teacher->id}/payouts/generate",
-            ['period_start' => now()->subDay()->toDateString(), 'period_end' => now()->addDay()->toDateString()],
-        );
-        $payoutId = $generate->json('data.id');
+        $payoutId = $this->generatePayout($teacher);
 
-        $this->withHeader('Authorization', "Bearer {$adminToken}")->postJson("/api/payouts/{$payoutId}/approve")->assertStatus(200);
+        // لا اعتماد — المسار أُزيل، والتحويل مباشرة من غير مدفوع
+        $this->withHeader('Authorization', "Bearer {$adminToken}")->postJson("/api/payouts/{$payoutId}/approve")->assertStatus(404);
 
         $withoutReference = $this->withHeader('Authorization', "Bearer {$adminToken}")
             ->postJson("/api/payouts/{$payoutId}/mark-paid", []);
@@ -176,6 +198,17 @@ class PayoutEndpointTest extends TestCase
         $withReference = $this->withHeader('Authorization', "Bearer {$adminToken}")
             ->postJson("/api/payouts/{$payoutId}/mark-paid", ['transfer_reference' => 'REF-123']);
         $withReference->assertStatus(200);
+        $this->assertSame('paid', \App\Models\Payout::find($payoutId)->status);
+
+        // مدفوع مرة واحدة فقط
+        $this->withHeader('Authorization', "Bearer {$adminToken}")
+            ->postJson("/api/payouts/{$payoutId}/mark-paid", ['transfer_reference' => 'REF-456'])
+            ->assertStatus(422);
+    }
+
+    private function generatePayout(Teacher $teacher): int
+    {
+        return app(\App\Services\PayoutService::class)->generateForPeriod($teacher, now()->subDay(), now()->addDay())->id;
     }
 
     private function createCompletedPackageSession(Teacher $teacher, float $teacherPrice, int $sessionsTotal): void

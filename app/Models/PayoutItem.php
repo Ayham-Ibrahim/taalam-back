@@ -6,9 +6,20 @@ use Illuminate\Database\Eloquent\Model;
 
 class PayoutItem extends Model
 {
+    /** مستحق جلسة مكتملة لأول مرة */
+    public const TYPE_SESSION = 'session';
+
+    /** فرق جلسة دورة/باقة جماعية صُرفت سابقاً ثم زادت قيمتها بتسجيل/انضمام متأخر */
+    public const TYPE_SETTLEMENT = 'settlement';
+
+    protected $attributes = [
+        'type' => self::TYPE_SESSION,
+    ];
+
     protected $fillable = [
         'payout_id',
         'class_session_id',
+        'type',
         'amount',
     ];
 

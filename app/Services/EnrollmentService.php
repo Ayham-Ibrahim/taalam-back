@@ -41,7 +41,9 @@ class EnrollmentService
             $sessions = $this->courseSessionsFor($course);
             // $sessions قد تكون موجودة مسبقاً (تسجيل ثانٍ فما فوق لنفس الدورة) —
             // استبعادها من فحص تعارض المعلم، وإلا تُرفَض بحجة "تعارضها" مع نفسها.
-            $this->conflicts->assertNoConflict($student, $course->teacher_id, $sessions->pluck('scheduled_at'), $course->session_duration_min, $sessions->pluck('id')->all());
+            // تعارض جدول الطالب نفسه لا يمنع تسجيله هنا (تحذير في الواجهة فقط) — نفس
+            // BookingService::joinGroupPackage. جدول المركز/المعلم يبقى مفحوصاً.
+            $this->conflicts->assertNoConflict($student, $course->teacher_id, $sessions->pluck('scheduled_at'), $course->session_duration_min, $sessions->pluck('id')->all(), checkStudentSchedule: false);
 
             foreach ($sessions as $session) {
                 SessionAttendee::create([

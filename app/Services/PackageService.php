@@ -28,6 +28,8 @@ class PackageService
             ]);
         }
 
+        $data = $this->applyTrialPackageValues($data, false);
+
         $curriculumIds = $data['curriculum_ids'] ?? [];
         $stageIds = $data['stage_ids'] ?? [];
         $schedules = $data['schedules'] ?? [];
@@ -68,6 +70,8 @@ class PackageService
             ]);
         }
 
+        $data = $this->applyTrialPackageValues($data, $package->is_trial);
+
         $curriculumIds = $data['curriculum_ids'] ?? null;
         $stageIds = $data['stage_ids'] ?? null;
         $schedules = $data['schedules'] ?? null;
@@ -93,6 +97,32 @@ class PackageService
         }
 
         return $package->fresh(['curricula', 'stages', 'schedules']);
+    }
+
+    /**
+     * باقة التجربة المجانية: جلسة واحدة فردية بسعر صفر — تُفرض هنا لا في الطلب وحده، ومعها
+     * تُمسح المادة والمناهج والمراحل والصفوف والخصم (تحويل مسودة عادية إلى مجانية لا يُبقي
+     * بيانات مضللة منها). الموافقة تمر كالمعتاد: teacher_price=0 يعطي student_price=0 أياً كانت
+     * نسبة المنصة.
+     */
+    private function applyTrialPackageValues(array $data, bool $currentlyTrial): array
+    {
+        if (! ($data['is_trial'] ?? $currentlyTrial)) {
+            return $data;
+        }
+
+        return array_merge($data, [
+            'is_trial' => true,
+            'session_format' => 'individual',
+            'capacity' => 1,
+            'sessions_count' => 1,
+            'teacher_price' => 0,
+            'subject_id' => null,
+            'discount_percent' => null,
+            'grades' => null,
+            'curriculum_ids' => [],
+            'stage_ids' => [],
+        ]);
     }
 
     public function submitForApproval(Package $package): Package

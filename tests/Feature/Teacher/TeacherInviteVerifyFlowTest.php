@@ -51,6 +51,7 @@ class TeacherInviteVerifyFlowTest extends TestCase
             'token' => $invitation->token,
             'password' => 'Password123!',
             'password_confirmation' => 'Password123!',
+            'accept_policy' => true,
         ]);
 
         $accept->assertStatus(200);
@@ -583,6 +584,7 @@ class TeacherInviteVerifyFlowTest extends TestCase
             'token' => $invitation->token,
             'password' => 'Password123!',
             'password_confirmation' => 'Password123!',
+            'accept_policy' => true,
         ]);
         $accept->assertStatus(200);
         $this->assertDatabaseHas('teachers', ['id' => $teacher->id, 'status' => 'verified']);
@@ -629,6 +631,7 @@ class TeacherInviteVerifyFlowTest extends TestCase
             'token' => $invitation->token,
             'password' => 'Password123!',
             'password_confirmation' => 'Password123!',
+            'accept_policy' => true,
         ]);
         $teacherToken = $accept->json('data.token');
 

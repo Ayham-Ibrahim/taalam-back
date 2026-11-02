@@ -26,6 +26,7 @@ class User extends Authenticatable
         'phone',
         'whatsapp',
         'role',
+        'primary_user_id',
         'password',
         'avatar_path',
         'gender',
@@ -33,6 +34,8 @@ class User extends Authenticatable
         'timezone',
         'timezone_auto',
         'is_active',
+        'policy_accepted_at',
+        'policy_version',
     ];
 
     /**
@@ -58,6 +61,8 @@ class User extends Authenticatable
             'password' => 'hashed',
             'is_active' => 'boolean',
             'timezone_auto' => 'boolean',
+            'policy_accepted_at' => 'datetime',
+            'policy_version' => 'datetime',
         ];
     }
 
@@ -74,6 +79,37 @@ class User extends Authenticatable
     public function academicSupporter()
     {
         return $this->hasOne(AcademicSupporter::class);
+    }
+
+    /** الحساب الأساسي الذي أضاف هذا الأخ — null للحسابات العادية */
+    public function primaryAccount()
+    {
+        return $this->belongsTo(User::class, 'primary_user_id');
+    }
+
+    /** الإخوة المضافون على هذا الحساب (فقط إن كان حساباً أساسياً) */
+    public function siblingAccounts()
+    {
+        return $this->hasMany(User::class, 'primary_user_id');
+    }
+
+    public function isSiblingAccount(): bool
+    {
+        return $this->primary_user_id !== null;
+    }
+
+    /**
+     * إيميل التواصل: إيميل الحساب نفسه، أو إيميل الحساب الأساسي لحساب أخ بلا
+     * إيميل — يُستخدم للإشعارات (routeNotificationForMail) وبوابة الدفع.
+     */
+    public function contactEmail(): ?string
+    {
+        return $this->email ?? $this->primaryAccount?->email;
+    }
+
+    public function routeNotificationForMail(): ?string
+    {
+        return $this->contactEmail();
     }
 
     public function isAdmin(): bool

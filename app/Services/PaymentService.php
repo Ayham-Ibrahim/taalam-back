@@ -47,7 +47,7 @@ class PaymentService
             'mode' => 'payment',
             ...$this->sessionExpiry($booking),
             'payment_method_types' => ['card'],
-            'customer_email' => $booking->student->user->email,
+            'customer_email' => $booking->student->user->contactEmail(),
             'line_items' => [[
                 'quantity' => 1,
                 'price_data' => [
@@ -88,7 +88,7 @@ class PaymentService
             'mode' => 'payment',
             ...$this->sessionExpiry($enrollment),
             'payment_method_types' => ['card'],
-            'customer_email' => $enrollment->student->user->email,
+            'customer_email' => $enrollment->student->user->contactEmail(),
             'line_items' => [[
                 'quantity' => 1,
                 'price_data' => [
@@ -131,7 +131,7 @@ class PaymentService
             'mode' => 'payment',
             ...$this->sessionExpiry($purchase),
             'payment_method_types' => ['card'],
-            'customer_email' => $purchase->student->user->email,
+            'customer_email' => $purchase->student->user->contactEmail(),
             'line_items' => [[
                 'quantity' => 1,
                 'price_data' => [

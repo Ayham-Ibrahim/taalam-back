@@ -36,7 +36,7 @@ class InvoicePdfService
             'reference' => $booking->reference,
             'issueDate' => $this->paidAt($booking),
             'studentName' => $booking->student?->user?->name,
-            'studentEmail' => $booking->student?->user?->email,
+            'studentEmail' => $booking->student?->user?->contactEmail(),
             'teacherName' => $booking->teacher?->user?->name,
             'itemTitle' => $booking->package?->title,
             'subject' => $booking->package?->subject?->name_ar,
@@ -60,7 +60,7 @@ class InvoicePdfService
             'reference' => $enrollment->reference,
             'issueDate' => $this->paidAt($enrollment),
             'studentName' => $enrollment->student?->user?->name,
-            'studentEmail' => $enrollment->student?->user?->email,
+            'studentEmail' => $enrollment->student?->user?->contactEmail(),
             'teacherName' => $enrollment->teacher?->user?->name,
             'itemTitle' => $enrollment->course?->title,
             'subject' => $enrollment->course?->subject?->name_ar,
@@ -73,24 +73,21 @@ class InvoicePdfService
     }
 
     /**
-     * كشف مستحقات (لا فاتورة طالب) — لا معنى له قبل الاعتماد (pending قابلة
-     * للتعديل بالكامل، لا رقم رسمي يُصدَر عنها بعد). قالب منفصل عن invoices.pdf
-     * (بند واحد ثابت) لأن كشف المستحقات يحتاج سطراً لكل جلسة ضمن الفترة.
+     * كشف مستحقات (لا فاتورة طالب) — متاح بحالتيه (غير مدفوع/مدفوع): بنوده ثابتة منذ التوليد، والحالة
+     * ومرجع التحويل يظهران فيه. قالب منفصل عن invoices.pdf (بند واحد ثابت) لأن كشف المستحقات يحتاج
+     * سطراً لكل جلسة ضمن الفترة.
      */
     public function forPayout(Payout $payout): string
     {
-        if (! in_array($payout->status, ['approved', 'paid'], true)) {
-            throw new RuntimeException('لا يتوفر كشف مستحقات قبل اعتمادها');
-        }
-
         $payout->loadMissing(['teacher.user', 'items.session.course', 'items.session.booking.package']);
 
         $items = $payout->items->map(function (PayoutItem $item) {
             $session = $item->session;
+            $title = $session?->course?->title ?? $session?->booking?->package?->title ?? '—';
 
             return [
                 'date' => $session?->scheduled_at?->format('Y-m-d') ?? '—',
-                'title' => $session?->course?->title ?? $session?->booking?->package?->title ?? '—',
+                'title' => $item->type === PayoutItem::TYPE_SETTLEMENT ? "تسوية تسجيل متأخر — {$title}" : $title,
                 'amount' => (float) $item->amount,
             ];
         });
@@ -100,7 +97,7 @@ class InvoicePdfService
             'teacherName' => $payout->teacher?->user?->name,
             'periodStart' => $payout->period_start->format('Y-m-d'),
             'periodEnd' => $payout->period_end->format('Y-m-d'),
-            'issueDate' => ($payout->paid_at ?? $payout->approved_at ?? $payout->created_at)->format('Y-m-d'),
+            'issueDate' => ($payout->paid_at ?? $payout->created_at)->format('Y-m-d'),
             'sessionsCount' => $payout->sessions_count,
             'items' => $items,
             'grossAmount' => (float) $payout->gross_amount,
@@ -115,7 +112,7 @@ class InvoicePdfService
     private function payoutStatusLabel(string $status): string
     {
         return match ($status) {
-            'approved' => 'معتمدة',
+            'pending' => 'غير مدفوعة',
             'paid' => 'مدفوعة',
             default => $status,
         };

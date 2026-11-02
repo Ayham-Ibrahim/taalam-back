@@ -65,4 +65,10 @@ class ClassSessionPolicy
     {
         return $user->isAdmin();
     }
+
+    /** إنشاء جلسة تعويضية يدوياً لجلسة غاب عنها المعلم أو الطلاب — للأدمن وحده. */
+    public function createMakeup(User $user, ClassSession $session): bool
+    {
+        return $user->isAdmin();
+    }
 }
