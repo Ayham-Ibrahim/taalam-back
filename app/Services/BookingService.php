@@ -469,7 +469,8 @@ class BookingService
             $sessions = $this->sessionsFor($package, $booking);
             // $sessions قد تكون موجودة مسبقاً (انضمام ثانٍ فما فوق لنفس المجموعة) —
             // استبعادها من فحص تعارض المعلم، وإلا تُرفَض بحجة "تعارضها" مع نفسها.
-            $this->conflicts->assertNoConflict($student, $package->teacher_id, $sessions->pluck('scheduled_at'), $this->defaultSessionDurationMinutes(), $sessions->pluck('id')->all());
+            // تعارض جدول الطالب نفسه لا يمنع الانضمام هنا (تحذير في الواجهة فقط) — جدول المعلم يبقى مفحوصاً.
+            $this->conflicts->assertNoConflict($student, $package->teacher_id, $sessions->pluck('scheduled_at'), $this->defaultSessionDurationMinutes(), $sessions->pluck('id')->all(), checkStudentSchedule: false);
 
             foreach ($sessions as $session) {
                 $this->registerAttendee($session, $student, booking: $booking);
@@ -776,12 +777,8 @@ class BookingService
         $durationMinutes = $this->defaultSessionDurationMinutes();
 
         return $schedules->values()->map(function ($schedule, int $index) use ($ownerBooking, $package, $durationMinutes) {
-            // start_time أُدخِل بمنطقة المعلم وقت إنشاء الباقة (Package::schedule_timezone) — لا UTC
-            // ساذجة. schedule->date كائن Carbon مُحوَّل مسبقاً (date cast) لا نص خام — toDateString()
-            // ضروري هنا، وإلا Carbon::parse يتجاهل $tz تماماً (نفس ملاحظة approveIndividualRequest).
-            $scheduledAt = Carbon::parse($this->dateString($schedule->date), $package->schedule_timezone ?? 'UTC')
-                ->setTimeFromTimeString((string) $schedule->start_time)
-                ->setTimezone(config('app.timezone'));
+            // نفس اللحظة التي يعرضها StudentPackageResource للطالب (starts_at) — مصدر واحد
+            $scheduledAt = $schedule->startsAt($package->schedule_timezone);
 
             return $ownerBooking->sessions()->create([
                 'teacher_id' => $package->teacher_id,

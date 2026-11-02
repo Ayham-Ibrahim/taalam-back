@@ -40,10 +40,16 @@ class ScheduleConflictService
      *   نفسها، فتُستبعَد من فحص تعارض المعلم صراحة، وإلا يُرفض كل انضمام ثانٍ فما فوق لأي مجموعة/دورة
      *   بحجة "تعارض" مع الجلسة ذاتها التي أنشأها أول طالب انضمّ إليها.
      *
+     * @param  bool  $checkStudentSchedule  false: يُتجاهَل تعارض جدول الطالب (أ) ويبقى فحص جدول المعلم (ب) —
+     *   انضمام الطالب بنفسه لباقة جماعية فقط: موعدها ثابت لا يختاره، فيُسمح له بالانضمام رغم تعارضه
+     *   مع جلسة أخرى له بعد تحذير صريح في الواجهة. $student يبقى مُمرَّراً لصياغة رسالة تعارض المعلم.
+     *
      * @throws ValidationException عند تقاطع أي لحظة مقترحة مع جلسة قائمة فعلاً إما للطالب نفسه أو للمعلم نفسه (مع أي طالب آخر)
      */
-    public function assertNoConflict(?Student $student, int $teacherId, iterable $candidateStarts, int $candidateDurationMinutes, array $excludeSessionIds = []): void
+    public function assertNoConflict(?Student $student, int $teacherId, iterable $candidateStarts, int $candidateDurationMinutes, array $excludeSessionIds = [], bool $checkStudentSchedule = true): void
     {
+        $scheduleOwner = $checkStudentSchedule ? $student : null;
+
         // المركز التدريبي يدير عدة مدرّبين فتتزامن دوراته طبيعياً — لا يُفحص جدوله
         // كجدول شخص واحد. تعارض الطالب مع جلساته (أ) يبقى مفحوصاً كالمعتاد.
         $checkTeacher = ! Teacher::whereKey($teacherId)->where('teacher_type', 'training_center')->exists();
@@ -51,7 +57,7 @@ class ScheduleConflictService
         $existingSessions = ClassSession::query()
             ->whereIn('status', self::LIVE_STATUSES)
             ->when($excludeSessionIds, fn ($q) => $q->whereNotIn('id', $excludeSessionIds))
-            ->where(function ($query) use ($student, $teacherId, $checkTeacher) {
+            ->where(function ($query) use ($scheduleOwner, $teacherId, $checkTeacher) {
                 // (أ) جلسة يحضرها هذا الطالب باشتراكٍ ما زال قائماً — لا حجز/تسجيل
                 //     مُلغى أو منتهية مهلته. بعد إلغاء/انتهاء الحجز يبقى صف الجلسة
                 //     في class_sessions بحالة scheduled، لكنه لم يعد التزاماً فعلياً
@@ -59,9 +65,9 @@ class ScheduleConflictService
                 //     $student = null: فحص جدول المعلم وحده — جلسة دورة لا طالب
                 //     مسجَّل فيها بعد ويعدّل الأدمن موعدها (RescheduleService::adminReschedule).
                 $query->when(
-                    $student,
-                    fn ($q) => $q->whereHas('attendees', function ($a) use ($student) {
-                        $a->where('student_id', $student->id);
+                    $scheduleOwner,
+                    fn ($q) => $q->whereHas('attendees', function ($a) use ($scheduleOwner) {
+                        $a->where('student_id', $scheduleOwner->id);
                         ClassSession::constrainToLiveAttendee($a);
                     }),
                     fn ($q) => $q->whereRaw('1 = 0'),

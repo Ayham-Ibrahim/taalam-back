@@ -213,6 +213,108 @@ class PackageBusySlotsTest extends TestCase
     }
 
     /**
+     * جلسة بدأت قبل منتصف الليل وتمتد بعده تشغل اليوم التالي أيضاً — كان الفلتر على
+     * بدايتها وحدها فتسقط من نتيجة اليوم التالي رغم تداخلها مع أول ساعاته.
+     */
+    public function test_a_session_crossing_midnight_is_busy_on_the_next_day_too(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        $package = $this->createActiveIndividualPackage($teacher);
+        $token = User::find($this->createStudent()->user_id)->createToken('t')->plainTextToken;
+
+        $day = Carbon::now('UTC')->addWeek()->startOfDay();
+        ClassSession::create([
+            'teacher_id' => $teacher->id,
+            'sequence_no' => 1,
+            'scheduled_at' => $day->copy()->subMinutes(30),
+            'duration_min' => 60,
+            'status' => 'scheduled',
+        ]);
+        // انتهت تماماً قبل منتصف الليل — لا تخص هذا اليوم
+        ClassSession::create([
+            'teacher_id' => $teacher->id,
+            'sequence_no' => 1,
+            'scheduled_at' => $day->copy()->subHours(2),
+            'duration_min' => 60,
+            'status' => 'scheduled',
+        ]);
+
+        $slots = $this->as($token)
+            ->getJson("/api/packages/{$package->id}/busy-slots?date={$day->toDateString()}&timezone=UTC")
+            ->assertStatus(200)
+            ->json('data');
+
+        $this->assertCount(1, $slots);
+        $this->assertSame($day->copy()->subMinutes(30)->toIso8601String(), $slots[0]['start']);
+    }
+
+    /**
+     * timezone المُمرَّر (منطقة متصفح الطالب) يحدد حدود اليوم، لا منطقة الملف الشخصي —
+     * الواجهة تحسب التاريخ بتوقيت المتصفح، فيجب جلب نفس ذلك اليوم بالضبط.
+     */
+    public function test_the_timezone_param_defines_the_day_boundaries(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        $package = $this->createActiveIndividualPackage($teacher);
+        $student = $this->createStudent();
+        User::whereKey($student->user_id)->update(['timezone' => 'Asia/Damascus']);
+        $token = User::find($student->user_id)->createToken('t')->plainTextToken;
+
+        // 23:15 دمشق = 00:15 دبي من اليوم التالي
+        $day = Carbon::now('Asia/Dubai')->addWeek()->startOfDay();
+        $session = ClassSession::create([
+            'teacher_id' => $teacher->id,
+            'sequence_no' => 1,
+            'scheduled_at' => $day->copy()->addMinutes(15)->utc(),
+            'duration_min' => 60,
+            'status' => 'scheduled',
+        ]);
+
+        $slots = $this->as($token)
+            ->getJson("/api/packages/{$package->id}/busy-slots?date={$day->toDateString()}&timezone=Asia/Dubai")
+            ->assertStatus(200)
+            ->json('data');
+
+        $this->assertCount(1, $slots);
+        $this->assertSame($session->scheduled_at->toIso8601String(), $slots[0]['start']);
+
+        $this->as($token)
+            ->getJson("/api/packages/{$package->id}/busy-slots?date={$day->toDateString()}&timezone=Not/AZone")
+            ->assertStatus(422);
+    }
+
+    /**
+     * starts_at يحمل اللحظة الفعلية لموعد المجموعة (بمنطقة المعلم) — نفس لحظة الجلسة
+     * التي ينشئها الانضمام، كي لا تفسّر الواجهة date/start_time بمنطقة المتصفح.
+     */
+    public function test_group_schedule_starts_at_matches_the_created_session(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        $package = $this->createActiveIndividualPackage($teacher);
+        $package->update(['session_format' => 'group', 'capacity' => 5, 'schedule_timezone' => 'Asia/Damascus']);
+
+        $day = Carbon::now('UTC')->addWeek()->startOfDay();
+        $package->schedules()->create([
+            'date' => $day->toDateString(),
+            'day_of_week' => $day->dayOfWeek,
+            'start_time' => '01:00',
+            'end_time' => '02:00',
+        ]);
+
+        $resource = (new \App\Http\Resources\Package\StudentPackageResource($package->fresh('schedules')))
+            ->toArray(request());
+        $startsAt = $resource['schedules'][0]['starts_at'];
+
+        $this->assertSame(
+            Carbon::parse($day->toDateString().' 01:00', 'Asia/Damascus')->utc()->toIso8601String(),
+            $startsAt,
+        );
+
+        $booking = app(BookingService::class)->joinGroupPackage($this->createStudent(), $package);
+        $this->assertSame($startsAt, $booking->sessions->first()->scheduled_at->toIso8601String());
+    }
+
+    /**
      * @return array{0: Teacher, 1: string}
      */
     private function createVerifiedTeacher(): array
