@@ -424,6 +424,7 @@ class SessionService
                 'attendees as has_paid_attendee' => fn ($q) => ClassSession::constrainToPaidAttendee($q),
                 'attendees as has_any_attendee',
                 'booking as has_paid_booking' => fn ($q) => $q->whereIn('status', ClassSession::PAID_BOOKING_STATUSES),
+                'booking as is_free_booking' => fn ($q) => $q->whereHas('package', fn ($p) => $p->where('student_price', '<=', 0)),
             ])
             ->chunkById(200, function ($sessions) use ($trackedSince, $noShowCompensation, $lateMinutes, &$completed) {
                 foreach ($sessions as $session) {
@@ -446,8 +447,9 @@ class SessionService
                                 default => 100,
                             },
                             // غياب الطلاب: مبلغ ثابت مرة واحدة للجلسة بدل مستحقها، يتحمّله هامش المنصة.
-                            // لا تعويض عن جلسة تعويضية — يُصرف مرة واحدة على الأصلية لكل سلسلة تعويض
-                            'teacher_compensation_amount' => $outcome === ClassSession::OUTCOME_STUDENT_NO_SHOW && ! $session->is_makeup
+                            // لا تعويض عن جلسة تعويضية — يُصرف مرة واحدة على الأصلية لكل سلسلة تعويض.
+                            // ولا عن جلسة باقة مجانية — لا مستحق للمعلم عنها أصلاً فلا شيء يُعوَّض
+                            'teacher_compensation_amount' => $outcome === ClassSession::OUTCOME_STUDENT_NO_SHOW && ! $session->is_makeup && ! $session->is_free_booking
                                 ? $noShowCompensation
                                 : null,
                         ]);

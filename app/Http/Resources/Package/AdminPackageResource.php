@@ -25,6 +25,7 @@ class AdminPackageResource extends JsonResource
             'subject_id' => $this->subject_id,
             'subject' => $this->whenLoaded('subject', fn () => $this->subject?->name_ar),
             'session_format' => $this->session_format,
+            'is_trial' => (bool) $this->is_trial,
             'capacity' => $this->capacity,
             'enrolled_count' => $this->enrolled_count,
             'sessions_count' => $this->sessions_count,

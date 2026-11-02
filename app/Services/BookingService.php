@@ -89,7 +89,7 @@ class BookingService
     /**
      * المعلم يوافق على طلب حجز فردي — عندها فقط تُنشأ الجلسات (من requested_slots،
      * موعد مستقل لكل جلسة) ويُنشأ الدفع المعلَّق. الطالب يكمل الدفع بعدها عبر
-     * BookingController::checkout.
+     * BookingController::checkout. الباقة المجانية تُؤكَّد فوراً بلا دفع.
      */
     public function approveIndividualRequest(Booking $booking, User $teacher): Booking
     {
@@ -126,12 +126,21 @@ class BookingService
                 $this->registerAttendee($session, $booking->student, booking: $booking);
             }
 
+            // باقة فردية مجانية (student_price = 0): لا شيء يُدفع، وStripe يرفض جلسة دفع بمبلغ
+            // صفر — فموافقة المعلم تؤكّد الحجز مباشرة عبر confirmBooking (نفس ما يفعله webhook
+            // الدفع: confirmed + غرف BBB) بلا Payment معلَّق ولا مهلة دفع.
+            $isFree = (float) $booking->package->student_price <= 0;
+
             $booking->update([
                 'status' => 'pending_payment',
-                'hold_expires_at' => now()->addMinutes((int) $this->settings->get('booking_payment_hold_minutes', 15)),
+                'hold_expires_at' => $isFree ? null : now()->addMinutes((int) $this->settings->get('booking_payment_hold_minutes', 15)),
             ]);
 
-            $this->createPendingPayment($booking);
+            if ($isFree) {
+                $this->confirmBooking($booking);
+            } else {
+                $this->createPendingPayment($booking);
+            }
 
             $this->audit('booking.request_approved', $booking, [], [], null, $teacher->id);
 

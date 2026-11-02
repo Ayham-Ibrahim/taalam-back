@@ -100,6 +100,39 @@ class AutomaticAttendancePayoutTest extends TestCase
         $this->assertNoPayoutGenerated($teacher);
     }
 
+    /** باقة مجانية لا مستحق للمعلم عنها — فغياب الطالب لا يولّد تعويضاً ثابتاً تتحمّله المنصة */
+    public function test_a_free_package_session_student_no_show_gets_no_compensation(): void
+    {
+        [$teacher, $teacherUser] = $this->createTeacher();
+        [$session] = $this->createEndedSession($teacher);
+        $session->booking->package->update([
+            'is_trial' => true, 'subject_id' => null, 'teacher_price' => 0,
+            'platform_margin_percent' => 0, 'student_price' => 0, 'platform_revenue' => 0,
+        ]);
+        $session->booking->update(['amount_paid' => 0, 'teacher_amount' => 0, 'platform_amount' => 0, 'margin_percent_snapshot' => 0]);
+        $this->logJoin($session, $teacherUser, 'teacher');
+
+        app(SessionService::class)->completeEndedSessions();
+
+        $session->refresh();
+        $this->assertSame(ClassSession::OUTCOME_STUDENT_NO_SHOW, $session->attendance_outcome);
+        $this->assertNull($session->teacher_compensation_amount);
+        $this->assertNoPayoutGenerated($teacher);
+    }
+
+    /** قيد chk_packages_price: السعر صفر مسموح لباقة التجربة وحدها، لا لباقة عادية */
+    public function test_a_regular_package_cannot_have_a_zero_price(): void
+    {
+        [$teacher] = $this->createTeacher();
+        [$session] = $this->createEndedSession($teacher);
+
+        $this->expectException(\Illuminate\Database\QueryException::class);
+
+        $session->booking->package->update([
+            'teacher_price' => 0, 'platform_margin_percent' => 0, 'student_price' => 0, 'platform_revenue' => 0,
+        ]);
+    }
+
     public function test_changing_the_compensation_affects_only_sessions_completed_afterwards(): void
     {
         [$teacher, $teacherUser] = $this->createTeacher();

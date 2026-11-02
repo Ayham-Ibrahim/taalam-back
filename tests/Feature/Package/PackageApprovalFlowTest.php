@@ -81,6 +81,96 @@ class PackageApprovalFlowTest extends TestCase
         $this->assertDatabaseHas('packages', ['id' => $packageId, 'teacher_price' => 100, 'student_price' => 1280]);
     }
 
+    /** باقة تجربة مجانية: تُفرض قيمها الثابتة، وتمر بالمراجعة كالمعتاد، وسعرها يبقى صفراً أياً كانت النسبة */
+    public function test_teacher_can_create_a_free_trial_package_that_stays_free_after_approval(): void
+    {
+        [$teacher, $teacherToken] = $this->createVerifiedTeacher();
+        AvailabilitySlot::create(['teacher_id' => $teacher->id, 'day_of_week' => 3]);
+
+        $create = $this->as($teacherToken)->postJson('/api/packages', [
+            'title' => 'جلسة تعريفية مجانية',
+            'description' => 'تعرّف على أسلوبي قبل الاشتراك',
+            'is_trial' => true,
+            'schedules' => [['day_of_week' => 3]],
+        ]);
+
+        $create->assertStatus(201)
+            ->assertJsonPath('data.status', 'draft')
+            ->assertJsonPath('data.is_trial', true)
+            ->assertJsonPath('data.session_format', 'individual')
+            ->assertJsonPath('data.sessions_count', 1)
+            ->assertJsonPath('data.subject_id', null);
+        $packageId = $create->json('data.id');
+
+        $this->as($teacherToken)->postJson("/api/packages/{$packageId}/submit")->assertStatus(200);
+
+        [, $adminToken] = $this->createAdmin();
+
+        $this->as($adminToken)->postJson("/api/packages/{$packageId}/approve", ['platform_margin_percent' => 60])
+            ->assertStatus(200)
+            ->assertJsonPath('data.status', 'active')
+            ->assertJsonPath('data.student_price', 0);
+
+        $this->assertDatabaseHas('packages', [
+            'id' => $packageId, 'is_trial' => true, 'subject_id' => null, 'capacity' => 1,
+            'teacher_price' => 0, 'student_price' => 0, 'platform_revenue' => 0,
+        ]);
+    }
+
+    public function test_a_free_trial_package_rejects_misleading_or_paid_details(): void
+    {
+        [$teacher, $teacherToken] = $this->createVerifiedTeacher();
+        $subject = Subject::create(['code' => 'math', 'name_ar' => 'رياضيات', 'education_type' => 'school']);
+        AvailabilitySlot::create(['teacher_id' => $teacher->id, 'day_of_week' => 3]);
+
+        $this->as($teacherToken)->postJson('/api/packages', [
+            'title' => 'جلسة تعريفية مجانية',
+            'description' => 'تعرّف على أسلوبي قبل الاشتراك',
+            'is_trial' => true,
+            'subject_id' => $subject->id,
+            'session_format' => 'group',
+            'sessions_count' => 4,
+            'teacher_price' => 50,
+            'discount_percent' => 10,
+            'grades' => [5],
+            'schedules' => [['day_of_week' => 3]],
+        ])->assertStatus(422)->assertJsonValidationErrors([
+            'subject_id', 'session_format', 'sessions_count', 'teacher_price', 'discount_percent', 'grades',
+        ]);
+
+        $this->assertDatabaseCount('packages', 0);
+    }
+
+    /** تحويل مسودة عادية إلى مجانية لا يُبقي منها مادة أو سعراً أو مراحل */
+    public function test_turning_a_draft_into_a_free_trial_package_clears_its_paid_details(): void
+    {
+        [$teacher, $teacherToken] = $this->createVerifiedTeacher();
+        $subject = Subject::create(['code' => 'math', 'name_ar' => 'رياضيات', 'education_type' => 'school']);
+        AvailabilitySlot::create(['teacher_id' => $teacher->id, 'day_of_week' => 3]);
+
+        $packageId = $this->as($teacherToken)->postJson('/api/packages', [
+            'title' => 'باقة رياضيات',
+            'description' => 'باقة لتقوية أساسيات الرياضيات',
+            'subject_id' => $subject->id,
+            'session_format' => 'individual',
+            'capacity' => 1,
+            'sessions_count' => 8,
+            'teacher_price' => 100,
+            'grades' => [5],
+            'schedules' => [['day_of_week' => 3]],
+        ])->assertStatus(201)->json('data.id');
+
+        $this->as($teacherToken)->putJson("/api/packages/{$packageId}", [
+            'title' => 'جلسة تعريفية مجانية',
+            'description' => 'تعرّف على أسلوبي قبل الاشتراك',
+            'is_trial' => true,
+        ])->assertStatus(200)->assertJsonPath('data.is_trial', true);
+
+        $this->assertDatabaseHas('packages', [
+            'id' => $packageId, 'subject_id' => null, 'sessions_count' => 1, 'teacher_price' => 0, 'grades' => null,
+        ]);
+    }
+
     public function test_admin_can_reject_pending_package_with_reason(): void
     {
         [$teacher, $teacherToken] = $this->createVerifiedTeacher();

@@ -90,6 +90,34 @@ class BookingFlowTest extends TestCase
         $this->assertSame(0, $package->fresh()->enrolled_count);
     }
 
+    /** باقة تجربة مجانية: موافقة المعلم تؤكّد الحجز مباشرة — لا Payment ولا Stripe ولا مهلة دفع */
+    public function test_approving_a_free_individual_package_request_confirms_it_without_payment(): void
+    {
+        Queue::fake();
+
+        [$teacher] = $this->createVerifiedTeacher();
+        $teacherUser = User::find($teacher->user_id);
+        $package = $this->createFreeTrialPackage($teacher);
+        $student = $this->createStudent();
+
+        $nextWednesday = Carbon::now()->next(3);
+        $package->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
+
+        $requested = app(BookingService::class)->requestIndividualBooking(
+            $student, $package, $this->weeklySlots($nextWednesday, 1),
+        );
+
+        $booking = app(BookingService::class)->approveIndividualRequest($requested, $teacherUser);
+
+        $this->assertSame('confirmed', $booking->status);
+        $this->assertNotNull($booking->confirmed_at);
+        $this->assertNull($booking->hold_expires_at);
+        $this->assertEquals(0.0, (float) $booking->amount_paid);
+        $this->assertCount(1, $booking->sessions);
+        $this->assertSame(0, DB::table('payments')->where('booking_id', $booking->id)->count());
+        Queue::assertPushed(CreateBbbRoomJob::class);
+    }
+
     public function test_booking_request_rejected_when_date_not_among_packages_available_days(): void
     {
         [$teacher] = $this->createVerifiedTeacher();
@@ -614,6 +642,25 @@ class BookingFlowTest extends TestCase
             'platform_margin_percent' => $margin,
             'student_price' => $computed['student_price'],
             'platform_revenue' => $computed['platform_revenue'],
+            'status' => 'active',
+            'approved_at' => now(),
+        ]);
+    }
+
+    private function createFreeTrialPackage(Teacher $teacher): Package
+    {
+        return Package::create([
+            'teacher_id' => $teacher->id,
+            'title' => 'جلسة تعريفية مجانية',
+            'subject_id' => null,
+            'session_format' => 'individual',
+            'is_trial' => true,
+            'capacity' => 1,
+            'sessions_count' => 1,
+            'teacher_price' => 0,
+            'platform_margin_percent' => 0,
+            'student_price' => 0,
+            'platform_revenue' => 0,
             'status' => 'active',
             'approved_at' => now(),
         ]);

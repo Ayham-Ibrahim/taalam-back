@@ -34,7 +34,7 @@ class PackageController extends Controller
 
         $packages = Package::query()
             ->select([
-                'id', 'teacher_id', 'title', 'subject_id', 'session_format', 'capacity',
+                'id', 'teacher_id', 'title', 'subject_id', 'session_format', 'is_trial', 'capacity',
                 'enrolled_count', 'sessions_count',
                 'teacher_price', 'platform_margin_percent', 'student_price', 'platform_revenue',
                 'currency', 'discount_percent', 'grades', 'status', 'submitted_at', 'approved_at',
