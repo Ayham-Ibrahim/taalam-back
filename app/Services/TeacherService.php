@@ -6,6 +6,7 @@ use App\Models\AccountInvitation;
 use App\Models\Booking;
 use App\Models\ClassSession;
 use App\Models\Enrollment;
+use App\Models\LegalPage;
 use App\Models\Teacher;
 use App\Models\TeacherExperience;
 use App\Models\TeacherFaq;
@@ -151,7 +152,12 @@ class TeacherService
 
         return DB::transaction(function () use ($invitation, $password) {
             $user = $invitation->user;
-            $user->update(['password' => $password, 'is_active' => true]);
+            // قبول الدعوة يشترط الموافقة على سياسة المعلم (AcceptInvitationRequest)
+            $user->update([
+                'password' => $password,
+                'is_active' => true,
+                ...LegalPage::acceptanceFor(LegalPage::TEACHER_POLICY),
+            ]);
 
             $teacher = $user->teacher;
             // شرطي لا تعيين مباشر: الأدمن قد يكون أكمل ملف هذا المعلم بالكامل

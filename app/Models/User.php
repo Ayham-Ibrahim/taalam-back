@@ -34,6 +34,8 @@ class User extends Authenticatable
         'timezone',
         'timezone_auto',
         'is_active',
+        'policy_accepted_at',
+        'policy_version',
     ];
 
     /**
@@ -59,6 +61,8 @@ class User extends Authenticatable
             'password' => 'hashed',
             'is_active' => 'boolean',
             'timezone_auto' => 'boolean',
+            'policy_accepted_at' => 'datetime',
+            'policy_version' => 'datetime',
         ];
     }
 
