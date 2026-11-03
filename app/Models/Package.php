@@ -27,6 +27,7 @@ class Package extends Model
         'description',
         'subject_id',
         'session_format',
+        'is_trial',
         'capacity',
         'enrolled_count',
         'sessions_count',
@@ -49,6 +50,7 @@ class Package extends Model
     protected function casts(): array
     {
         return [
+            'is_trial' => 'boolean',
             'teacher_price' => 'decimal:2',
             'platform_margin_percent' => 'decimal:2',
             'student_price' => 'decimal:2',

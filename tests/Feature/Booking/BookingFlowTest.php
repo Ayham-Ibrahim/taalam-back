@@ -90,6 +90,34 @@ class BookingFlowTest extends TestCase
         $this->assertSame(0, $package->fresh()->enrolled_count);
     }
 
+    /** باقة تجربة مجانية: موافقة المعلم تؤكّد الحجز مباشرة — لا Payment ولا Stripe ولا مهلة دفع */
+    public function test_approving_a_free_individual_package_request_confirms_it_without_payment(): void
+    {
+        Queue::fake();
+
+        [$teacher] = $this->createVerifiedTeacher();
+        $teacherUser = User::find($teacher->user_id);
+        $package = $this->createFreeTrialPackage($teacher);
+        $student = $this->createStudent();
+
+        $nextWednesday = Carbon::now()->next(3);
+        $package->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
+
+        $requested = app(BookingService::class)->requestIndividualBooking(
+            $student, $package, $this->weeklySlots($nextWednesday, 1),
+        );
+
+        $booking = app(BookingService::class)->approveIndividualRequest($requested, $teacherUser);
+
+        $this->assertSame('confirmed', $booking->status);
+        $this->assertNotNull($booking->confirmed_at);
+        $this->assertNull($booking->hold_expires_at);
+        $this->assertEquals(0.0, (float) $booking->amount_paid);
+        $this->assertCount(1, $booking->sessions);
+        $this->assertSame(0, DB::table('payments')->where('booking_id', $booking->id)->count());
+        Queue::assertPushed(CreateBbbRoomJob::class);
+    }
+
     public function test_booking_request_rejected_when_date_not_among_packages_available_days(): void
     {
         [$teacher] = $this->createVerifiedTeacher();
@@ -188,6 +216,35 @@ class BookingFlowTest extends TestCase
         foreach ($booking1->sessions as $session) {
             $this->assertSame(2, $session->attendees()->count());
         }
+    }
+
+    /** المنضم لاحقاً يحضر التعويضية كبقية المجموعة، والملغاة لا تُعقد فلا يُسجَّل فيها */
+    public function test_a_later_group_joiner_is_registered_in_makeup_but_not_cancelled_sessions(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        $package = $this->createActiveGroupPackage($teacher, capacity: 3, sessionsCount: 3, teacherPrice: 50, margin: 40);
+
+        // كل أسبوعين — التعويضية تُنشأ بعد أسبوع من الأصلية فلا تتعارض مع الجلسة التالية
+        foreach ([0, 2, 4] as $weeks) {
+            $date = Carbon::now()->next(2)->addWeeks($weeks);
+            $package->schedules()->create(['date' => $date->toDateString(), 'day_of_week' => $date->dayOfWeek, 'start_time' => '09:00', 'end_time' => '10:00']);
+        }
+
+        $booking1 = app(BookingService::class)->joinGroupPackage($this->createStudent(), $package);
+        app(BookingService::class)->confirmBooking($booking1);
+        [$first, $second, $third] = $booking1->sessions->sortBy('sequence_no')->values()->all();
+
+        $makeup = app(\App\Services\SessionService::class)->createMakeupSession($first);
+        $third->update(['status' => 'cancelled']);
+
+        $booking2 = app(BookingService::class)->joinGroupPackage($this->createStudent(), $package);
+
+        $this->assertSame(
+            [$first->id, $second->id, $makeup->id],
+            $booking2->attendedSessions->pluck('id')->sort()->values()->all(),
+        );
+        $this->assertSame(0, $third->attendees()->where('booking_id', $booking2->id)->count());
+        $this->assertSame(4, ClassSession::count());
     }
 
     public function test_joining_a_group_package_whose_schedule_dates_all_passed_is_rejected_as_unavailable(): void
@@ -585,6 +642,25 @@ class BookingFlowTest extends TestCase
             'platform_margin_percent' => $margin,
             'student_price' => $computed['student_price'],
             'platform_revenue' => $computed['platform_revenue'],
+            'status' => 'active',
+            'approved_at' => now(),
+        ]);
+    }
+
+    private function createFreeTrialPackage(Teacher $teacher): Package
+    {
+        return Package::create([
+            'teacher_id' => $teacher->id,
+            'title' => 'جلسة تعريفية مجانية',
+            'subject_id' => null,
+            'session_format' => 'individual',
+            'is_trial' => true,
+            'capacity' => 1,
+            'sessions_count' => 1,
+            'teacher_price' => 0,
+            'platform_margin_percent' => 0,
+            'student_price' => 0,
+            'platform_revenue' => 0,
             'status' => 'active',
             'approved_at' => now(),
         ]);

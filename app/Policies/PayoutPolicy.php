@@ -19,11 +19,6 @@ class PayoutPolicy
 
     public function generate(User $user): bool
     {
-        return $user->isAdmin();
-    }
-
-    public function approve(User $user): bool
-    {
         return $user->isFinance();
     }
 

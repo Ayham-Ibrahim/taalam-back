@@ -25,6 +25,8 @@ class RegisterTeacherRequest extends FormRequest
             // confirmed إلزامية هنا (بعكس إنشاء الأدمن للحساب) — المعلم هو من يختار
             // كلمة مروره بنفسه، فلازم تأكيدها لتفادي خطأ كتابة لا يكتشفه إلا لاحقاً.
             'password' => ['required', 'confirmed', Password::defaults()],
+            // موافقة صريحة على سياسة المعلم (legal_pages: teacher-policy) — تُحفظ في users.policy_accepted_at
+            'accept_policy' => ['accepted'],
         ];
     }
 
@@ -44,6 +46,7 @@ class RegisterTeacherRequest extends FormRequest
             'phone' => 'رقم الهاتف',
             'password' => 'كلمة المرور',
             'teacher_type' => 'نوع الحساب',
+            'accept_policy' => 'الموافقة على سياسة المعلم',
         ];
     }
 }

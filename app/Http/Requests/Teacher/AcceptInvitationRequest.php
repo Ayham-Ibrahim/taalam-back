@@ -17,6 +17,14 @@ class AcceptInvitationRequest extends FormRequest
         return [
             'token' => ['required', 'string', 'max:255'],
             'password' => ['required', 'confirmed', Password::defaults()],
+            'accept_policy' => ['accepted'],
+        ];
+    }
+
+    public function attributes(): array
+    {
+        return [
+            'accept_policy' => 'الموافقة على سياسة المعلم',
         ];
     }
 }

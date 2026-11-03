@@ -3,11 +3,13 @@
 namespace App\Http\Controllers\Session;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Session\CreateMakeupSessionRequest;
 use App\Http\Requests\Session\RescheduleSessionRequest;
 use App\Http\Resources\Session\ClassSessionResource;
 use App\Models\ClassSession;
 use App\Models\User;
 use App\Services\BookingService;
+use App\Services\PayoutService;
 use App\Services\RescheduleService;
 use App\Services\SessionJoinLogService;
 use App\Services\SessionService;
@@ -22,6 +24,7 @@ class ClassSessionController extends Controller
         private readonly BookingService $bookingService,
         private readonly RescheduleService $rescheduleService,
         private readonly SessionJoinLogService $joinLogService,
+        private readonly PayoutService $payoutService,
     ) {}
 
     public function index(Request $request)
@@ -36,7 +39,8 @@ class ClassSessionController extends Controller
 
         $sessions = ClassSession::query()
             ->visibleTo($request->user())
-            ->when($request->filled('status'), fn ($q) => $this->applyStatusFilter($q, $request->string('status')->value()))
+            ->when($request->user()->isAdmin(), fn ($q) => $this->onlyPaidSessions($q))
+            ->when($request->filled('status'), fn ($q) => $this->applyStatusFilter($q, $request->string('status')->value(), $request->user()->isAdmin()))
             ->when($request->filled('category'), fn ($q) => $this->applyCategoryFilter($q, $request->string('category')->value()))
             ->when(
                 $request->filled('package_id'),
@@ -53,7 +57,8 @@ class ClassSessionController extends Controller
             ->when($request->filled('to'), fn ($q) => $q->where('scheduled_at', '<=', $request->date('to')))
             ->with(self::eagerLoad())
             ->withStudentPaidAccess($request->user())
-            ->when($request->user()->isAdmin(), fn ($q) => $q->with(self::JOIN_LOGS_RELATION))
+            // has_makeup: زر "إنشاء جلسة تعويضية" لدى الأدمن يختفي بعد إنشائها (تعويضية واحدة لكل جلسة)
+            ->when($request->user()->isAdmin(), fn ($q) => $q->with(self::JOIN_LOGS_RELATION)->withExists('makeupSessions as has_makeup'))
             // الافتراضي desc (الأحدث تاريخاً أولاً) يبقى كما كان لأي طرف آخر يعتمد
             // عليه ضمناً — sort=asc صريح (الأقرب موعداً أولاً) يطلبه استدعاء
             // "جلساتي" في لوحة الطالب تحديداً.
@@ -63,6 +68,15 @@ class ClassSessionController extends Controller
                 fn ($q) => $q->orderByDesc('scheduled_at')->orderByDesc('id'),
             )
             ->paginate($request->integer('per_page', 20));
+
+        // مبلغ مستحق المعلم من كل جلسة — للأدمن فقط، لصفحة الجلسات الحالية دفعة واحدة
+        if ($request->user()->isAdmin()) {
+            $payouts = $this->payoutService->sessionPayoutAmounts($sessions->getCollection());
+            $sessions->getCollection()->each(fn (ClassSession $session) => $session->setAttribute(
+                'payout_amount',
+                $payouts[$session->id] ?? null,
+            ));
+        }
 
         return $this->paginate($sessions->through(fn (ClassSession $session) => new ClassSessionResource($session)));
     }
@@ -99,9 +113,18 @@ class ClassSessionController extends Controller
      * منطق hasPendingRescheduleRequest() في الفرونت إند)، فتُرجم لـ whereHas لا
      * لقيمة عمود حرفية — وإلا تُرجع صفر نتائج دائماً بصمت مطابقةً لنفس عطل
      * upcoming/attended قبل هذا الإصلاح.
+     *
+     * للأدمن فقط: فلاتر مبنية على نتيجة الحضور التلقائي (attendance_outcome، مخفية عن
+     * غيره) بدل status وحدها — كل جلسة منتهية status='completed' أياً كان ما حدث فيها،
+     * فـ"المكتملة" كانت تخلط المنعقدة فعلاً بغياب المعلم/الطلاب والجلسات غير المدفوعة.
+     * المفاتيح أعلاه تبقى كما هي لكل الأطراف؛ مفاتيح الأدمن لغيره تُطابَق حرفياً (لا نتائج).
      */
-    private function applyStatusFilter($query, string $status)
+    private function applyStatusFilter($query, string $status, bool $isAdmin = false)
     {
+        if ($isAdmin && ($outcomeFilter = $this->outcomeFilter($status))) {
+            return $outcomeFilter($query);
+        }
+
         if ($status === 'reschedule_pending') {
             return $query->whereHas('rescheduleRequests', fn ($q) => $q->where('status', 'pending'));
         }
@@ -114,6 +137,52 @@ class ClassSessionController extends Controller
         };
 
         return $bucket ? $query->whereIn('status', $bucket) : $query->where('status', $status);
+    }
+
+    /**
+     * قائمة الأدمن تعرض الجلسات المدفوعة فقط: طالب واحد على الأقل حجزه/تسجيله مدفوع.
+     * جلسة كل حجوزاتها انتهت مهلتها أو أُلغيت أو ما زالت بانتظار الدفع لا تُعقد ولا تُصرف،
+     * فتُخفى. بلا أي سطر حضور: جلسة دورة قبل أول تسجيل تبقى ظاهرة (جدول الدورة)، وجلسة
+     * باقة قديمة يُحكم فيها بحجزها المالك — نفس احتياط PayoutService.
+     */
+    private function onlyPaidSessions($query)
+    {
+        return $query->where(fn ($q) => $q
+            ->whereHas('attendees', fn ($a) => ClassSession::constrainToPaidAttendee($a))
+            ->orWhere(fn ($noAttendees) => $noAttendees
+                ->whereDoesntHave('attendees')
+                ->where(fn ($owner) => $owner
+                    ->whereNotNull('course_id')
+                    ->orWhereHas('booking', fn ($b) => $b->whereIn('status', ClassSession::PAID_BOOKING_STATUSES)))));
+    }
+
+    /**
+     * held: عُقدت (حضر المعلم وطالب، أو قبل تتبع الحضور/بلا نتيجة — بيانات قديمة).
+     * teacher_absent / student_no_show: نتيجتها، ومعها no_show_teacher/no_show_student القديمة (تسجيل يدوي).
+     * needs_makeup: قابلة للتعويض ولم تُنشأ تعويضيتها بعد — نفس شروط SessionService::scheduleMakeupByAdmin.
+     * not_held: لم تُعقد لسبب غير الغياب — بلا اشتراك مدفوع، أو ملغاة.
+     */
+    private function outcomeFilter(string $status): ?\Closure
+    {
+        return match ($status) {
+            'held' => fn ($q) => $q->where('status', 'completed')->where(fn ($o) => $o
+                ->whereNull('attendance_outcome')
+                ->orWhereIn('attendance_outcome', [ClassSession::OUTCOME_ATTENDED, ClassSession::OUTCOME_UNTRACKED])),
+            'teacher_absent' => fn ($q) => $q->where(fn ($o) => $o
+                ->where(fn ($c) => $c->where('status', 'completed')->where('attendance_outcome', ClassSession::OUTCOME_TEACHER_ABSENT))
+                ->orWhere('status', 'no_show_teacher')),
+            'student_no_show' => fn ($q) => $q->where(fn ($o) => $o
+                ->where(fn ($c) => $c->where('status', 'completed')->where('attendance_outcome', ClassSession::OUTCOME_STUDENT_NO_SHOW))
+                ->orWhere('status', 'no_show_student')),
+            'needs_makeup' => fn ($q) => $q->where('status', 'completed')
+                ->whereIn('attendance_outcome', [ClassSession::OUTCOME_TEACHER_ABSENT, ClassSession::OUTCOME_STUDENT_NO_SHOW])
+                ->whereDoesntHave('makeupSessions')
+                ->whereHas('attendees', fn ($a) => ClassSession::constrainToPaidAttendee($a)),
+            'not_held' => fn ($q) => $q->where(fn ($o) => $o
+                ->where(fn ($c) => $c->where('status', 'completed')->where('attendance_outcome', ClassSession::OUTCOME_NO_PAID_ATTENDEE))
+                ->orWhere('status', 'cancelled')),
+            default => null,
+        };
     }
 
     /**
@@ -227,5 +296,21 @@ class ClassSessionController extends Controller
         $session->load(self::eagerLoad());
 
         return $this->success(new ClassSessionResource($session), 'تم تعديل موعد الجلسة');
+    }
+
+    /**
+     * جلسة تعويضية يدوية من الأدمن لجلسة غاب عنها المعلم أو الطلاب. الشروط (نتيجة
+     * الحضور، تعويضية واحدة، موعد مستقبلي، لا تعارض) في SessionService::scheduleMakeupByAdmin.
+     */
+    public function createMakeup(CreateMakeupSessionRequest $request, ClassSession $session)
+    {
+        // نفس تحويل reschedule أعلاه — موعد ISO بإزاحة توقيت يُخزَّن بتوقيت التطبيق
+        $scheduledAt = Carbon::parse($request->validated('scheduled_at'))->setTimezone(config('app.timezone'));
+
+        $makeup = $this->sessionService->scheduleMakeupByAdmin($session, $request->user(), $scheduledAt, $request->validated('notes'));
+
+        $makeup->load(self::eagerLoad());
+
+        return $this->success(new ClassSessionResource($makeup), 'تم إنشاء الجلسة التعويضية', 201);
     }
 }

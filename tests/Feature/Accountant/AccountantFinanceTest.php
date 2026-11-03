@@ -9,6 +9,7 @@ use App\Models\Student;
 use App\Models\Subject;
 use App\Models\Teacher;
 use App\Models\User;
+use App\Services\PayoutService;
 use App\Services\PricingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -21,13 +22,13 @@ class AccountantFinanceTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_accountant_can_list_approve_and_mark_payouts_paid_and_export(): void
+    public function test_accountant_can_list_and_mark_payouts_paid_and_export(): void
     {
-        [$teacher, $payout] = $this->pendingPayoutFromAdmin();
+        [$teacher, $payout] = $this->pendingPayout();
         $accountantToken = $this->accountantToken();
 
-        $this->as($accountantToken)->getJson('/api/payouts')->assertStatus(200);
-        $this->as($accountantToken)->postJson("/api/payouts/{$payout->id}/approve")->assertStatus(200);
+        $this->as($accountantToken)->getJson('/api/payouts')->assertStatus(200)->assertJsonCount(1, 'data');
+        $this->as($accountantToken)->postJson('/api/payouts/generate')->assertSuccessful();
         $this->as($accountantToken)->postJson("/api/payouts/{$payout->id}/mark-paid", [
             'transfer_reference' => 'REF-ACC-1',
         ])->assertStatus(200);
@@ -38,19 +39,9 @@ class AccountantFinanceTest extends TestCase
 
     public function test_accountant_can_see_all_bookings_for_finance_review(): void
     {
-        $this->pendingPayoutFromAdmin();
+        $this->pendingPayout();
 
         $this->as($this->accountantToken())->getJson('/api/bookings')->assertStatus(200);
-    }
-
-    public function test_accountant_cannot_generate_payouts(): void
-    {
-        [$teacher] = $this->pendingPayoutFromAdmin();
-
-        $this->as($this->accountantToken())->postJson("/api/teachers/{$teacher->id}/payouts/generate", [
-            'period_start' => now()->subDay()->toDateString(),
-            'period_end' => now()->addDay()->toDateString(),
-        ])->assertStatus(403);
     }
 
     public function test_accountant_cannot_access_admin_only_areas(): void
@@ -84,19 +75,13 @@ class AccountantFinanceTest extends TestCase
     }
 
     /** @return array{0: Teacher, 1: Payout} */
-    private function pendingPayoutFromAdmin(): array
+    private function pendingPayout(): array
     {
         $teacherUser = User::factory()->teacher()->create();
         $teacher = Teacher::create(['user_id' => $teacherUser->id, 'teacher_type' => 'school', 'status' => 'verified']);
         $this->createCompletedPackageSession($teacher, 100, 4);
 
-        $admin = User::factory()->admin()->create();
-        $generate = $this->as($admin->createToken('t')->plainTextToken)->postJson(
-            "/api/teachers/{$teacher->id}/payouts/generate",
-            ['period_start' => now()->subDay()->toDateString(), 'period_end' => now()->addDay()->toDateString()],
-        )->assertStatus(201);
-
-        return [$teacher, Payout::findOrFail($generate->json('data.id'))];
+        return [$teacher, app(PayoutService::class)->generateForPeriod($teacher, now()->subDay(), now()->addDay())];
     }
 
     private function createCompletedPackageSession(Teacher $teacher, float $teacherPrice, int $sessionsTotal): void

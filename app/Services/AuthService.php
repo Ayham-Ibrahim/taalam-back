@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\LegalPage;
 use App\Models\Student;
 use App\Models\Teacher;
 use App\Models\User;
@@ -33,6 +34,7 @@ class AuthService
                 'role' => 'student',
                 'password' => $data['password'],
                 'timezone' => $data['timezone'] ?? 'Asia/Riyadh',
+                ...LegalPage::acceptanceFor(LegalPage::STUDENT_POLICY),
             ]);
 
             $student = Student::create([
@@ -78,6 +80,7 @@ class AuthService
                 'role' => 'teacher',
                 'password' => $data['password'],
                 'is_active' => true,
+                ...LegalPage::acceptanceFor(LegalPage::TEACHER_POLICY),
             ]);
 
             $teacher = Teacher::create([

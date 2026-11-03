@@ -23,6 +23,7 @@ class Payment extends Model
         'paid_at',
         'failure_reason',
         'gateway_payload',
+        'meta_context',
         'invoice_number',
         'invoice_path',
     ];
@@ -35,6 +36,7 @@ class Payment extends Model
             'platform_amount' => 'decimal:2',
             'paid_at' => 'datetime',
             'gateway_payload' => 'array',
+            'meta_context' => 'array',
         ];
     }
 

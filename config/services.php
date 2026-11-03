@@ -40,6 +40,15 @@ return [
         'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
     ],
 
+    // Meta Conversions API — أي قيمة فارغة من الاثنين الأوّلين = الإرسال معطّل بالكامل.
+    // test_event_code للاختبار فقط (staging): الأحداث تظهر في Test Events ولا تُحسب في الحملات
+    'meta' => [
+        'pixel_id' => env('META_PIXEL_ID'),
+        'access_token' => env('META_CAPI_ACCESS_TOKEN'),
+        'test_event_code' => env('META_TEST_EVENT_CODE'),
+        'graph_version' => env('META_GRAPH_VERSION', 'v21.0'),
+    ],
+
     'bbb' => [
         'url' => env('BBB_URL'),
         'secret' => env('BBB_SECRET'),

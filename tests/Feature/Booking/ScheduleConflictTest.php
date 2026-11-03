@@ -115,7 +115,40 @@ class ScheduleConflictTest extends TestCase
         $this->assertSame(0, DB::table('class_sessions')->where('booking_id', $requested->id)->count());
     }
 
-    public function test_joining_a_group_package_is_rejected_when_its_schedule_overlaps_an_existing_session(): void
+    /**
+     * انضمام الطالب بنفسه لمجموعة لا يُمنع بتعارضها مع جلسة أخرى له (عند معلم آخر) —
+     * تحذير في الواجهة فقط. تعارض جدول المعلم يبقى مانعاً (اختبار ..._teachers_existing_individual_session).
+     */
+    public function test_joining_a_group_package_is_allowed_when_its_schedule_overlaps_the_students_own_session(): void
+    {
+        [$teacherA] = $this->createVerifiedTeacher();
+        $sessionDate = Carbon::now()->addWeek();
+        $groupPackage = $this->createActiveGroupPackage($teacherA, capacity: 10, sessionsCount: 1, teacherPrice: 100, margin: 60);
+        $groupPackage->schedules()->create([
+            'date' => $sessionDate->toDateString(),
+            'day_of_week' => $sessionDate->dayOfWeek,
+            'start_time' => '14:00',
+            'end_time' => '15:00',
+        ]);
+
+        $student = $this->createStudent();
+
+        [$teacherB] = $this->createVerifiedTeacher();
+        $individualPackage = $this->createActiveIndividualPackage($teacherB, teacherPrice: 100, margin: 60, sessionsCount: 1);
+        $individualPackage->schedules()->create(['day_of_week' => $sessionDate->dayOfWeek]);
+        $admin = User::factory()->admin()->create();
+        app(BookingService::class)->createManualBooking(
+            $student, $individualPackage, $admin, 'حجز سابق', [['date' => $sessionDate->toDateString(), 'start_time' => '14:00']],
+        );
+
+        $booking = app(BookingService::class)->joinGroupPackage($student, $groupPackage);
+
+        $this->assertSame($groupPackage->id, $booking->package_id);
+        $this->assertCount(1, $booking->sessions);
+    }
+
+    /** الحجز اليدوي من الأدمن لباقة جماعية لم يتغير — تعارض جدول الطالب ما زال يمنعه */
+    public function test_manual_group_booking_by_admin_is_still_rejected_on_the_students_own_conflict(): void
     {
         [$teacherA] = $this->createVerifiedTeacher();
         $sessionDate = Carbon::now()->addWeek();
@@ -141,7 +174,7 @@ class ScheduleConflictTest extends TestCase
         $this->expectException(ValidationException::class);
 
         try {
-            app(BookingService::class)->joinGroupPackage($student, $groupPackage);
+            app(BookingService::class)->createManualBooking($student, $groupPackage, $admin, 'حجز متعارض');
         } catch (ValidationException $e) {
             $this->assertSame(
                 $this->studentConflictMessage(Carbon::parse($sessionDate->toDateString())->setTime(14, 0)),
@@ -182,7 +215,32 @@ class ScheduleConflictTest extends TestCase
         );
     }
 
-    public function test_enrolling_in_a_course_is_rejected_when_a_session_overlaps_an_existing_package_booking(): void
+    /** تسجيل الطالب بنفسه في دورة لا يُمنع بتعارضها مع جلسة أخرى له — تحذير في الواجهة فقط */
+    public function test_enrolling_in_a_course_is_allowed_when_a_session_overlaps_the_students_own_booking(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        $student = $this->createStudent();
+        $admin = User::factory()->admin()->create();
+
+        $courseStart = Carbon::now()->next(1)->startOfDay();
+        $center = $this->createVerifiedCenter();
+        $course = $this->createActiveCourse($center, teacherPrice: 100, margin: 50, start: $courseStart, end: $courseStart->copy()->addDays(6));
+        $course->schedules()->create(['day_of_week' => 1, 'start_time' => '09:00', 'end_time' => '10:00']);
+
+        $package = $this->createActiveIndividualPackage($teacher, teacherPrice: 100, margin: 60, sessionsCount: 1);
+        $package->schedules()->create(['day_of_week' => 1]);
+        app(BookingService::class)->createManualBooking(
+            $student, $package, $admin, 'حجز سابق', [['date' => $courseStart->toDateString(), 'start_time' => '09:00']],
+        );
+
+        $enrollment = app(EnrollmentService::class)->initiateEnrollment($student, $course);
+
+        $this->assertSame($course->id, $enrollment->course_id);
+        $this->assertSame(1, DB::table('session_attendees')->where('enrollment_id', $enrollment->id)->count());
+    }
+
+    /** التسجيل اليدوي من الأدمن لم يتغير — تعارض جدول الطالب ما زال يمنعه */
+    public function test_manual_course_enrollment_by_admin_is_still_rejected_on_the_students_own_conflict(): void
     {
         [$teacher] = $this->createVerifiedTeacher();
         $student = $this->createStudent();
@@ -203,7 +261,7 @@ class ScheduleConflictTest extends TestCase
         $this->expectException(ValidationException::class);
         $this->expectExceptionMessage($this->studentConflictMessage(Carbon::parse($courseStart->toDateString())->setTime(9, 0)));
 
-        app(EnrollmentService::class)->initiateEnrollment($student, $course);
+        app(EnrollmentService::class)->createManualEnrollment($student, $course, $admin, 'تسجيل متعارض');
     }
 
     /**

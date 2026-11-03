@@ -19,6 +19,9 @@ class UserResource extends JsonResource
             'email' => $this->email,
             'phone' => $this->phone,
             'role' => $this->role,
+            // حساب أخ مضاف على حساب طالب أساسي (بلا إيميل — يُفتح بالتبديل فقط)
+            'primary_user_id' => $this->primary_user_id,
+            'is_sibling_account' => $this->primary_user_id !== null,
             'avatar_path' => $this->avatar_path,
             'timezone' => $this->timezone,
             'timezone_auto' => $this->timezone_auto,

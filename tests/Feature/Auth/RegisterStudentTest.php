@@ -25,6 +25,7 @@ class RegisterStudentTest extends TestCase
             'email' => 'ahmad@example.com',
             'password' => 'Password123!',
             'password_confirmation' => 'Password123!',
+            'accept_policy' => true,
             'education_type' => 'school',
             'curriculum_id' => $curriculumId,
             'stage_id' => $stageId,
@@ -46,6 +47,7 @@ class RegisterStudentTest extends TestCase
             'email' => 'noreqs@example.com',
             'password' => 'Password123!',
             'password_confirmation' => 'Password123!',
+            'accept_policy' => true,
             'education_type' => 'school',
         ]);
 
@@ -63,6 +65,7 @@ class RegisterStudentTest extends TestCase
             'email' => 'dup@example.com',
             'password' => 'Password123!',
             'password_confirmation' => 'Password123!',
+            'accept_policy' => true,
             'education_type' => 'training',
             'level' => 'beginner',
         ]);
@@ -78,6 +81,7 @@ class RegisterStudentTest extends TestCase
             'email' => 'weakpass@example.com',
             'password' => 'password',
             'password_confirmation' => 'password',
+            'accept_policy' => true,
             'education_type' => 'training',
             'level' => 'beginner',
         ]);

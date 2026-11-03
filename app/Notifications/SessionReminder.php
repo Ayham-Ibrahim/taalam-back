@@ -4,6 +4,7 @@ namespace App\Notifications;
 
 use App\Models\ClassSession;
 use App\Notifications\Concerns\TracksNotificationLog;
+use App\Services\SettingsService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
@@ -31,12 +32,19 @@ class SessionReminder extends Notification implements ShouldQueue
         // التي عولجت سابقاً في الحجز والجدولة — هنا فقط لم تُطبَّق في البريد).
         $localTime = $this->session->scheduled_at->clone()->setTimezone($notifiable->timezone ?? config('app.timezone'));
 
+        // نفس مهلة حسم الحضور التلقائي (SessionService::completeEndedSessions) — للطرفين معاً
+        $lateMinutes = (int) app(SettingsService::class)->get('student_no_show_after_minutes', 20);
+        $policyPath = $notifiable->role === 'teacher' ? '/teacher-policy' : '/student-policy';
+
         return (new MailMessage)
             ->subject('Reminder: Your Session Starts Soon')
             ->greeting("Hello {$notifiable->name},")
             ->line("Your session is scheduled to start at {$localTime->format('H:i')} on {$localTime->format('Y-m-d')} ({$localTime->format('e')} time).")
             ->action('Join Session', $this->joinUrl)
-            ->line('Please join a few minutes early to make sure your connection and audio are ready.');
+            ->line('Please join a few minutes early to make sure your connection and audio are ready.')
+            ->line("Joining after the first {$lateMinutes} minutes counts as an absence. Please join through this button or the platform so your attendance is recorded, and do not share this link.")
+            ->line('This session is recorded for quality assurance and is available only to its participants and the platform management.')
+            ->line('Attendance and make-up rules: '.frontend_url($policyPath));
     }
 
     public function toArray($notifiable): array

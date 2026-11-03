@@ -34,7 +34,7 @@ class PackageController extends Controller
 
         $packages = Package::query()
             ->select([
-                'id', 'teacher_id', 'title', 'subject_id', 'session_format', 'capacity',
+                'id', 'teacher_id', 'title', 'subject_id', 'session_format', 'is_trial', 'capacity',
                 'enrolled_count', 'sessions_count',
                 'teacher_price', 'platform_margin_percent', 'student_price', 'platform_revenue',
                 'currency', 'discount_percent', 'grades', 'status', 'submitted_at', 'approved_at',
@@ -117,9 +117,14 @@ class PackageController extends Controller
         $date = $request->string('date')->value();
         abort_if(! $date, 422, 'التاريخ مطلوب');
 
-        $timezone = $request->user()->timezone ?? 'UTC';
+        // timezone (اختياري): منطقة المتصفح التي حسبت فيها الواجهة $date فعلاً — قد تختلف
+        // عن منطقة الملف الشخصي، وإلا يُجلَب يوم غير الذي تقارن به الواجهة.
+        $timezone = $request->string('timezone')->value();
+        abort_if($timezone && ! in_array($timezone, timezone_identifiers_list(), true), 422, 'المنطقة الزمنية غير صالحة');
+        $timezone = $timezone ?: ($request->user()->timezone ?? 'UTC');
+
         $dayStart = Carbon::parse($date, $timezone)->startOfDay()->setTimezone(config('app.timezone'));
-        $dayEnd = $dayStart->copy()->addDay();
+        $dayEnd = Carbon::parse($date, $timezone)->startOfDay()->addDay()->setTimezone(config('app.timezone'));
 
         /**
          * كان الاستعلام يعتمد على status=scheduled/active وحدها — صف class_sessions
@@ -130,11 +135,24 @@ class PackageController extends Controller
          */
         $sessions = ClassSession::where('teacher_id', $package->teacher_id)
             ->whereIn('status', ['scheduled', 'active'])
-            ->whereBetween('scheduled_at', [$dayStart, $dayEnd])
+            // تداخل مع اليوم لا بداية داخله: جلسة بدأت قبل منتصف الليل وتمتد بعده تشغل
+            // هذا اليوم أيضاً. يوم سابق كامل هامش آمن لأي مدة جلسة، والتداخل الدقيق في filter أدناه.
+            ->where('scheduled_at', '<', $dayEnd)
+            ->where('scheduled_at', '>', $dayStart->copy()->subDay())
             ->where(fn ($q) => $q->whereDoesntHave('attendees')
                 ->orWhereHas('attendees', fn ($a) => ClassSession::constrainToLiveAttendee($a)))
+            // جلسات هذه الباقة الجماعية نفسها (أنشأها أول منضم) ليست "انشغالاً" لمن
+            // ينضم إليها لاحقاً — سيحضرها هو نفسه. نفس استثناء excludeSessionIds في
+            // BookingService::joinGroupPackage، وإلا تظهر الباقة متعارضة مع نفسها.
+            ->when($package->session_format === 'group', fn ($q) => $q->where(fn ($q2) => $q2
+                ->whereNull('booking_id')
+                ->orWhereDoesntHave('booking', fn ($b) => $b->where('package_id', $package->id))))
             ->get(['scheduled_at', 'duration_min'])
-            ->filter(fn (ClassSession $session) => $session->scheduled_at->copy()->addMinutes($session->duration_min)->gt(now()))
+            ->filter(function (ClassSession $session) use ($dayStart) {
+                $end = $session->scheduled_at->copy()->addMinutes($session->duration_min);
+
+                return $end->gt(now()) && $end->gt($dayStart);
+            })
             ->values();
 
         return $this->success($sessions->map(fn (ClassSession $session) => [

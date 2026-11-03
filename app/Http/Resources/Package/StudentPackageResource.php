@@ -19,6 +19,7 @@ class StudentPackageResource extends JsonResource
             'subject_id' => $this->subject_id,
             'subject' => $this->whenLoaded('subject', fn () => $this->subject?->name_ar),
             'session_format' => $this->session_format,
+            'is_trial' => (bool) $this->is_trial,
             'capacity' => $this->capacity,
             'enrolled_count' => $this->enrolled_count,
             'sessions_count' => $this->sessions_count,
@@ -31,6 +32,8 @@ class StudentPackageResource extends JsonResource
             'grades' => $this->grades,
             'schedules' => $this->whenLoaded('schedules', fn () => $this->schedules->map(fn ($s) => [
                 'id' => $s->id, 'date' => $s->date?->toDateString(), 'day_of_week' => $s->day_of_week, 'start_time' => $s->start_time, 'end_time' => $s->end_time,
+                // اللحظة الفعلية (UTC) — date/start_time بمنطقة المعلم، لا منطقة من يعرضها
+                'starts_at' => $s->startsAt($this->schedule_timezone)?->toIso8601String(),
             ])),
         ];
     }

@@ -30,12 +30,14 @@ class PaymentService
         private readonly BookingService $bookingService,
         private readonly EnrollmentService $enrollmentService,
         private readonly SupportPackagePurchaseService $supportPackagePurchaseService,
+        private readonly MetaConversionsService $metaConversions,
     ) {}
 
     public function createCheckoutSessionForBooking(Booking $booking): string
     {
         $payment = $booking->payments()->latest()->firstOrFail();
         $this->assertPayable($booking, $payment);
+        $this->metaConversions->trackCheckoutStarted($payment, $booking, request());
 
         if ($url = $this->reusableCheckoutUrl($payment)) {
             return $url;
@@ -47,7 +49,7 @@ class PaymentService
             'mode' => 'payment',
             ...$this->sessionExpiry($booking),
             'payment_method_types' => ['card'],
-            'customer_email' => $booking->student->user->email,
+            'customer_email' => $booking->student->user->contactEmail(),
             'line_items' => [[
                 'quantity' => 1,
                 'price_data' => [
@@ -77,6 +79,7 @@ class PaymentService
     {
         $payment = $enrollment->payments()->latest()->firstOrFail();
         $this->assertPayable($enrollment, $payment);
+        $this->metaConversions->trackCheckoutStarted($payment, $enrollment, request());
 
         if ($url = $this->reusableCheckoutUrl($payment)) {
             return $url;
@@ -88,7 +91,7 @@ class PaymentService
             'mode' => 'payment',
             ...$this->sessionExpiry($enrollment),
             'payment_method_types' => ['card'],
-            'customer_email' => $enrollment->student->user->email,
+            'customer_email' => $enrollment->student->user->contactEmail(),
             'line_items' => [[
                 'quantity' => 1,
                 'price_data' => [
@@ -118,6 +121,7 @@ class PaymentService
     {
         $payment = $purchase->payments()->latest()->firstOrFail();
         $this->assertPayable($purchase, $payment);
+        $this->metaConversions->trackCheckoutStarted($payment, $purchase, request());
 
         if ($url = $this->reusableCheckoutUrl($payment)) {
             return $url;
@@ -131,7 +135,7 @@ class PaymentService
             'mode' => 'payment',
             ...$this->sessionExpiry($purchase),
             'payment_method_types' => ['card'],
-            'customer_email' => $purchase->student->user->email,
+            'customer_email' => $purchase->student->user->contactEmail(),
             'line_items' => [[
                 'quantity' => 1,
                 'price_data' => [
@@ -217,6 +221,10 @@ class PaymentService
             $payable instanceof Enrollment => $this->enrollmentService->confirmEnrollment($payable),
             $payable instanceof SupportPackagePurchase => $this->supportPackagePurchaseService->confirmPurchase($payable),
         };
+
+        // يُحتسَب Purchase حتى لو انتهت مهلة الطلب أدناه — المال وصل فعلاً. الخروج المبكر أعلاه
+        // عند payment->status === 'paid' يضمن إرساله مرة واحدة مهما أعاد Stripe الـ webhook
+        $this->metaConversions->trackPurchase($payment, $payable);
 
         // دفعٌ وصل بعد أن انتهت المهلة وتحوّل الطلب إلى expired/cancelled — confirm* لا يُحييه
         // (المقعد/الكوبون ربما ذهبا لغيره)، ولا استرداد تلقائي في هذا النظام، فيُترك للإدارة

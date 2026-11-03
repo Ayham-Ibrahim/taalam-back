@@ -31,6 +31,7 @@ use App\Http\Controllers\Reschedule\RescheduleRequestController;
 use App\Http\Controllers\Review\ReviewController;
 use App\Http\Controllers\Session\ClassSessionController;
 use App\Http\Controllers\Session\SessionAttendanceController;
+use App\Http\Controllers\Student\SiblingController;
 use App\Http\Controllers\Student\StudentController;
 use App\Http\Controllers\Student\StudentImportController;
 use App\Http\Controllers\SupportPackagePurchase\SupportPackagePurchaseController;
@@ -64,6 +65,13 @@ Route::middleware(['auth:sanctum', 'throttle:uploads'])->post('me/avatar', [Prof
 Route::middleware('auth:sanctum')->delete('me/avatar', [ProfileController::class, 'deleteAvatar']);
 Route::middleware('auth:sanctum')->put('me/profile', [ProfileController::class, 'updateProfile']);
 Route::middleware(['auth:sanctum', 'throttle:password-change'])->put('me/password', [ProfileController::class, 'updatePassword']);
+
+// حسابات الإخوة — الطالب الأساسي يضيف إخوته ويبدّل بين حسابات العائلة (SiblingAccountService)
+Route::middleware('auth:sanctum')->group(function () {
+    Route::get('me/siblings', [SiblingController::class, 'index']);
+    Route::post('me/siblings', [SiblingController::class, 'store']);
+    Route::post('me/switch-account/{user}', [SiblingController::class, 'switch']);
+});
 
 Route::post('teachers/accept-invitation', [TeacherController::class, 'acceptInvitation']);
 
@@ -247,10 +255,19 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('class-sessions/{session}', [ClassSessionController::class, 'show']);
     Route::get('class-sessions/{session}/join', [ClassSessionController::class, 'join']);
     Route::patch('class-sessions/{session}/schedule', [ClassSessionController::class, 'reschedule']);
+    Route::post('class-sessions/{session}/makeup', [ClassSessionController::class, 'createMakeup']);
 
     Route::post('session-attendees/{attendee}/present', [SessionAttendanceController::class, 'markPresent']);
     Route::post('session-attendees/{attendee}/absent', [SessionAttendanceController::class, 'recordAbsence']);
-    Route::post('class-sessions/{session}/no-show-teacher', [SessionAttendanceController::class, 'teacherNoShow']);
+    // معطَّل: تسجيل غياب المعلم يدوياً (SessionService::recordTeacherNoShow) سابق للحضور التلقائي
+    // ويتعارض معه — لا يفحص حالة الجلسة، فيقبل جلسة مكتملة حكم الحضور التلقائي بانعقادها وصُرف
+    // مستحقها (يبقى البند المصروف)، ويقبل التكرار على نفس الجلسة: تعويضية جديدة في كل مرة بموعد
+    // تلقائي بعد أسبوع بلا فحص تعارض، وزيادة no_show_count حتى الإيقاف التلقائي للمعلم بجلسة واحدة.
+    // غياب المعلم يُحسم الآن تلقائياً (teacher_absent بنسبة 0% في completeEndedSessions) والتعويضية
+    // عبر class-sessions/{session}/makeup. لا تستدعيه الواجهة. ملاحظة: كان المسار الوحيد الذي يزيد
+    // no_show_count ويطبّق teacher_no_show_warning_threshold/suspend_threshold — لا يُعاد تفعيله قبل
+    // إضافة هذه الحمايات أو نقل الاحتساب إلى الحضور التلقائي.
+    // Route::post('class-sessions/{session}/no-show-teacher', [SessionAttendanceController::class, 'teacherNoShow']);
 
     Route::get('complaints', [ComplaintController::class, 'index']);
     Route::get('complaints/{complaint}', [ComplaintController::class, 'show']);
@@ -265,8 +282,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('payouts', [PayoutController::class, 'index']);
     Route::get('payouts/{payout}', [PayoutController::class, 'show']);
     Route::get('payouts/{payout}/invoice', [PayoutController::class, 'downloadInvoice']);
-    Route::post('teachers/{teacher}/payouts/generate', [PayoutController::class, 'generate']);
-    Route::post('payouts/{payout}/approve', [PayoutController::class, 'approve']);
+    // زر الأدمن والمحاسب: كشف لكل معلم بكل مستحقاته غير المصروفة حتى لحظة الضغط — مسار حرفي ثابت، لا يتعارض
+    // مع payouts/{payout}. التوليد لمعلم واحد بفترة حرة (teachers/{teacher}/payouts/generate) أُزيل:
+    // كان يُنتج كشوفاً متداخلة ومتكررة لنفس المعلم بفترات مختلفة.
+    Route::post('payouts/generate', [PayoutController::class, 'generate']);
     Route::post('payouts/{payout}/mark-paid', [PayoutController::class, 'markPaid']);
 
     // ترتيب مقصود: export قبل أي مسار بمعرّف لاحقاً لنفس السابقة أعلاه (export/{id})

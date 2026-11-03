@@ -34,7 +34,17 @@ class TeacherSessionsReportExport implements FromCollection, WithHeadings, WithM
 
     public function headings(): array
     {
-        return ['المعلم', 'عدد الحصص المحقَّقة', 'مستحق المعلم', 'عائد المنصة'];
+        return [
+            'المعلم',
+            'عدد الحصص المحقَّقة',
+            'منها لم يحضر الطلاب',
+            'غياب المعلم',
+            'مستحق المعلم',
+            'مُدرَج في كشوف',
+            'لم يُدرَج بعد',
+            'تسويات تسجيل متأخر',
+            'عائد المنصة',
+        ];
     }
 
     public function map($row): array
@@ -42,7 +52,12 @@ class TeacherSessionsReportExport implements FromCollection, WithHeadings, WithM
         return [
             $row['teacherName'],
             $row['sessionsCount'],
+            $row['studentNoShowCount'],
+            $row['teacherAbsentCount'],
             $row['teacherRevenue'],
+            $row['inPayoutsAmount'],
+            $row['notInPayoutsAmount'],
+            $row['settlementsAmount'],
             $row['platformRevenue'],
         ];
     }
