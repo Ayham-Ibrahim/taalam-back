@@ -10,15 +10,20 @@ use App\Http\Requests\Auth\RegisterTeacherRequest;
 use App\Http\Requests\Auth\ResetPasswordRequest;
 use App\Http\Resources\UserResource;
 use App\Services\AuthService;
+use App\Services\MetaConversionsService;
 use Illuminate\Http\Request;
 
 class AuthController extends Controller
 {
-    public function __construct(private readonly AuthService $authService) {}
+    public function __construct(
+        private readonly AuthService $authService,
+        private readonly MetaConversionsService $metaConversions,
+    ) {}
 
     public function registerStudent(RegisterStudentRequest $request)
     {
         $result = $this->authService->registerStudent($request->validated());
+        $this->metaConversions->trackStudentRegistration($result['user'], $request);
 
         return $this->success($result, 'تم إنشاء الحساب بنجاح', 201);
     }
