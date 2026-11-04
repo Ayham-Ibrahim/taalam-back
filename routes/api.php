@@ -250,6 +250,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('class-sessions/{session}/join', [ClassSessionController::class, 'join']);
     Route::patch('class-sessions/{session}/schedule', [ClassSessionController::class, 'reschedule']);
     Route::post('class-sessions/{session}/makeup', [ClassSessionController::class, 'createMakeup']);
+    Route::post('class-sessions/{session}/attendance', [ClassSessionController::class, 'markAttendance']);
 
     Route::post('session-attendees/{attendee}/present', [SessionAttendanceController::class, 'markPresent']);
     Route::post('session-attendees/{attendee}/absent', [SessionAttendanceController::class, 'recordAbsence']);
