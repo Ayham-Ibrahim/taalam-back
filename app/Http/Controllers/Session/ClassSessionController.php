@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Session;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Session\CreateMakeupSessionRequest;
+use App\Http\Requests\Session\MarkSessionAttendanceRequest;
 use App\Http\Requests\Session\RescheduleSessionRequest;
 use App\Http\Resources\Session\ClassSessionResource;
 use App\Models\ClassSession;
@@ -312,5 +313,23 @@ class ClassSessionController extends Controller
         $makeup->load(self::eagerLoad());
 
         return $this->success(new ClassSessionResource($makeup), 'تم إنشاء الجلسة التعويضية', 201);
+    }
+
+    /**
+     * تسجيل الأدمن حضور المعلم أو أحد الطلاب يدوياً أثناء الجلسة (نافذة روابطها) — يُحتسب كحضور
+     * طبيعي في الوقت. الشروط في SessionJoinLogService::recordByAdmin.
+     */
+    public function markAttendance(MarkSessionAttendanceRequest $request, ClassSession $session)
+    {
+        $this->joinLogService->recordByAdmin(
+            $session,
+            $request->user(),
+            $request->validated('role'),
+            $request->validated('student_id'),
+        );
+
+        $session->load([...self::eagerLoad(), self::JOIN_LOGS_RELATION]);
+
+        return $this->success(new ClassSessionResource($session), 'تم تسجيل الحضور');
     }
 }

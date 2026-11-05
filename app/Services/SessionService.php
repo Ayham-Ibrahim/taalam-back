@@ -21,7 +21,7 @@ class SessionService
     use LogsAuditEvents;
 
     /** يُسمح بالانضمام قبل الموعد المجدول بهذه المدة — ريثما يستعد الطرفان قبل بدء الجلسة فعلياً. */
-    private const EARLY_JOIN_MINUTES = 5;
+    public const EARLY_JOIN_MINUTES = 5;
 
     public function __construct(
         private readonly SettingsService $settings,
