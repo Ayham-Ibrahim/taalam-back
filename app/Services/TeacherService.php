@@ -575,4 +575,18 @@ class TeacherService
             },
         ];
     }
+
+    public function updateFaq(TeacherFaq $faq, array $data): TeacherFaq
+    {
+        $old = ['question' => $faq->question, 'answer' => $faq->answer];
+
+        $faq->update([
+            'question' => $data['question'],
+            'answer' => $data['answer'],
+        ]);
+
+        $this->audit('teacher.faq_updated', $faq, $old, ['question' => $faq->question, 'answer' => $faq->answer]);
+
+        return $faq;
+    }
 }

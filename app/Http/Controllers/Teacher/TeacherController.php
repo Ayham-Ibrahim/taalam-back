@@ -110,7 +110,7 @@ class TeacherController extends Controller
 
         $teacher->load([
             'user:id,name,avatar_path', 'subjects', 'curricula', 'languages', 'majors', 'videos', 'faqs',
-            'experiences', 'activeBadgeAwards',
+            'experiences', 'activeBadgeAwards', 'availabilityTimes',
         ]);
         if ($isManager) {
             // الأحدث أولاً — قد يرفع المعلم أكثر من وثيقة لنفس النوع بعد رفض

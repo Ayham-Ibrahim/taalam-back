@@ -48,6 +48,20 @@ class PublicTeacherResource extends JsonResource
                 'name_ar' => $award->badge->name_ar,
                 'icon' => $award->badge->icon,
             ])),
+            /**
+             * أوقات التوفّر الأسبوعية معروضة للعرض فقط ("أوقات التوفر هذا الأسبوع")
+             * — مجمَّعة حسب اليوم مع قائمة نوافذ start–end (H:i) لكل يوم.
+             */
+            'availability_times' => $this->whenLoaded('availabilityTimes', fn () => $this->availabilityTimes
+                ->groupBy('day_of_week')
+                ->map(fn ($rows, $day) => [
+                    'day_of_week' => (int) $day,
+                    'slots' => $rows->map(fn ($r) => [
+                        'start' => substr((string) $r->start_time, 0, 5),
+                        'end' => substr((string) $r->end_time, 0, 5),
+                    ])->values(),
+                ])
+                ->values()),
             'user' => [
                 'id' => $this->user->id,
                 'name' => $this->user->name,

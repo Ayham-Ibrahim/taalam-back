@@ -26,6 +26,7 @@ use App\Http\Controllers\SupportPackage\SupportPackageController;
 use App\Http\Controllers\Payment\PaymentWebhookController;
 use App\Http\Controllers\Payout\PayoutController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\Report\AcademicSupportFinanceReportController;
 use App\Http\Controllers\Report\TeacherSessionsReportController;
 use App\Http\Controllers\Reschedule\RescheduleRequestController;
 use App\Http\Controllers\Review\ReviewController;
@@ -37,6 +38,7 @@ use App\Http\Controllers\Student\StudentImportController;
 use App\Http\Controllers\SupportPackagePurchase\SupportPackagePurchaseController;
 use App\Http\Controllers\TaxonomyController;
 use App\Http\Controllers\Teacher\BadgeController;
+use App\Http\Controllers\Teacher\TeacherAvailabilityTimeController;
 use App\Http\Controllers\Teacher\TeacherController;
 use App\Http\Controllers\Accountant\AccountantController;
 use App\Http\Controllers\Employee\EmployeeController;
@@ -145,6 +147,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('teachers/{teacher}/videos', [TeacherVideoController::class, 'store']);
     Route::delete('teacher-videos/{video}', [TeacherVideoController::class, 'destroy']);
     Route::post('teachers/{teacher}/faqs', [TeacherFaqController::class, 'store']);
+    Route::put('teacher-faqs/{faq}', [TeacherFaqController::class, 'update']);
     Route::delete('teacher-faqs/{faq}', [TeacherFaqController::class, 'destroy']);
     Route::post('teachers/{teacher}/experiences', [TeacherExperienceController::class, 'store']);
     Route::put('teacher-experiences/{experience}', [TeacherExperienceController::class, 'update']);
@@ -210,6 +213,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('teachers/{teacher}/availability-slots/{slot}', [AvailabilityController::class, 'destroySlot']);
     Route::post('teachers/{teacher}/blackouts', [AvailabilityController::class, 'storeBlackout']);
     Route::delete('teachers/{teacher}/blackouts/{blackout}', [AvailabilityController::class, 'destroyBlackout']);
+
+    Route::get('teachers/{teacher}/availability-times', [TeacherAvailabilityTimeController::class, 'index']);
+    Route::post('teachers/{teacher}/availability-times', [TeacherAvailabilityTimeController::class, 'store']);
+    Route::delete('teachers/{teacher}/availability-times/{time}', [TeacherAvailabilityTimeController::class, 'destroy']);
 
     Route::get('courses', [CourseController::class, 'index']);
     Route::post('courses', [CourseController::class, 'store']);
@@ -304,6 +311,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // ترتيب مقصود: export قبل أي مسار بمعرّف لاحقاً لنفس السابقة أعلاه (export/{id})
     Route::get('reports/teacher-sessions/export', [TeacherSessionsReportController::class, 'export']);
     Route::get('reports/teacher-sessions', [TeacherSessionsReportController::class, 'index']);
+    Route::get('reports/academic-support/export', [AcademicSupportFinanceReportController::class, 'export']);
+    Route::get('reports/academic-support', [AcademicSupportFinanceReportController::class, 'index']);
 
     Route::get('me/reviews', [ReviewController::class, 'myReviews']);
     Route::get('reviews', [ReviewController::class, 'index']);

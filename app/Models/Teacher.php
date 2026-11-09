@@ -21,6 +21,9 @@ class Teacher extends Model
     /** نفس المنطق أيضاً — سجل خبرات سابقة يديره المعلم بنفسه (عنوان + فترة نصية) */
     public const MAX_EXPERIENCES = 10;
 
+    /** حدّ معقول لعدد نوافذ التوفّر الأسبوعية (3 نوافذ × 7 أيام) */
+    public const MAX_AVAILABILITY_TIMES = 21;
+
     protected $fillable = [
         'user_id',
         'teacher_type',
@@ -116,6 +119,13 @@ class Teacher extends Model
     public function experiences()
     {
         return $this->hasMany(TeacherExperience::class)->orderBy('sort_order');
+    }
+
+    public function availabilityTimes()
+    {
+        return $this->hasMany(TeacherAvailabilityTime::class)
+            ->orderBy('day_of_week')
+            ->orderBy('start_time');
     }
 
     public function badgeAwards()
