@@ -71,4 +71,10 @@ class ClassSessionPolicy
     {
         return $user->isAdmin();
     }
+
+    /** تسجيل حضور المعلم أو أحد الطلاب يدوياً أثناء الجلسة — للأدمن وحده. */
+    public function markAttendance(User $user, ClassSession $session): bool
+    {
+        return $user->isAdmin();
+    }
 }

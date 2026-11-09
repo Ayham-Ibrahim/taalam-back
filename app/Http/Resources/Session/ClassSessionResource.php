@@ -3,8 +3,10 @@
 namespace App\Http\Resources\Session;
 
 use App\Models\SessionJoinLog;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Facades\URL;
 
 /**
  * رابط الانضمام يُعرض حسب دور طالب النداء فقط — لا يُسرَّب رابط/كلمة سر
@@ -61,6 +63,10 @@ class ClassSessionResource extends JsonResource
             'pending_reschedule_request_created_at' => $pendingRescheduleRequest?->created_at,
             'join_url_teacher' => $isTeacher ? $this->join_url_teacher : null,
             'join_url_student' => $isStudent ? $this->join_url_student : null,
+            // ما يفتحه زر "انضم" فعلاً: رابط عادي يمرّ عبر المنصة (joinRedirect) فيتحقق من
+            // الموعد، ويُنشئ الغرفة إن حذفها BBB، ويسجّل الحضور ثم يحوّل لـ BBB — بلا
+            // window.open بعد await الذي يحجبه Safari/موانع النوافذ فيعيد المستخدم الكبس.
+            'join_redirect_url' => $this->joinRedirectUrl($user, $isTeacher, $isStudent),
             'teacher' => $this->whenLoaded('teacher'),
             'booking' => $this->whenLoaded('booking'),
             'course' => $this->whenLoaded('course'),
@@ -74,5 +80,26 @@ class ClassSessionResource extends JsonResource
                 fn () => ($since = SessionJoinLog::trackingStartedAt()) !== null && $this->scheduled_at?->gte($since),
             ),
         ];
+    }
+
+    private function joinRedirectUrl(?User $user, bool $isTeacher, bool $isStudent): ?string
+    {
+        $joinUrl = $isTeacher ? $this->join_url_teacher : ($isStudent ? $this->join_url_student : null);
+
+        if (! $user || ! $joinUrl || ! $this->scheduled_at || ! $this->duration_min) {
+            return null;
+        }
+
+        $endsAt = $this->scheduled_at->clone()->addMinutes($this->duration_min);
+
+        if ($endsAt->isPast()) {
+            return null;
+        }
+
+        return URL::temporarySignedRoute(
+            'class-sessions.join-redirect',
+            $endsAt,
+            ['session' => $this->id, 'user' => $user->id],
+        );
     }
 }

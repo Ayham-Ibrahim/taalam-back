@@ -66,6 +66,31 @@ class SessionJoinTest extends TestCase
         $response->assertJsonPath('data.url', $session->join_url_student);
     }
 
+    /**
+     * زر "انضم" في الفرونت رابط عادي لـ join_redirect_url (بدل window.open بعد await
+     * الذي يحجبه Safari) — موقّع لصاحب الطلب نفسه ويمرّ عبر joinRedirect فيُسجَّل انضمامه.
+     */
+    public function test_session_payload_exposes_a_signed_join_redirect_url_that_logs_the_join_and_redirects_to_bbb(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        [, $session, $studentUser] = $this->createBookingWithSession($teacher, now()->subMinutes(5));
+
+        $this->mock(BigBlueButtonService::class, function ($mock) {
+            $mock->shouldReceive('meetingExists')->once()->andReturn(true);
+        });
+
+        $url = $this->as($studentUser->createToken('t')->plainTextToken)
+            ->getJson("/api/class-sessions/{$session->id}")
+            ->assertStatus(200)
+            ->json('data.join_redirect_url');
+
+        $this->assertStringContainsString("/class-sessions/{$session->id}/join-redirect/{$studentUser->id}", $url);
+        $this->assertStringContainsString('signature=', $url);
+
+        $this->get($url)->assertRedirect($session->join_url_student);
+        $this->assertDatabaseHas('session_join_logs', ['class_session_id' => $session->id, 'user_id' => $studentUser->id]);
+    }
+
     public function test_join_returns_a_clean_arabic_error_instead_of_raw_bbb_xml_when_the_session_has_not_started_yet(): void
     {
         [$teacher, $teacherUser] = $this->createVerifiedTeacher();
@@ -221,6 +246,7 @@ class SessionJoinTest extends TestCase
         $show = $this->as($token)->getJson("/api/class-sessions/{$session->id}");
         $show->assertStatus(200);
         $this->assertNull($show->json('data.join_url_student'));
+        $this->assertNull($show->json('data.join_redirect_url'));
 
         $index = $this->as($token)->getJson('/api/class-sessions');
         $index->assertStatus(200);
