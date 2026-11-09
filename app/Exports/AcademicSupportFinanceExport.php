@@ -10,7 +10,7 @@ use Maatwebsite\Excel\Concerns\WithMultipleSheets;
 /**
  * التقرير المالي الشامل للدعم الأكاديمي — نفس أرقام AcademicSupportFinanceReportService
  * بأربع أوراق: ملخص، الداعمون (التزامات المنصة لكل داعم)، الباقات (الداعم والمواد والنسب)،
- * وتفصيل كل اشتراك مدفوع. مع $only (supporters|packages|purchases) يُصدَّر جدول واحد فقط
+ * وتفصيل كل اشتراك مدفوع — كل جدول ينتهي بصف إجمالي لأعمدته الرقمية. مع $only (supporters|packages|purchases) يُصدَّر جدول واحد فقط
  * (زر التصدير داخل كل تاب بالواجهة).
  */
 class AcademicSupportFinanceExport implements WithMultipleSheets
@@ -94,7 +94,16 @@ class AcademicSupportFinanceExport implements WithMultipleSheets
             $row['discountAmount'],
             $row['supporterAmount'],
             $row['platformAmount'],
-        ], $supporters));
+        ], $supporters), [
+            'الإجمالي',
+            $this->sum($supporters, 'packagesCount'),
+            '',
+            $this->sum($supporters, 'purchasesCount'),
+            $this->sum($supporters, 'studentsPaid'),
+            $this->sum($supporters, 'discountAmount'),
+            $this->sum($supporters, 'supporterAmount'),
+            $this->sum($supporters, 'platformAmount'),
+        ]);
     }
 
     private function packagesSheet(array $packages): ReportSheet
@@ -125,7 +134,14 @@ class AcademicSupportFinanceExport implements WithMultipleSheets
             $row['discountAmount'],
             $row['supporterAmount'],
             $row['platformAmount'],
-        ], $packages));
+        ], $packages), [
+            'الإجمالي', '', '', '', '', '', '',
+            $this->sum($packages, 'purchasesCount'),
+            $this->sum($packages, 'studentsPaid'),
+            $this->sum($packages, 'discountAmount'),
+            $this->sum($packages, 'supporterAmount'),
+            $this->sum($packages, 'platformAmount'),
+        ]);
     }
 
     private function purchasesSheet(array $purchases): ReportSheet
@@ -164,6 +180,23 @@ class AcademicSupportFinanceExport implements WithMultipleSheets
             $row['platformPercent'],
             $row['platformAmount'],
             $row['currency'],
-        ], $purchases));
+        ], $purchases), [
+            'الإجمالي', '', '', '', '', '', '',
+            $this->sum($purchases, 'listPrice'),
+            '',
+            $this->sum($purchases, 'discountAmount'),
+            $this->sum($purchases, 'amountPaid'),
+            '',
+            $this->sum($purchases, 'supporterAmount'),
+            '',
+            $this->sum($purchases, 'platformAmount'),
+            '',
+        ]);
+    }
+
+    /** مجموع عمود لصف الإجمالي — القيم الفارغة (مثل خصم غير موجود) تُحسب صفراً */
+    private function sum(array $rows, string $key): float|int
+    {
+        return round(array_sum(array_map(fn (array $row) => $row[$key] ?? 0, $rows)), 2);
     }
 }

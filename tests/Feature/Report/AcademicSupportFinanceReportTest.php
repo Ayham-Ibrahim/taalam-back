@@ -135,9 +135,13 @@ class AcademicSupportFinanceReportTest extends TestCase
 
         Excel::assertDownloaded('academic-support-finance-report.xlsx', function (AcademicSupportFinanceExport $export) {
             $sheets = $export->sheets();
+            $purchaseRows = $sheets[3]->array();
 
             return array_map(fn ($sheet) => $sheet->title(), $sheets) === ['ملخص', 'الداعمون', 'الباقات', 'تفاصيل الاشتراكات']
-                && count($sheets[3]->array()) === 1;
+                // صف الاشتراك + صف الإجمالي
+                && count($purchaseRows) === 2
+                && $purchaseRows[1][0] === 'الإجمالي'
+                && $purchaseRows[1][10] == 300;
         });
     }
 
