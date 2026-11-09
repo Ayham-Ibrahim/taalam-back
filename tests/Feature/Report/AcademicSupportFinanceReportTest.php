@@ -141,6 +141,28 @@ class AcademicSupportFinanceReportTest extends TestCase
         });
     }
 
+    public function test_export_can_download_a_single_table(): void
+    {
+        Excel::fake();
+
+        $this->purchase($this->createPackage($this->createSupporter('داعم'), 300, 50), now());
+        $token = User::factory()->admin()->create()->createToken('t')->plainTextToken;
+
+        $this->withToken($token)
+            ->get('/api/reports/academic-support/export?sheet=packages')
+            ->assertOk();
+
+        Excel::assertDownloaded('academic-support-packages.xlsx', function (AcademicSupportFinanceExport $export) {
+            $sheets = $export->sheets();
+
+            return count($sheets) === 1 && $sheets[0]->title() === 'الباقات';
+        });
+
+        $this->withToken($token)
+            ->getJson('/api/reports/academic-support/export?sheet=bogus')
+            ->assertUnprocessable();
+    }
+
     private function createSupporter(string $name): AcademicSupporter
     {
         $user = User::factory()->create(['role' => 'academic_support', 'name' => $name]);

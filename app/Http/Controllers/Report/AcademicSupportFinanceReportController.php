@@ -33,10 +33,15 @@ class AcademicSupportFinanceReportController extends Controller
         $this->authorize('view-finance-reports');
 
         $this->validateFilters($request);
+        $request->validate([
+            'sheet' => ['nullable', 'in:'.implode(',', AcademicSupportFinanceExport::SINGLE_SHEETS)],
+        ]);
+
+        $sheet = $request->input('sheet');
 
         return Excel::download(
-            new AcademicSupportFinanceExport($this->reportService, $request->only(['from', 'to', 'supporter_id'])),
-            'academic-support-finance-report.xlsx',
+            new AcademicSupportFinanceExport($this->reportService, $request->only(['from', 'to', 'supporter_id']), $sheet),
+            $sheet ? "academic-support-{$sheet}.xlsx" : 'academic-support-finance-report.xlsx',
         );
     }
 

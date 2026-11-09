@@ -10,15 +10,19 @@ use Maatwebsite\Excel\Concerns\WithMultipleSheets;
 /**
  * التقرير المالي الشامل للدعم الأكاديمي — نفس أرقام AcademicSupportFinanceReportService
  * بأربع أوراق: ملخص، الداعمون (التزامات المنصة لكل داعم)، الباقات (الداعم والمواد والنسب)،
- * وتفصيل كل اشتراك مدفوع.
+ * وتفصيل كل اشتراك مدفوع. مع $only (supporters|packages|purchases) يُصدَّر جدول واحد فقط
+ * (زر التصدير داخل كل تاب بالواجهة).
  */
 class AcademicSupportFinanceExport implements WithMultipleSheets
 {
+    public const SINGLE_SHEETS = ['supporters', 'packages', 'purchases'];
+
     private const TIER_LABELS = ['basic' => 'أساسية', 'premium' => 'شاملة'];
 
     public function __construct(
         private readonly AcademicSupportFinanceReportService $reportService,
         private readonly array $filters = [],
+        private readonly ?string $only = null,
     ) {}
 
     public function sheets(): array
@@ -29,6 +33,16 @@ class AcademicSupportFinanceExport implements WithMultipleSheets
             ! empty($this->filters['supporter_id']) ? (int) $this->filters['supporter_id'] : null,
         );
 
+        return match ($this->only) {
+            'supporters' => [$this->supportersSheet($report['supporters'])],
+            'packages' => [$this->packagesSheet($report['packages'])],
+            'purchases' => [$this->purchasesSheet($report['purchases'])],
+            default => $this->allSheets($report),
+        };
+    }
+
+    private function allSheets(array $report): array
+    {
         return [
             $this->summarySheet($report),
             $this->supportersSheet($report['supporters']),
