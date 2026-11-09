@@ -21,7 +21,7 @@ class CoursePolicy
     {
         $teacher = $user->loadMissing('teacher')->teacher;
 
-        return $teacher !== null && $teacher->isVerified() && $teacher->isTrainingCenter();
+        return $teacher !== null && $teacher->isVerified() && $teacher->canOfferCourses();
     }
 
     public function update(User $user, Course $course): bool

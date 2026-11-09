@@ -2,6 +2,8 @@
 
 namespace Tests\Feature\Search;
 
+use App\Models\Course;
+use App\Models\CourseField;
 use App\Models\Language;
 use App\Models\Package;
 use App\Models\Stage;
@@ -36,6 +38,28 @@ class TeacherSearchTest extends TestCase
         $response->assertStatus(200);
         $this->assertCount(1, $response->json('data'));
         $this->assertSame('training_center', $response->json('data.0.teacher_type'));
+    }
+
+    public function test_training_center_search_includes_university_teachers_with_published_courses(): void
+    {
+        $center = $this->createTeacher('training_center', 'verified', ranking: 30);
+        $universityWithCourse = $this->createTeacher('university', 'verified', ranking: 20);
+        $this->createCourse($universityWithCourse, 'active');
+
+        // مدرس جامعي بلا دورة، وآخر دورته مسودة لم تُنشر — لا يظهران
+        $this->createTeacher('university', 'verified', ranking: 10);
+        $universityWithDraft = $this->createTeacher('university', 'verified', ranking: 5);
+        $this->createCourse($universityWithDraft, 'draft');
+
+        $this->createTeacher('school', 'verified', ranking: 40);
+
+        $response = $this->getJson('/api/teachers/search?teacher_type=training_center');
+
+        $response->assertStatus(200);
+        $this->assertSame([$center->id, $universityWithCourse->id], collect($response->json('data'))->pluck('id')->all());
+
+        // بحث الجامعيين نفسه لا يتغيّر: كل المدرسين الجامعيين
+        $this->assertCount(3, $this->getJson('/api/teachers/search?teacher_type=university')->json('data'));
     }
 
     public function test_search_orders_by_ranking_score_descending(): void
@@ -194,6 +218,28 @@ class TeacherSearchTest extends TestCase
             'platform_revenue' => $studentPrice * 0.4,
             'status' => 'active',
             'approved_at' => now(),
+        ]);
+    }
+
+    private function createCourse(Teacher $teacher, string $status): Course
+    {
+        return Course::create([
+            'teacher_id' => $teacher->id,
+            'title' => 'دورة',
+            'course_field_id' => CourseField::create(['code' => 'cf-'.uniqid(), 'name_ar' => 'مجال'])->id,
+            'start_date' => now()->addWeek()->toDateString(),
+            'end_date' => now()->addMonth()->toDateString(),
+            'total_sessions' => 5,
+            'max_seats' => 10,
+            'provider_price' => 100,
+            'platform_margin_percent' => 50,
+            'student_price' => 150,
+            'platform_revenue' => 50,
+            'status' => $status,
+            'requires_laptop' => false,
+            'materials_included' => true,
+            'has_practical_exercises' => true,
+            'sessions_recorded' => false,
         ]);
     }
 

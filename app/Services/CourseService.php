@@ -13,15 +13,15 @@ class CourseService
 
     public function createDraft(Teacher $teacher, array $data): Course
     {
-        if (! $teacher->isTrainingCenter()) {
+        if (! $teacher->canOfferCourses()) {
             throw ValidationException::withMessages([
-                'teacher_type' => ['الدورات التدريبية حصراً لحسابات المراكز التدريبية'],
+                'teacher_type' => ['الدورات التدريبية حصراً لحسابات المراكز التدريبية والمدرسين الجامعيين'],
             ]);
         }
 
         if (! $teacher->isVerified()) {
             throw ValidationException::withMessages([
-                'teacher_status' => ['يجب توثيق حساب المركز أولاً قبل إنشاء دورة'],
+                'teacher_status' => ['يجب توثيق الحساب أولاً قبل إنشاء دورة'],
             ]);
         }
 

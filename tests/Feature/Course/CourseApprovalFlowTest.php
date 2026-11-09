@@ -141,6 +141,27 @@ class CourseApprovalFlowTest extends TestCase
         $response->assertStatus(422)->assertJsonValidationErrors(['end_date']);
     }
 
+    public function test_verified_university_teacher_can_create_course(): void
+    {
+        [, $teacherToken] = $this->createVerifiedTeacher('university');
+        $field = CourseField::create(['code' => 'uni', 'name_ar' => 'برمجة']);
+
+        $response = $this->as($teacherToken)->postJson('/api/courses', [
+            'title' => 'دورة من مدرس جامعي',
+            'course_field_id' => $field->id,
+            'start_date' => '2026-12-01',
+            'end_date' => '2026-12-10',
+            'total_sessions' => 5,
+            'max_seats' => 10,
+            'provider_price' => 100,
+            'pricing_mode' => 'total',
+            ...$this->courseInfoFlags(),
+            'has_certificate' => false,
+        ]);
+
+        $response->assertStatus(201)->assertJsonPath('data.status', 'draft');
+    }
+
     public function test_school_teacher_cannot_create_course(): void
     {
         [, $teacherToken] = $this->createVerifiedTeacher('school');

@@ -174,6 +174,18 @@ class Teacher extends Model
         return $this->teacher_type === 'training_center';
     }
 
+    /**
+     * من يحق له إنشاء دورات تدريبية: المركز التدريبي (دورات فقط)، والمدرس الجامعي حصراً
+     * (دورات إضافة إلى باقاته). مدرس المدارس لا. نفس القاعدة مفروضة بالـ trigger
+     * trg_courses_teacher_type بقاعدة البيانات.
+     */
+    public const COURSE_PROVIDER_TYPES = ['training_center', 'university'];
+
+    public function canOfferCourses(): bool
+    {
+        return in_array($this->teacher_type, self::COURSE_PROVIDER_TYPES, true);
+    }
+
     public function isVerified(): bool
     {
         return $this->status === 'verified';

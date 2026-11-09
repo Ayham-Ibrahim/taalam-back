@@ -25,7 +25,18 @@ class TeacherSearchController extends Controller
         $teachers = Teacher::query()
             ->select(['id', 'user_id', 'teacher_type', 'bio', 'city', 'qualification', 'experience_years', 'rating_avg', 'reviews_count', 'ranking_score', 'profile_completeness'])
             ->where('status', 'verified')
-            ->when($filters['teacher_type'] ?? null, fn ($q, $type) => $q->where('teacher_type', $type))
+            ->when($filters['teacher_type'] ?? null, function ($q, $type) {
+                if ($type !== 'training_center') {
+                    return $q->where('teacher_type', $type);
+                }
+
+                // صفحة البحث عن المراكز التدريبية تعرض أيضاً المدرسين الجامعيين الذين
+                // يقدّمون دورات تدريبية ظاهرة للطلاب فعلاً (منشورة وغير منتهية) — لا كل
+                // مدرس جامعي، فمن ليس له دورة لا مكان له بنتائج الدورات.
+                $q->where(fn ($tq) => $tq->where('teacher_type', 'training_center')
+                    ->orWhere(fn ($uq) => $uq->where('teacher_type', 'university')
+                        ->whereHas('courses', fn ($cq) => $cq->whereIn('status', Course::PUBLIC_STATUSES)->notEnded())));
+            })
             ->when($filters['city'] ?? null, fn ($q, $city) => $q->where('city', $city))
             ->when($filters['q'] ?? null, function ($q, $search) {
                 $q->whereHas('user', fn ($uq) => $uq->where('name', 'like', "%{$search}%"));
