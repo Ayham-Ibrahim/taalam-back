@@ -26,6 +26,7 @@ use App\Http\Controllers\SupportPackage\SupportPackageController;
 use App\Http\Controllers\Payment\PaymentWebhookController;
 use App\Http\Controllers\Payout\PayoutController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\Report\AcademicSupportFinanceReportController;
 use App\Http\Controllers\Report\TeacherSessionsReportController;
 use App\Http\Controllers\Reschedule\RescheduleRequestController;
 use App\Http\Controllers\Review\ReviewController;
@@ -292,6 +293,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // ترتيب مقصود: export قبل أي مسار بمعرّف لاحقاً لنفس السابقة أعلاه (export/{id})
     Route::get('reports/teacher-sessions/export', [TeacherSessionsReportController::class, 'export']);
     Route::get('reports/teacher-sessions', [TeacherSessionsReportController::class, 'index']);
+    Route::get('reports/academic-support/export', [AcademicSupportFinanceReportController::class, 'export']);
+    Route::get('reports/academic-support', [AcademicSupportFinanceReportController::class, 'index']);
 
     Route::get('me/reviews', [ReviewController::class, 'myReviews']);
     Route::get('reviews', [ReviewController::class, 'index']);
