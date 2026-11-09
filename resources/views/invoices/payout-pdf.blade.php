@@ -137,9 +137,6 @@
             <td style="text-align:left; direction:ltr;">
                 <h3 style="text-align:left;">تفاصيل الكشف</h3>
                 <p>تاريخ الإصدار: {{ $issueDate }}</p>
-                @if($transferReference)
-                    <p>الرقم المرجعي للتحويل: {{ $transferReference }}</p>
-                @endif
                 <p>
                     <span class="status-badge">{{ $statusLabel }}</span>
                 </p>

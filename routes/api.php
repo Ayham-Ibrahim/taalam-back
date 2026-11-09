@@ -41,6 +41,8 @@ use App\Http\Controllers\Teacher\BadgeController;
 use App\Http\Controllers\Teacher\TeacherAvailabilityTimeController;
 use App\Http\Controllers\Teacher\TeacherController;
 use App\Http\Controllers\Accountant\AccountantController;
+use App\Http\Controllers\Employee\EmployeeController;
+use App\Http\Controllers\Employee\EmployeePayrollController;
 use App\Http\Controllers\Teacher\TeacherExperienceController;
 use App\Http\Controllers\Teacher\TeacherFaqController;
 use App\Http\Controllers\Teacher\TeacherImportController;
@@ -289,6 +291,22 @@ Route::middleware('auth:sanctum')->group(function () {
     // كان يُنتج كشوفاً متداخلة ومتكررة لنفس المعلم بفترات مختلفة.
     Route::post('payouts/generate', [PayoutController::class, 'generate']);
     Route::post('payouts/{payout}/mark-paid', [PayoutController::class, 'markPaid']);
+
+    // الموظفون الإداريون ورواتبهم الشهرية (الأدمن والمحاسب — EmployeePolicy). المسارات الحرفية
+    // (report/export/generate) قبل payroll/{salary} لنفس سبب payouts/export أعلاه.
+    Route::get('employees', [EmployeeController::class, 'index']);
+    Route::post('employees', [EmployeeController::class, 'store']);
+    Route::get('employees/{employee}', [EmployeeController::class, 'show']);
+    Route::put('employees/{employee}', [EmployeeController::class, 'update']);
+    Route::delete('employees/{employee}', [EmployeeController::class, 'destroy']);
+    Route::post('employees/{employee}/adjustments', [EmployeeController::class, 'storeAdjustment']);
+    Route::delete('employee-adjustments/{adjustment}', [EmployeeController::class, 'destroyAdjustment']);
+    Route::get('payroll/report/export', [EmployeePayrollController::class, 'exportReport']);
+    Route::get('payroll/report', [EmployeePayrollController::class, 'report']);
+    Route::get('payroll/export', [EmployeePayrollController::class, 'export']);
+    Route::post('payroll/generate', [EmployeePayrollController::class, 'generate']);
+    Route::get('payroll', [EmployeePayrollController::class, 'index']);
+    Route::post('payroll/{salary}/mark-paid', [EmployeePayrollController::class, 'markPaid']);
 
     // ترتيب مقصود: export قبل أي مسار بمعرّف لاحقاً لنفس السابقة أعلاه (export/{id})
     Route::get('reports/teacher-sessions/export', [TeacherSessionsReportController::class, 'export']);
