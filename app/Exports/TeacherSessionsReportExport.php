@@ -2,20 +2,26 @@
 
 namespace App\Exports;
 
+use App\Exports\Concerns\ArabicSheetStyling;
 use App\Services\TeacherSessionsReportService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\FromCollection;
+use Maatwebsite\Excel\Concerns\ShouldAutoSize;
+use Maatwebsite\Excel\Concerns\WithEvents;
 use Maatwebsite\Excel\Concerns\WithHeadings;
 use Maatwebsite\Excel\Concerns\WithMapping;
+use Maatwebsite\Excel\Concerns\WithStrictNullComparison;
 
 /**
  * صف واحد لكل معلم (بيانات مُجمَّعة أصلاً من TeacherSessionsReportService، لا
  * استعلام خام) — FromCollection لا FromQuery عمداً، خلافاً لـ PayoutsExport،
  * لأن عدد المعلمين صغير مقارنة بعدد الحجوزات/المستحقات.
  */
-class TeacherSessionsReportExport implements FromCollection, WithHeadings, WithMapping
+class TeacherSessionsReportExport implements FromCollection, ShouldAutoSize, WithEvents, WithHeadings, WithMapping, WithStrictNullComparison
 {
+    use ArabicSheetStyling;
+
     public function __construct(
         private readonly TeacherSessionsReportService $reportService,
         private readonly array $filters = [],
@@ -60,5 +66,10 @@ class TeacherSessionsReportExport implements FromCollection, WithHeadings, WithM
             $row['settlementsAmount'],
             $row['platformRevenue'],
         ];
+    }
+
+    protected function totalColumns(): array
+    {
+        return ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'];
     }
 }

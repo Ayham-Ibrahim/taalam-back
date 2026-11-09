@@ -149,10 +149,10 @@ class PayoutService
     }
 
     /**
-     * للكشف حالتان فقط: غير مدفوع (pending) عند التوليد، ومدفوع (paid) بهذا الزر مع مرجع التحويل —
-     * لا خطوة اعتماد وسيطة. التحويل مرة واحدة: كشف مدفوع لا يُعاد تحويله.
+     * للكشف حالتان فقط: غير مدفوع (pending) عند التوليد، ومدفوع (paid) بهذا الزر — مرجع التحويل
+     * اختياري. لا خطوة اعتماد وسيطة. التحويل مرة واحدة: كشف مدفوع لا يُعاد تحويله.
      */
-    public function markPaid(Payout $payout, string $transferReference): Payout
+    public function markPaid(Payout $payout, ?string $transferReference = null): Payout
     {
         if ($payout->status !== 'pending') {
             throw ValidationException::withMessages([

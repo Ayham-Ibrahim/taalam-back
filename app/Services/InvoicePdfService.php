@@ -104,9 +104,7 @@ class InvoicePdfService
             'deductions' => (float) $payout->deductions,
             'netAmount' => (float) $payout->net_amount,
             'currency' => $payout->currency,
-            'statusLabel' => $this->payoutStatusLabel($payout->status),
-            'transferReference' => $payout->transfer_reference,
-        ], 'invoices.payout-pdf');
+            'statusLabel' => $this->payoutStatusLabel($payout->status),        ], 'invoices.payout-pdf');
     }
 
     private function payoutStatusLabel(string $status): string
