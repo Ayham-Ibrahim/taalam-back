@@ -46,7 +46,6 @@ class PayoutsExport implements FromQuery, WithHeadings, WithMapping
             'العملة',
             'الحالة',
             'تاريخ الدفع',
-            'الرقم المرجعي للتحويل',
         ];
     }
 
@@ -65,7 +64,6 @@ class PayoutsExport implements FromQuery, WithHeadings, WithMapping
             $payout->currency,
             $this->statusLabel($payout->status),
             $payout->paid_at?->format('Y-m-d H:i'),
-            $payout->transfer_reference,
         ];
     }
 

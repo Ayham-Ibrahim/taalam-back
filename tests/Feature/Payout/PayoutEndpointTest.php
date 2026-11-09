@@ -134,7 +134,7 @@ class PayoutEndpointTest extends TestCase
             ->first();
 
         $this->assertSame('مادة', $row[2]);
-        $this->assertCount(13, $row);
+        $this->assertCount(12, $row);
     }
 
     public function test_payout_details_list_its_items_with_attendance_only_for_finance(): void
@@ -177,7 +177,7 @@ class PayoutEndpointTest extends TestCase
             ->assertStatus(403);
     }
 
-    public function test_mark_paid_requires_a_transfer_reference_and_succeeds_when_provided(): void
+    public function test_mark_paid_succeeds_without_a_transfer_reference_and_only_once(): void
     {
         $admin = User::factory()->admin()->create();
         $adminToken = $admin->createToken('t')->plainTextToken;
@@ -191,18 +191,15 @@ class PayoutEndpointTest extends TestCase
         // لا اعتماد — المسار أُزيل، والتحويل مباشرة من غير مدفوع
         $this->withHeader('Authorization', "Bearer {$adminToken}")->postJson("/api/payouts/{$payoutId}/approve")->assertStatus(404);
 
-        $withoutReference = $this->withHeader('Authorization', "Bearer {$adminToken}")
-            ->postJson("/api/payouts/{$payoutId}/mark-paid", []);
-        $withoutReference->assertStatus(422);
-
-        $withReference = $this->withHeader('Authorization', "Bearer {$adminToken}")
-            ->postJson("/api/payouts/{$payoutId}/mark-paid", ['transfer_reference' => 'REF-123']);
-        $withReference->assertStatus(200);
+        // مرجع التحويل اختياري
+        $this->withHeader('Authorization', "Bearer {$adminToken}")
+            ->postJson("/api/payouts/{$payoutId}/mark-paid", [])
+            ->assertStatus(200);
         $this->assertSame('paid', \App\Models\Payout::find($payoutId)->status);
 
         // مدفوع مرة واحدة فقط
         $this->withHeader('Authorization', "Bearer {$adminToken}")
-            ->postJson("/api/payouts/{$payoutId}/mark-paid", ['transfer_reference' => 'REF-456'])
+            ->postJson("/api/payouts/{$payoutId}/mark-paid", [])
             ->assertStatus(422);
     }
 
