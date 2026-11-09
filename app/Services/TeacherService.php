@@ -283,16 +283,14 @@ class TeacherService
     {
         if ($teacher->experiences()->count() >= Teacher::MAX_EXPERIENCES) {
             throw ValidationException::withMessages([
-                'experiences' => ['لا يمكن إضافة أكثر من '.Teacher::MAX_EXPERIENCES.' خبرات — احذف خبرة قديمة أولاً.'],
+                'experiences' => [$teacher->isTrainingCenter()
+                    ? 'لا يمكن إضافة أكثر من '.Teacher::MAX_EXPERIENCES.' دورات — احذف دورة قديمة أولاً.'
+                    : 'لا يمكن إضافة أكثر من '.Teacher::MAX_EXPERIENCES.' خبرات — احذف خبرة قديمة أولاً.'],
             ]);
         }
 
         $experience = $teacher->experiences()->create([
-            'title' => $data['title'],
-            'company' => $data['company'] ?? null,
-            'period' => $data['period'],
-            'location' => $data['location'] ?? null,
-            'description' => $data['description'] ?? null,
+            ...$this->experienceAttributes($teacher, $data),
             'sort_order' => ($teacher->experiences()->max('sort_order') ?? -1) + 1,
         ]);
 
@@ -305,17 +303,28 @@ class TeacherService
     {
         $before = ['title' => $experience->title];
 
-        $experience->update([
-            'title' => $data['title'],
-            'company' => $data['company'] ?? null,
-            'period' => $data['period'],
-            'location' => $data['location'] ?? null,
-            'description' => $data['description'] ?? null,
-        ]);
+        $experience->update($this->experienceAttributes($experience->teacher, $data));
 
         $this->audit('teacher.experience_updated', $experience, $before, ['title' => $experience->title]);
 
         return $experience;
+    }
+
+    /**
+     * للمركز التدريبي القسم هو "الدورات المتاحة": اسم الدورة ووصفها فقط — الجهة والموقع
+     * والفترة لا معنى لها فتُفرَّغ (حتى لا تبقى قيم برامج سابقة قديمة عند التعديل).
+     */
+    private function experienceAttributes(Teacher $teacher, array $data): array
+    {
+        $isCenter = $teacher->isTrainingCenter();
+
+        return [
+            'title' => $data['title'],
+            'company' => $isCenter ? null : ($data['company'] ?? null),
+            'period' => $isCenter ? null : $data['period'],
+            'location' => $isCenter ? null : ($data['location'] ?? null),
+            'description' => $data['description'] ?? null,
+        ];
     }
 
     public function removeExperience(TeacherExperience $experience): void

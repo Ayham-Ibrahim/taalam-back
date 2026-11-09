@@ -33,6 +33,41 @@ class TeacherExperiencesTest extends TestCase
         $this->assertDatabaseMissing('teacher_experiences', ['id' => $experienceId]);
     }
 
+    public function test_training_center_adds_offered_courses_with_name_and_description_only(): void
+    {
+        $user = User::factory()->teacher()->create();
+        $center = Teacher::create(['user_id' => $user->id, 'teacher_type' => 'training_center', 'status' => 'verified']);
+        $token = $user->createToken('t')->plainTextToken;
+
+        // بلا فترة: مقبول للمركز — لكن الوصف إلزامي
+        $this->as($token)->postJson("/api/teachers/{$center->id}/experiences", ['title' => 'دورة إدارة المشاريع'])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['description'])
+            ->assertJsonMissingValidationErrors(['period']);
+
+        $add = $this->as($token)->postJson("/api/teachers/{$center->id}/experiences", [
+            'title' => 'دورة إدارة المشاريع',
+            'description' => 'تأهيل لاختبار PMP مع تطبيقات عملية',
+            'company' => 'تُتجاهَل للمركز',
+            'period' => '2020',
+        ]);
+
+        $add->assertStatus(201);
+        $this->assertDatabaseHas('teacher_experiences', [
+            'id' => $add->json('data.id'),
+            'title' => 'دورة إدارة المشاريع',
+            'description' => 'تأهيل لاختبار PMP مع تطبيقات عملية',
+            'company' => null,
+            'period' => null,
+        ]);
+
+        // المدرس العادي: الفترة ما زالت إلزامية
+        [$teacher, $teacherToken] = $this->createTeacher();
+        $this->as($teacherToken)->postJson("/api/teachers/{$teacher->id}/experiences", ['title' => 'خبرة'])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['period']);
+    }
+
     public function test_experiences_appear_on_the_public_profile_of_a_verified_teacher(): void
     {
         $user = User::factory()->teacher()->create();

@@ -16,14 +16,24 @@ class AddTeacherExperienceRequest extends FormRequest
         return [
             'title' => ['required', 'string', 'max:200'],
             'company' => ['nullable', 'string', 'max:200'],
-            'period' => ['required', 'string', 'max:100'],
+            // المركز التدريبي: "دورة متاحة" = الاسم + الوصف (إلزامي) بلا فترة؛ المدرس: خبرة بفترة إلزامية
+            'period' => [$this->isTrainingCenter() ? 'nullable' : 'required', 'string', 'max:100'],
             'location' => ['nullable', 'string', 'max:150'],
-            'description' => ['nullable', 'string', 'max:2000'],
+            'description' => [$this->isTrainingCenter() ? 'required' : 'nullable', 'string', 'max:2000'],
         ];
+    }
+
+    private function isTrainingCenter(): bool
+    {
+        return (bool) $this->route('teacher')?->isTrainingCenter();
     }
 
     public function attributes(): array
     {
+        if ($this->isTrainingCenter()) {
+            return ['title' => 'اسم الدورة', 'description' => 'وصف الدورة'];
+        }
+
         return [
             'title' => 'المسمى',
             'company' => 'الشركة أو الجهة أو المؤسسة',
