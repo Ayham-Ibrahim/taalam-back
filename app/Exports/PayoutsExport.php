@@ -2,18 +2,24 @@
 
 namespace App\Exports;
 
+use App\Exports\Concerns\ArabicSheetStyling;
 use App\Models\Payout;
 use Maatwebsite\Excel\Concerns\FromQuery;
+use Maatwebsite\Excel\Concerns\ShouldAutoSize;
+use Maatwebsite\Excel\Concerns\WithEvents;
 use Maatwebsite\Excel\Concerns\WithHeadings;
 use Maatwebsite\Excel\Concerns\WithMapping;
+use Maatwebsite\Excel\Concerns\WithStrictNullComparison;
 
 /**
  * أول ميزة تصدير Excel في المشروع (maatwebsite/excel كان يُستخدم للاستيراد
  * فقط سابقاً — StudentsImport/TeachersImport). FromQuery لا FromCollection
  * عمداً كي لا يُحمَّل كل جدول payouts في الذاكرة دفعة واحدة على حساب طويل.
  */
-class PayoutsExport implements FromQuery, WithHeadings, WithMapping
+class PayoutsExport implements FromQuery, ShouldAutoSize, WithEvents, WithHeadings, WithMapping, WithStrictNullComparison
 {
+    use ArabicSheetStyling;
+
     public function __construct(private readonly array $filters = []) {}
 
     public function query()
@@ -89,5 +95,10 @@ class PayoutsExport implements FromQuery, WithHeadings, WithMapping
             'paid' => 'مدفوعة',
             default => $status,
         };
+    }
+
+    protected function totalColumns(): array
+    {
+        return ['F', 'G', 'H', 'I'];
     }
 }
