@@ -15,7 +15,7 @@ class MarkPayoutPaidRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'transfer_reference' => ['required', 'string', 'max:120'],
+            'transfer_reference' => ['nullable', 'string', 'max:120'],
         ];
     }
 }

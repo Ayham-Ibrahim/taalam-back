@@ -20,7 +20,6 @@ class PayoutResource extends JsonResource
             'status' => $this->status,
             'approvedAt' => optional($this->approved_at)->toDateString(),
             'paidAt' => optional($this->paid_at)->toDateString(),
-            'transferReference' => $this->transfer_reference,
         ];
     }
 }
