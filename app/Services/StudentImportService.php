@@ -158,6 +158,7 @@ class StudentImportService
             'birth_date' => $this->normalizeValue($row['birth_date'] ?? null),
             'guardian_name' => $this->normalizeValue($row['guardian_name'] ?? null),
             'guardian_phone' => $this->normalizeValue($row['guardian_phone'] ?? null),
+            'timezone' => $this->normalizeValue($row['timezone'] ?? null),
         ];
 
         $validator = Validator::make($normalized, [
@@ -178,6 +179,7 @@ class StudentImportService
             'birth_date' => ['nullable', 'date'],
             'guardian_name' => ['nullable', 'string', 'max:150', new NotSpreadsheetFormula],
             'guardian_phone' => ['nullable', 'string', 'max:25'],
+            'timezone' => ['nullable', 'string', 'max:64', 'timezone:all_with_bc'],
         ]);
 
         if ($validator->fails()) {

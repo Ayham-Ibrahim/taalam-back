@@ -658,9 +658,17 @@ class BookingService
     /**
      * عمداً update() وليس increment() — increment() ينفّذ UPDATE مباشراً في قاعدة
      * البيانات متجاوزاً حدث saving، فلا يعمل PackageObserver (الإغلاق التلقائي عند full).
+     *
+     * الباقة الفردية لا نصاب لها (راجع PackageObserver) — capacity=1 فيها، وقيد
+     * chk_packages_enrolled (enrolled_count <= capacity) كان يُفشل تأكيد ثاني حجز
+     * على نفس الباقة (موافقة المعلم على المجانية، أو webhook الدفع على المدفوعة).
      */
     private function incrementEnrolledCount(Package $package): void
     {
+        if ($package->isIndividual()) {
+            return;
+        }
+
         $package->update(['enrolled_count' => $package->enrolled_count + 1]);
     }
 

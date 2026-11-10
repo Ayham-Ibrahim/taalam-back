@@ -20,6 +20,8 @@ class InviteTeacherRequest extends FormRequest
             'email' => ['required', 'email', 'max:150', 'unique:users,email'],
             'phone' => ['nullable', 'string', 'max:25', 'unique:users,phone'],
             'teacher_type' => ['required', Rule::in(['school', 'university', 'training_center'])],
+            // يختارها الأدمن من القائمة — يستبدلها متصفح المعلم لاحقاً عند قبول الدعوة
+            'timezone' => ['nullable', 'string', 'max:64', 'timezone:all_with_bc'],
         ];
     }
 }

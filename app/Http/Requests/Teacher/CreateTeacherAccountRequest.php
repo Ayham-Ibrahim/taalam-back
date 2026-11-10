@@ -25,6 +25,8 @@ class CreateTeacherAccountRequest extends FormRequest
             'phone' => ['nullable', 'string', 'max:25', 'regex:/^\+?\d{7,24}$/', 'unique:users,phone'],
             'teacher_type' => ['required', Rule::in(['school', 'university', 'training_center'])],
             'password' => ['required', Password::defaults()],
+            // يختارها الأدمن من القائمة — بلا قيمة تبقى الافتراضية (Asia/Riyadh)
+            'timezone' => ['nullable', 'string', 'max:64', 'timezone:all_with_bc'],
         ];
     }
 
