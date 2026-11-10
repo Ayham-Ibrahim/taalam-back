@@ -59,7 +59,7 @@ class ClassSessionController extends Controller
             ->with(self::eagerLoad())
             ->withStudentPaidAccess($request->user())
             // has_makeup: زر "إنشاء جلسة تعويضية" لدى الأدمن يختفي بعد إنشائها (تعويضية واحدة لكل جلسة)
-            ->when($request->user()->isAdmin(), fn ($q) => $q->with(self::JOIN_LOGS_RELATION)->withExists('makeupSessions as has_makeup'))
+            ->when($request->user()->isAdmin(), fn ($q) => $q->with([self::JOIN_LOGS_RELATION, ...self::STUDENT_TIMEZONE_RELATIONS])->withExists('makeupSessions as has_makeup'))
             // الافتراضي desc (الأحدث تاريخاً أولاً) يبقى كما كان لأي طرف آخر يعتمد
             // عليه ضمناً — sort=asc صريح (الأقرب موعداً أولاً) يطلبه استدعاء
             // "جلساتي" في لوحة الطالب تحديداً.
@@ -213,6 +213,9 @@ class ClassSessionController extends Controller
     /** سجل الانضمام يظهر للأدمن فقط — لا يُحمَّل (فلا يظهر في الاستجابة) لغيره */
     private const JOIN_LOGS_RELATION = 'joinLogs:id,class_session_id,user_id,role,student_id,first_joined_at,last_joined_at,join_count';
 
+    /** ClassSession::studentTimezone لقائمة الأدمن دفعة واحدة — بلا استعلام لكل جلسة */
+    private const STUDENT_TIMEZONE_RELATIONS = ['booking.student:id,user_id', 'booking.student.user:id,timezone'];
+
     private static function eagerLoad(): array
     {
         return [
@@ -288,9 +291,9 @@ class ClassSessionController extends Controller
      */
     public function reschedule(RescheduleSessionRequest $request, ClassSession $session)
     {
-        // الموعد يُخزَّن بتوقيت التطبيق (UTC) — نصّ ISO بإزاحة توقيت (+03:00)
-        // يُحوَّل هنا صراحة، وإلا يُحفَظ رقم الساعة المحلي كما هو على أنه UTC.
-        $newTime = Carbon::parse($request->validated('scheduled_at'))->setTimezone(config('app.timezone'));
+        // الوقت يصل نصّاً محلياً خاماً بلا إزاحة، ويُفسَّر بمنطقة الطالب الزمنية
+        // (لا متصفح الأدمن)، ثم يُخزَّن بتوقيت التطبيق (UTC).
+        $newTime = Carbon::parse($request->validated('scheduled_at'), $session->studentTimezone())->setTimezone(config('app.timezone'));
 
         $session = $this->rescheduleService->adminReschedule($session, $request->user(), $newTime, $request->validated('notes'));
 
@@ -305,8 +308,8 @@ class ClassSessionController extends Controller
      */
     public function createMakeup(CreateMakeupSessionRequest $request, ClassSession $session)
     {
-        // نفس تحويل reschedule أعلاه — موعد ISO بإزاحة توقيت يُخزَّن بتوقيت التطبيق
-        $scheduledAt = Carbon::parse($request->validated('scheduled_at'))->setTimezone(config('app.timezone'));
+        // نفس تفسير reschedule أعلاه — بمنطقة الطالب الزمنية ثم يُخزَّن بتوقيت التطبيق
+        $scheduledAt = Carbon::parse($request->validated('scheduled_at'), $session->studentTimezone())->setTimezone(config('app.timezone'));
 
         $makeup = $this->sessionService->scheduleMakeupByAdmin($session, $request->user(), $scheduledAt, $request->validated('notes'));
 
