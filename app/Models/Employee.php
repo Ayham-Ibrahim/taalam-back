@@ -7,6 +7,11 @@ use Illuminate\Database\Eloquent\Model;
 /** موظف إداري بلا حساب دخول — راتبه الشهري عبر EmployeeSalary وبونصاته/خصوماته عبر EmployeeAdjustment */
 class Employee extends Model
 {
+    /** عملة التقارير — كل كشف يُحوَّل إليها بسعر صرف شهره (PayrollExchangeRate) */
+    public const BASE_CURRENCY = 'AED';
+
+    public const CURRENCIES = ['AED', 'USD', 'EGP'];
+
     protected $attributes = [
         'currency' => 'AED',
         'is_active' => true,

@@ -2,11 +2,12 @@
 
 namespace App\Exports;
 
+use App\Models\Employee;
 use App\Services\EmployeePayrollService;
 use Maatwebsite\Excel\Concerns\WithMultipleSheets;
 
 /**
- * التقرير الشامل كملف واحد بثلاث أوراق: حسب الموظف، حسب الشهر، وتفاصيل الكشوف — نفس أرقام
+ * التقرير الشامل (مبالغه بالدرهم) كملف واحد بثلاث أوراق: حسب الموظف، حسب الشهر، وتفاصيل الكشوف — نفس أرقام
  * GET payroll/report لأنه مبني على EmployeePayrollService::report ونفس الفلاتر.
  */
 class PayrollReportExport implements WithMultipleSheets
@@ -29,6 +30,8 @@ class PayrollReportExport implements WithMultipleSheets
             $r['jobTitle'],
             $r['isActive'] ? 'نشط' : 'غير نشط',
             $r['monthsCount'],
+            $r['currency'] ?? 'متعددة',
+            $r['original']['netTotal'] ?? null,
             $r['baseTotal'],
             $r['bonusesTotal'],
             $r['deductionsTotal'],
@@ -45,23 +48,32 @@ class PayrollReportExport implements WithMultipleSheets
             $m['deductionsTotal'],
             $m['netTotal'],
             $m['paidAmount'],
-            round($m['netTotal'] - $m['paidAmount'], 2),
+            $m['outstandingAmount'],
+            collect($m['rates'])->map(fn ($rate, $currency) => $this->formatRate($currency, $rate))->implode(' | '),
         ])->all();
 
         return [
             new PayrollReportSheet(
                 'حسب الموظف',
-                ['الموظف', 'المسمى الوظيفي', 'الحالة', 'عدد الأشهر', 'الأساسي', 'البونصات', 'الخصومات', 'الصافي', 'المدفوع', 'المتبقي'],
+                ['الموظف', 'المسمى الوظيفي', 'الحالة', 'عدد الأشهر', 'العملة', 'الصافي بعملة الموظف', 'الأساسي (د.إ)', 'البونصات (د.إ)', 'الخصومات (د.إ)', 'الصافي (د.إ)', 'المدفوع (د.إ)', 'المتبقي (د.إ)'],
                 $byEmployee,
-                ['D', 'E', 'F', 'G', 'H', 'I', 'J'],
+                ['D', 'G', 'H', 'I', 'J', 'K', 'L'],
             ),
             new PayrollReportSheet(
                 'حسب الشهر',
-                ['الشهر', 'عدد الموظفين', 'الأساسي', 'البونصات', 'الخصومات', 'الصافي', 'المدفوع', 'المتبقي'],
+                ['الشهر', 'عدد الموظفين', 'الأساسي (د.إ)', 'البونصات (د.إ)', 'الخصومات (د.إ)', 'الصافي (د.إ)', 'المدفوع (د.إ)', 'المتبقي (د.إ)', 'أسعار الصرف'],
                 $byMonth,
                 ['C', 'D', 'E', 'F', 'G', 'H'],
             ),
             new EmployeePayrollExport(array_filter(['from' => $from, 'to' => $to, 'employee_id' => $employeeId])),
         ];
+    }
+
+    /** نفس عرض الواجهة: الجنيه معكوساً ("1 AED = 13.6 EGP") لأن سعره المباشر رقم صغير يصعب قراءته */
+    private function formatRate(string $currency, float $rate): string
+    {
+        return $currency === 'EGP'
+            ? '1 '.Employee::BASE_CURRENCY.' = '.round(1 / $rate, 4)." {$currency}"
+            : "1 {$currency} = ".round($rate, 6).' '.Employee::BASE_CURRENCY;
     }
 }

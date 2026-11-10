@@ -306,6 +306,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('payroll/report', [EmployeePayrollController::class, 'report']);
     Route::get('payroll/export', [EmployeePayrollController::class, 'export']);
     Route::post('payroll/generate', [EmployeePayrollController::class, 'generate']);
+    Route::get('payroll/rates', [EmployeePayrollController::class, 'rates']);
+    Route::put('payroll/rates', [EmployeePayrollController::class, 'updateRates']);
     Route::get('payroll', [EmployeePayrollController::class, 'index']);
     Route::post('payroll/{salary}/mark-paid', [EmployeePayrollController::class, 'markPaid']);
 

@@ -43,6 +43,8 @@ class EmployeePayrollExport implements FromQuery, ShouldAutoSize, WithEvents, Wi
             'الخصومات',
             'الصافي',
             'العملة',
+            'سعر الصرف',
+            'الصافي بالدرهم',
             'الحالة',
             'تاريخ الدفع',
             'ملاحظات',
@@ -60,6 +62,8 @@ class EmployeePayrollExport implements FromQuery, ShouldAutoSize, WithEvents, Wi
             (float) $salary->deductions_total,
             (float) $salary->net_amount,
             $salary->currency,
+            (float) $salary->exchange_rate,
+            (float) $salary->net_amount_aed,
             $salary->isPaid() ? 'مدفوع' : 'غير مدفوع',
             $salary->paid_at?->format('Y-m-d H:i'),
             $salary->notes,
@@ -68,6 +72,7 @@ class EmployeePayrollExport implements FromQuery, ShouldAutoSize, WithEvents, Wi
 
     protected function totalColumns(): array
     {
-        return ['D', 'E', 'F', 'G'];
+        // المبالغ الأصلية بعملات مختلفة لا تُجمع — المجموع لعمود الدرهم فقط
+        return ['J'];
     }
 }

@@ -4,6 +4,7 @@ namespace App\Http\Requests\Employee;
 
 use App\Models\Employee;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StoreEmployeeRequest extends FormRequest
 {
@@ -20,7 +21,7 @@ class StoreEmployeeRequest extends FormRequest
             'phone' => ['nullable', 'string', 'max:30'],
             'email' => ['nullable', 'email', 'max:150'],
             'base_salary' => ['required', 'numeric', 'min:0', 'max:9999999999'],
-            'currency' => ['sometimes', 'string', 'size:3'],
+            'currency' => ['sometimes', 'string', Rule::in(Employee::CURRENCIES)],
             'hired_at' => ['nullable', 'date'],
             'is_active' => ['sometimes', 'boolean'],
             'notes' => ['nullable', 'string', 'max:2000'],
@@ -33,6 +34,7 @@ class StoreEmployeeRequest extends FormRequest
             'name' => 'الاسم',
             'job_title' => 'المسمى الوظيفي',
             'base_salary' => 'الراتب الأساسي',
+            'currency' => 'العملة',
             'hired_at' => 'تاريخ التعيين',
         ];
     }
