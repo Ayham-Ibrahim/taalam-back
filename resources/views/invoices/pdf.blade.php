@@ -155,15 +155,19 @@
             <tr>
                 <th>الوصف</th>
                 <th>المادة</th>
-                <th>عدد الجلسات</th>
-                <th>المعلم</th>
+                @if($showSessions ?? true)
+                    <th>عدد الجلسات</th>
+                @endif
+                <th>{{ $teacherLabel ?? 'المعلم' }}</th>
             </tr>
         </thead>
         <tbody>
             <tr>
                 <td>{{ $itemTitle ?? '—' }}</td>
                 <td>{{ $subject ?? '—' }}</td>
-                <td>{{ $sessionsCount ?? '—' }}</td>
+                @if($showSessions ?? true)
+                    <td>{{ $sessionsCount ?? '—' }}</td>
+                @endif
                 <td>{{ $teacherName ?? '—' }}</td>
             </tr>
         </tbody>

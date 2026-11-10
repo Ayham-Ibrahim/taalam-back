@@ -173,6 +173,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('support-package-purchases/{supportPackagePurchase}', [SupportPackagePurchaseController::class, 'show']);
     Route::post('support-packages/{supportPackage}/purchases', [SupportPackagePurchaseController::class, 'store']);
     Route::post('support-package-purchases/{supportPackagePurchase}/checkout', [SupportPackagePurchaseController::class, 'checkout']);
+    Route::get('support-package-purchases/{supportPackagePurchase}/invoice', [SupportPackagePurchaseController::class, 'downloadInvoice']);
 
     Route::get('badges', [BadgeController::class, 'index']);
     Route::post('teachers/{teacher}/badges', [BadgeController::class, 'grant']);
