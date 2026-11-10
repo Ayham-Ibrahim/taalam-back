@@ -6,15 +6,18 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\SupportPackagePurchase\PurchaseSupportPackageRequest;
 use App\Models\SupportPackage;
 use App\Models\SupportPackagePurchase;
+use App\Services\InvoicePdfService;
 use App\Services\PaymentService;
 use App\Services\SupportPackagePurchaseService;
 use Illuminate\Http\Request;
+use RuntimeException;
 
 class SupportPackagePurchaseController extends Controller
 {
     public function __construct(
         private readonly SupportPackagePurchaseService $purchaseService,
         private readonly PaymentService $paymentService,
+        private readonly InvoicePdfService $invoicePdfService,
     ) {}
 
     public function index(Request $request)
@@ -76,5 +79,20 @@ class SupportPackagePurchaseController extends Controller
         $checkoutUrl = $this->paymentService->createCheckoutSessionForSupportPackagePurchase($supportPackagePurchase);
 
         return $this->success(['checkout_url' => $checkoutUrl]);
+    }
+
+    public function downloadInvoice(Request $request, SupportPackagePurchase $supportPackagePurchase)
+    {
+        $this->authorize('view', $supportPackagePurchase);
+
+        try {
+            $pdf = $this->invoicePdfService->forSupportPackagePurchase($supportPackagePurchase);
+        } catch (RuntimeException $e) {
+            return $this->error($e->getMessage(), 422);
+        }
+
+        $reference = InvoicePdfService::supportPackagePurchaseReference($supportPackagePurchase);
+
+        return $this->pdfDownload($pdf, "invoice-{$reference}.pdf");
     }
 }

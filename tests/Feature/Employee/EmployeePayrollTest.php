@@ -173,4 +173,69 @@ class EmployeePayrollTest extends TestCase
             ->assertStatus(200)
             ->assertDownload('payroll-report.xlsx');
     }
+
+    /** كل كشف يُحوَّل للدرهم بسعر شهره، والتقرير يجمع بالدرهم فقط */
+    public function test_foreign_currency_salaries_are_converted_to_aed_with_the_month_rate(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $usd = Employee::create(['name' => 'محمد', 'base_salary' => 300, 'currency' => 'USD']);
+        Employee::create(['name' => 'بلب', 'base_salary' => 10000, 'currency' => 'EGP']);
+        Employee::create(['name' => 'أحمد', 'base_salary' => 2000]);
+
+        // لا سعر محفوظ قط للجنيه → يُرفض التوليد ولا يُنشأ أي كشف ولا يبقى سعر الدولار المُرسل محفوظاً
+        $this->actingAs($admin)->postJson('/api/payroll/generate', ['month' => '2026-10', 'rates' => ['USD' => 3.6725]])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('rates.EGP');
+        $this->assertDatabaseCount('employee_salaries', 0);
+        $this->assertDatabaseCount('payroll_exchange_rates', 0);
+
+        $this->actingAs($admin)->postJson('/api/payroll/generate', ['month' => '2026-10', 'rates' => ['USD' => 3.6725, 'EGP' => 0.0735]])
+            ->assertStatus(201)
+            ->assertJsonPath('data.created', 3);
+
+        $this->actingAs($admin)->postJson("/api/employees/{$usd->id}/adjustments", ['month' => '2026-10', 'amount' => 20]);
+
+        $salary = EmployeeSalary::where('employee_id', $usd->id)->firstOrFail();
+        $this->assertEquals(320.0, (float) $salary->net_amount);
+        $this->assertEquals(1175.2, (float) $salary->net_amount_aed);
+
+        $this->actingAs($admin)->getJson('/api/payroll/report?from=2026-10&to=2026-10')
+            ->assertStatus(200)
+            ->assertJsonPath('data.summary.netTotal', 1175.2 + 735 + 2000)
+            ->assertJsonPath('data.months.0.rates.USD', 3.6725);
+
+        // تغيير سعر الشهر يعيد حساب الكشوف غير المدفوعة
+        $this->actingAs($admin)->putJson('/api/payroll/rates', ['month' => '2026-10', 'rates' => ['EGP' => 0.07]])
+            ->assertStatus(200)
+            ->assertJsonPath('data.locked', false)
+            ->assertJsonPath('data.rates.EGP.rate', 0.07);
+        $this->assertEquals(700.0, (float) EmployeeSalary::where('currency', 'EGP')->value('net_amount_aed'));
+
+        // بعد دفع أي كشف تُقفل أسعار الشهر: التغيير مرفوض، وإعادة التوليد بنفس الأسعار مسموحة
+        $this->actingAs($admin)->postJson("/api/payroll/{$salary->id}/mark-paid")->assertStatus(200);
+        $this->actingAs($admin)->putJson('/api/payroll/rates', ['month' => '2026-10', 'rates' => ['EGP' => 0.08]])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('rates.EGP');
+        $this->actingAs($admin)->postJson('/api/payroll/generate', ['month' => '2026-10', 'rates' => ['USD' => 3.6725, 'EGP' => 0.07]])
+            ->assertStatus(200);
+        $this->actingAs($admin)->getJson('/api/payroll/rates?month=2026-10')
+            ->assertJsonPath('data.locked', true)
+            ->assertJsonPath('data.rates.EGP.rate', 0.07);
+        $this->assertEquals(1175.2, (float) $salary->fresh()->net_amount_aed);
+
+        // الشهر التالي بلا أسعار يأخذ آخر سعر محفوظ ويثبّته له
+        $this->actingAs($admin)->postJson('/api/payroll/generate', ['month' => '2026-11'])->assertStatus(201);
+        $this->actingAs($admin)->getJson('/api/payroll/rates?month=2026-11')
+            ->assertJsonPath('data.rates.USD.saved', true)
+            ->assertJsonPath('data.rates.EGP.rate', 0.07);
+    }
+
+    public function test_employee_currency_is_limited_to_supported_ones(): void
+    {
+        $admin = User::factory()->admin()->create();
+
+        $this->actingAs($admin)->postJson('/api/employees', ['name' => 'x', 'base_salary' => 1, 'currency' => 'EUR'])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('currency');
+    }
 }

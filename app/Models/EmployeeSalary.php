@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 /**
  * كشف راتب موظف لشهر واحد. pending: يُعاد حسابه (الأساسي الحالي + البونصات − الخصومات) عند
  * كل تعديل. paid: لقطة نهائية مقفلة — لا تُضاف بونصات/خصومات لشهره بعدها.
+ * المبالغ الأصلية بعملة الموظف (currency)، وأعمدة *_aed مقابلها بالدرهم بسعر exchange_rate لشهر الكشف.
  */
 class EmployeeSalary extends Model
 {
@@ -28,6 +29,11 @@ class EmployeeSalary extends Model
         'deductions_total',
         'net_amount',
         'currency',
+        'exchange_rate',
+        'base_salary_aed',
+        'bonuses_total_aed',
+        'deductions_total_aed',
+        'net_amount_aed',
         'status',
         'paid_at',
         'paid_by',
@@ -41,6 +47,11 @@ class EmployeeSalary extends Model
             'bonuses_total' => 'decimal:2',
             'deductions_total' => 'decimal:2',
             'net_amount' => 'decimal:2',
+            'exchange_rate' => 'decimal:8',
+            'base_salary_aed' => 'decimal:2',
+            'bonuses_total_aed' => 'decimal:2',
+            'deductions_total_aed' => 'decimal:2',
+            'net_amount_aed' => 'decimal:2',
             'paid_at' => 'datetime',
         ];
     }
