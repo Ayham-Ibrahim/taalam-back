@@ -186,12 +186,6 @@ class DuplicateSubscriptionTest extends TestCase
 
         $this->assertSame('completed', $firstBooking->fresh()->status);
 
-        // مسألة منفصلة تماماً عن هذا الاختبار: enrolled_count لا يتحرر تلقائياً
-        // عند اكتمال الاشتراك طبيعياً (فقط عند الإلغاء)، فتبقى باقة فردية
-        // (نصابها 1) "ممتلئة" للأبد بعد أول حجز رغم انتهائه — PackageObserver
-        // يُغلقها. غير مرتبط بفحص التكرار المقصود هنا فنعزله يدوياً.
-        $package->update(['enrolled_count' => 0]);
-
         $secondBooking = app(BookingService::class)->createManualBooking(
             $student, $package, $admin, 'اشتراك جديد بعد الانتهاء', [['date' => $nextWednesday->copy()->addWeek()->toDateString(), 'start_time' => '09:00']],
         );

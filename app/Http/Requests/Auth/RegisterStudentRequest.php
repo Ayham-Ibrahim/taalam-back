@@ -23,7 +23,7 @@ class RegisterStudentRequest extends FormRequest
             'gender' => ['nullable', Rule::in(['male', 'female'])],
             'password' => ['required', 'confirmed', Password::defaults()],
             // منطقة متصفح الطالب الفعلية وقت التسجيل — تُلتقَط مرة واحدة هنا فقط (راجع AuthService::registerStudent)
-            'timezone' => ['nullable', 'string', 'max:64'],
+            'timezone' => ['nullable', 'string', 'max:64', 'timezone:all_with_bc'],
             'education_type' => ['required', Rule::in(['school', 'university', 'training'])],
 
             'curriculum_id' => ['required_if:education_type,school', 'nullable', 'exists:curricula,id'],

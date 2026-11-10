@@ -118,6 +118,32 @@ class BookingFlowTest extends TestCase
         Queue::assertPushed(CreateBbbRoomJob::class);
     }
 
+    /**
+     * قيد chk_packages_enrolled (enrolled_count <= capacity، والفردية capacity=1)
+     * كان يُفشل موافقة المعلم على ثاني طالب يحجز نفس الباقة الفردية.
+     */
+    public function test_second_student_can_be_approved_on_the_same_individual_package(): void
+    {
+        Queue::fake();
+
+        [$teacher] = $this->createVerifiedTeacher();
+        $teacherUser = User::find($teacher->user_id);
+        $package = $this->createFreeTrialPackage($teacher);
+
+        $nextWednesday = Carbon::now()->next(3);
+        $package->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
+
+        foreach (['10:00', '12:00'] as $time) {
+            $requested = app(BookingService::class)->requestIndividualBooking(
+                $this->createStudent(), $package, $this->weeklySlots($nextWednesday, 1, $time),
+            );
+
+            $this->assertSame('confirmed', app(BookingService::class)->approveIndividualRequest($requested, $teacherUser)->status);
+        }
+
+        $this->assertSame('active', $package->fresh()->status);
+    }
+
     public function test_booking_request_rejected_when_date_not_among_packages_available_days(): void
     {
         [$teacher] = $this->createVerifiedTeacher();
@@ -137,7 +163,7 @@ class BookingFlowTest extends TestCase
         $this->assertSame(0, DB::table('payments')->count());
     }
 
-    public function test_confirm_booking_transitions_status_increments_enrolled_count_and_dispatches_bbb_job(): void
+    public function test_confirm_booking_transitions_status_and_dispatches_bbb_job(): void
     {
         Queue::fake();
 
@@ -160,16 +186,17 @@ class BookingFlowTest extends TestCase
         $this->assertNotNull($confirmed->confirmed_at);
         $this->assertNull($confirmed->hold_expires_at);
 
-        // النصاب الفردي = 1 يعني طالب واحد لكل جلسة، لا للباقة كلها — تبقى active
+        // الباقة الفردية لا نصاب لها — لا يُحتسب enrolled_count، وتبقى active
         // وقابلة لحجز طلاب آخرين بأوقات مختلفة طالما جدول المعلم يسمح (PackageObserver).
-        $this->assertSame(1, $package->fresh()->enrolled_count);
+        $this->assertSame(0, $package->fresh()->enrolled_count);
         $this->assertSame('active', $package->fresh()->status);
 
         Queue::assertPushed(CreateBbbRoomJob::class);
 
-        // عملية idempotent: استدعاء ثانٍ لا يزيد enrolled_count مرة أخرى
+        // عملية idempotent: استدعاء ثانٍ لا يُطلق غرفاً جديدة
+        Queue::fake();
         app(BookingService::class)->confirmBooking($confirmed->fresh());
-        $this->assertSame(1, $package->fresh()->enrolled_count);
+        Queue::assertNothingPushed();
     }
 
     public function test_group_booking_shares_sessions_across_students_and_fills_at_capacity(): void
@@ -305,7 +332,7 @@ class BookingFlowTest extends TestCase
             'user_id' => $admin->id,
         ]);
 
-        $this->assertSame(1, $package->fresh()->enrolled_count);
+        $this->assertSame(0, $package->fresh()->enrolled_count);
 
         // الحجز اليدوي لا يمر بـ confirmBooking — كانت جلساته تبقى بلا رابط انضمام إطلاقاً.
         $sessions = $booking->fresh()->sessions;

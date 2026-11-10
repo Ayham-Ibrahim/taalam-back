@@ -115,6 +115,7 @@ class TeacherImportService
             'teacher_type' => $this->mapTeacherType(
                 $this->normalizeValue($row['teacher_type'] ?? $row['type_of_teaching'] ?? null)
             ),
+            'timezone' => $this->normalizeValue($row['timezone'] ?? null),
         ];
 
         $validator = Validator::make($normalized, [
@@ -124,6 +125,7 @@ class TeacherImportService
             'whatsapp' => ['nullable', 'string', 'max:25'],
             'gender' => ['nullable', Rule::in(['male', 'female'])],
             'teacher_type' => ['required', Rule::in(['school', 'university', 'training_center'])],
+            'timezone' => ['nullable', 'string', 'max:64', 'timezone:all_with_bc'],
         ], [
             'teacher_type.required' => 'نوع المعلم (مدرسي/جامعي/مركز تدريب) مفقود أو غير معروف من قيمة العمود',
         ]);
