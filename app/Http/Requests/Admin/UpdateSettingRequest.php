@@ -33,6 +33,13 @@ class UpdateSettingRequest extends FormRequest
                         return;
                     }
 
+                    if ($this->route('key') === 'student_no_show_teacher_compensation_percent'
+                        && (! is_numeric($value) || $value < 0 || $value > 100)) {
+                        $fail('النسبة يجب أن تكون رقماً بين 0 و100.');
+
+                        return;
+                    }
+
                     if ($this->route('key') === 'contact_email' && ! filter_var($value, FILTER_VALIDATE_EMAIL)) {
                         $fail('يرجى إدخال بريد إلكتروني صحيح.');
                     }

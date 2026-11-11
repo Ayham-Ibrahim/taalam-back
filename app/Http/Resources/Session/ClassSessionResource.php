@@ -45,6 +45,7 @@ class ClassSessionResource extends JsonResource
             'attendance_outcome' => $this->when($isAdmin, fn () => $this->attendance_outcome),
             'teacher_payout_percent' => $this->when($isAdmin, fn () => $this->teacher_payout_percent),
             'teacher_compensation_amount' => $this->when($isAdmin, fn () => $this->teacher_compensation_amount),
+            'teacher_compensation_percent' => $this->when($isAdmin, fn () => $this->teacher_compensation_percent),
             // {amount, paid} أو null — يضبطه ClassSessionController::index للأدمن فقط
             'teacher_payout_amount' => $this->when(
                 $isAdmin && array_key_exists('payout_amount', $this->resource->getAttributes()),

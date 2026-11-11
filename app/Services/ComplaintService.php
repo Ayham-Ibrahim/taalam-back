@@ -21,7 +21,6 @@ class ComplaintService
 
     public function __construct(
         private readonly SettingsService $settings,
-        private readonly SessionService $sessionService,
         private readonly NotificationService $notifications,
     ) {}
 
@@ -83,13 +82,8 @@ class ComplaintService
             'resolved_at' => now(),
         ]);
 
-        if ($resolutionType === 'makeup_session' && $complaint->class_session_id) {
-            $complaint->loadMissing('session');
-
-            if ($complaint->session) {
-                $this->sessionService->createMakeupSession($complaint->session);
-            }
-        }
+        // makeup_session تصنيف للحل فقط — التعويضية تُنشأ من صفحة الجلسات (SessionService::scheduleMakeupByAdmin)
+        // بشروطها: كانت تُنشأ هنا لأي جلسة بلا فحص، فتعويضية جلسة عُقدت تُسقط بالسقف مستحق جلسة عادية.
 
         $this->audit('complaint.resolved', $complaint, [], [
             'resolution_type' => $resolutionType,
