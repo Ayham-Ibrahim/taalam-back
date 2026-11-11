@@ -93,7 +93,7 @@ class ComplaintFlowTest extends TestCase
         $this->assertDatabaseHas('audit_logs', ['action' => 'complaint.resolved']);
     }
 
-    public function test_resolving_with_makeup_session_creates_a_new_session(): void
+    public function test_resolving_with_makeup_session_only_records_the_resolution(): void
     {
         [$teacher] = $this->createVerifiedTeacher();
         [$student, $studentToken] = $this->createStudent();
@@ -113,10 +113,8 @@ class ComplaintFlowTest extends TestCase
         ]);
         $resolve->assertStatus(200);
 
-        $this->assertDatabaseHas('class_sessions', [
-            'makeup_for_session_id' => $session->id,
-            'is_makeup' => 1,
-        ]);
+        $this->assertDatabaseHas('complaints', ['id' => $complaintId, 'resolution_type' => 'makeup_session']);
+        $this->assertDatabaseMissing('class_sessions', ['makeup_for_session_id' => $session->id]);
     }
 
     public function test_non_admin_cannot_resolve_complaint(): void

@@ -36,7 +36,7 @@ class AutomaticAttendancePayoutTest extends TestCase
         // تُعدّ untracked — الجدول أُنشئ لحظة تشغيل الاختبارات، فنتقدم بالزمن.
         $this->travel(2)->days();
 
-        app(SettingsService::class)->set('student_no_show_teacher_compensation_amount', 30);
+        app(SettingsService::class)->set('student_no_show_teacher_compensation_percent', 30);
     }
 
     public function test_teacher_and_student_joined_gives_the_full_amount(): void
@@ -55,8 +55,8 @@ class AutomaticAttendancePayoutTest extends TestCase
         $this->assertEquals(100.0, (float) $this->generatePayout($teacher)->gross_amount);
     }
 
-    /** دخل المعلم وحده → التعويض الثابت من الإعداد بدل مستحق الجلسة (100) */
-    public function test_teacher_joined_and_student_did_not_gives_the_configured_fixed_compensation(): void
+    /** دخل المعلم وحده → نسبة التعويض من الإعداد (30%) من قيمة الجلسة (100) بدل مستحقها */
+    public function test_teacher_joined_and_student_did_not_gives_the_configured_percent_of_the_session_value(): void
     {
         [$teacher, $teacherUser] = $this->createTeacher();
         [$session] = $this->createEndedSession($teacher);
@@ -140,7 +140,7 @@ class AutomaticAttendancePayoutTest extends TestCase
         $this->logJoin($first, $teacherUser, 'teacher');
         app(SessionService::class)->completeEndedSessions();
 
-        app(SettingsService::class)->set('student_no_show_teacher_compensation_amount', 15);
+        app(SettingsService::class)->set('student_no_show_teacher_compensation_percent', 15);
 
         [$second] = $this->createEndedSession($teacher);
         $this->logJoin($second, $teacherUser, 'teacher');
@@ -148,6 +148,8 @@ class AutomaticAttendancePayoutTest extends TestCase
 
         $this->assertEquals(30, (float) $first->fresh()->teacher_compensation_amount);
         $this->assertEquals(15, (float) $second->fresh()->teacher_compensation_amount);
+        $this->assertEquals(30, (float) $first->fresh()->teacher_compensation_percent);
+        $this->assertEquals(15, (float) $second->fresh()->teacher_compensation_percent);
         $this->assertEquals(45.0, (float) $this->generatePayout($teacher)->gross_amount);
     }
 
