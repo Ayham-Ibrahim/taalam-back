@@ -60,6 +60,12 @@ class ClassSessionController extends Controller
             ->withStudentPaidAccess($request->user())
             // has_makeup: زر "إنشاء جلسة تعويضية" لدى الأدمن يختفي بعد إنشائها (تعويضية واحدة لكل جلسة)
             ->when($request->user()->isAdmin(), fn ($q) => $q->with(self::JOIN_LOGS_RELATION)->withExists('makeupSessions as has_makeup'))
+            // المعلم: هل دخل هو والطالب — يحدد ظهور زر "نسخ رابط التقييم" بالجدول. علَمان فقط (لا
+            // سجل الانضمام نفسه، فهو لصفحة التفاصيل)، محسوبان ضمن نفس الاستعلام لا استعلام لكل جلسة
+            ->when($request->user()->isTeacher(), fn ($q) => $q->withExists([
+                'joinLogs as teacher_joined' => fn ($j) => $j->where('role', 'teacher'),
+                'joinLogs as student_joined' => fn ($j) => $j->where('role', 'student'),
+            ]))
             // الافتراضي desc (الأحدث تاريخاً أولاً) يبقى كما كان لأي طرف آخر يعتمد
             // عليه ضمناً — sort=asc صريح (الأقرب موعداً أولاً) يطلبه استدعاء
             // "جلساتي" في لوحة الطالب تحديداً.

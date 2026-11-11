@@ -28,6 +28,8 @@ class AcademicSupporter extends Model
 
     protected $fillable = [
         'user_id',
+        // ملف داعم لمدرس جامعي (يضيف له الأدمن باقات دعم) — null للداعم المستقل
+        'teacher_id',
         'bio',
         'qualification',
         'experience_years',
@@ -39,6 +41,24 @@ class AcademicSupporter extends Model
     public function user()
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function teacher()
+    {
+        return $this->belongsTo(Teacher::class);
+    }
+
+    /**
+     * ما يظهر للطالب الجامعي بتاب الدعم الأكاديمي: الداعم المستقل النشط كما كان، والمدرس
+     * الجامعي فقط إن كان موثّقاً ولديه باقة دعم نشطة واحدة على الأقل.
+     */
+    public function scopeVisibleToStudents($query)
+    {
+        return $query->where('status', 'active')
+            ->where(fn ($q) => $q->whereNull('teacher_id')
+                ->orWhere(fn ($tq) => $tq
+                    ->whereHas('teacher', fn ($t) => $t->where('teacher_type', 'university')->where('status', 'verified'))
+                    ->whereHas('supportPackages', fn ($p) => $p->where('status', 'active'))));
     }
 
     public function university()

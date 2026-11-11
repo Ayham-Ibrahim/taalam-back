@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\AcademicSupporter;
 use App\Models\AcademicSupporterGalleryItem;
+use App\Models\Teacher;
 use App\Models\User;
 use App\Notifications\AccountCreatedByAdmin;
 use App\Notifications\PasswordResetByAdmin;
@@ -50,6 +51,52 @@ class AcademicSupporterService
             );
 
             $this->audit('academic_supporter.account_created', $supporter, [], ['email' => $user->email], null, $admin->id);
+
+            return $supporter;
+        });
+    }
+
+    /**
+     * المدرس الجامعي حصراً: ملف داعم مرتبط به (نفس حساب المستخدم) لتُضاف له باقات دعم
+     * أكاديمي من لوحة الأدمن. idempotent — يعيد نفس الملف إن وُجد (ويستعيده إن حُذف).
+     * نبذته ومؤهله وخبرته ومواده الجامعية تُنسخ من ملفه كمدرس حتى يظهر كارده كاملاً للطالب.
+     */
+    public function linkUniversityTeacher(Teacher $teacher, User $admin): AcademicSupporter
+    {
+        if ($teacher->teacher_type !== 'university') {
+            throw ValidationException::withMessages([
+                'teacher_type' => ['باقات الدعم الأكاديمي متاحة للمدرسين الجامعيين حصراً'],
+            ]);
+        }
+
+        return DB::transaction(function () use ($teacher, $admin) {
+            $supporter = AcademicSupporter::withTrashed()
+                ->where('teacher_id', $teacher->id)
+                ->orWhere('user_id', $teacher->user_id)
+                ->first();
+
+            $profile = [
+                'user_id' => $teacher->user_id,
+                'teacher_id' => $teacher->id,
+                'bio' => $teacher->bio,
+                'qualification' => $teacher->qualification,
+                'experience_years' => $teacher->experience_years,
+            ];
+
+            if ($supporter) {
+                if ($supporter->trashed()) {
+                    $supporter->restore();
+                }
+                $supporter->update($profile);
+            } else {
+                $supporter = AcademicSupporter::create([...$profile, 'status' => 'active']);
+                $this->audit('academic_supporter.linked_to_teacher', $supporter, [], ['teacher_id' => $teacher->id], null, $admin->id);
+            }
+
+            $universitySubjectIds = $teacher->subjects()->where('education_type', 'university')->pluck('subjects.id');
+            if ($universitySubjectIds->isNotEmpty()) {
+                $supporter->subjects()->syncWithoutDetaching($universitySubjectIds);
+            }
 
             return $supporter;
         });

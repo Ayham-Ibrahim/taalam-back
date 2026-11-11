@@ -31,6 +31,7 @@ use App\Http\Controllers\Report\TeacherSessionsReportController;
 use App\Http\Controllers\Reschedule\RescheduleRequestController;
 use App\Http\Controllers\Review\ReviewController;
 use App\Http\Controllers\Session\ClassSessionController;
+use App\Http\Controllers\Session\SessionQualityRatingController;
 use App\Http\Controllers\Session\SessionAttendanceController;
 use App\Http\Controllers\Student\SiblingController;
 use App\Http\Controllers\Student\StudentController;
@@ -39,6 +40,7 @@ use App\Http\Controllers\SupportPackagePurchase\SupportPackagePurchaseController
 use App\Http\Controllers\TaxonomyController;
 use App\Http\Controllers\Teacher\BadgeController;
 use App\Http\Controllers\Teacher\TeacherAvailabilityTimeController;
+use App\Http\Controllers\Teacher\TeacherAcademicSupportController;
 use App\Http\Controllers\Teacher\TeacherController;
 use App\Http\Controllers\Accountant\AccountantController;
 use App\Http\Controllers\Employee\EmployeeController;
@@ -108,6 +110,8 @@ Route::get('teachers/search', [TeacherSearchController::class, 'index']);
 Route::get('teachers/{teacher}', [TeacherController::class, 'show']);
 Route::get('teachers/{teacher}/packages', [PackageController::class, 'indexForTeacher']);
 Route::get('teachers/{teacher}/courses', [CourseController::class, 'indexForTeacher']);
+// باقات الدعم الأكاديمي للمدرس الجامعي — عرض عام ببروفايله كبقية باقاته (الشراء للطالب الجامعي فقط)
+Route::get('teachers/{teacher}/support-packages', [TeacherAcademicSupportController::class, 'index']);
 Route::get('teachers/{teacher}/reviews', [ReviewController::class, 'indexForTeacher']);
 Route::get('teachers/{teacher}/rating-summary', [ReviewController::class, 'ratingSummaryForTeacher']);
 
@@ -127,6 +131,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('teachers/create-account', [TeacherController::class, 'createAccount']);
     Route::post('teachers/import', [TeacherImportController::class, 'store']);
     Route::get('teachers/{teacher}/admin-detail', [TeacherController::class, 'adminDetail']);
+    Route::post('teachers/{teacher}/academic-supporter', [TeacherAcademicSupportController::class, 'store']);
     Route::put('teachers/{teacher}', [TeacherController::class, 'update']);
     Route::post('teachers/{teacher}/submit-for-verification', [TeacherController::class, 'submitForVerification']);
     Route::post('teachers/{teacher}/approve', [TeacherController::class, 'approve']);
@@ -257,6 +262,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('class-sessions', [ClassSessionController::class, 'index']);
     Route::get('class-sessions/{session}', [ClassSessionController::class, 'show']);
     Route::get('class-sessions/{session}/join', [ClassSessionController::class, 'join']);
+    // تقييم جودة الجلسة: الطالب يقيّم بعد انتهائها، والأدمن وحده يرى التقييمات
+    Route::get('session-quality/{token}', [SessionQualityRatingController::class, 'show']);
+    Route::post('session-quality/{token}', [SessionQualityRatingController::class, 'store']);
+    Route::get('session-quality-ratings', [SessionQualityRatingController::class, 'index']);
     Route::patch('class-sessions/{session}/schedule', [ClassSessionController::class, 'reschedule']);
     Route::post('class-sessions/{session}/makeup', [ClassSessionController::class, 'createMakeup']);
     Route::post('class-sessions/{session}/attendance', [ClassSessionController::class, 'markAttendance']);

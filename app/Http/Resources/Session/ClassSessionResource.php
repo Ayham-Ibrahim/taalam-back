@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\URL;
  */
 class ClassSessionResource extends JsonResource
 {
+
     public function toArray(Request $request): array
     {
         $user = $request->user();
@@ -61,6 +62,12 @@ class ClassSessionResource extends JsonResource
             'has_pending_reschedule_request' => (bool) $pendingRescheduleRequest,
             'pending_reschedule_request_status' => $pendingRescheduleRequest?->status,
             'pending_reschedule_request_created_at' => $pendingRescheduleRequest?->created_at,
+            // مسار صفحة تقييم الجودة (/rate-session/{token}) لزر "نسخ رابط التقييم" — لصاحب
+            // الجلسة والأدمن فقط، بعد بدئها ودخول المعلم والطالب إليها (الرمز يُنشأ عند أول طلب له)
+            'quality_rating_path' => $this->when(
+                $isTeacher && \App\Services\SessionQualityRatingService::linkAvailable($this->resource),
+                fn () => \App\Models\SessionQualityRating::frontendPath($this->resource->ensureQualityRatingToken()),
+            ),
             'join_url_teacher' => $isTeacher ? $this->join_url_teacher : null,
             'join_url_student' => $isStudent ? $this->join_url_student : null,
             // ما يفتحه زر "انضم" فعلاً: رابط عادي يمرّ عبر المنصة (joinRedirect) فيتحقق من

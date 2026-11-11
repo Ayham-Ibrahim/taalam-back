@@ -13,24 +13,27 @@ class UpdateTeacherExperienceRequest extends FormRequest
 
     public function rules(): array
     {
+        $isCourse = $this->isCourseEntry();
+
         return [
             'title' => ['required', 'string', 'max:200'],
             'company' => ['nullable', 'string', 'max:200'],
-            // المركز التدريبي: "دورة متاحة" = الاسم + الوصف (إلزامي) بلا فترة؛ المدرس: خبرة بفترة إلزامية
-            'period' => [$this->isTrainingCenter() ? 'nullable' : 'required', 'string', 'max:100'],
+            // "دورة متاحة" = الاسم + الوصف (إلزامي) بلا فترة؛ الخبرة: فترة إلزامية
+            'period' => [$isCourse ? 'nullable' : 'required', 'string', 'max:100'],
             'location' => ['nullable', 'string', 'max:150'],
-            'description' => [$this->isTrainingCenter() ? 'required' : 'nullable', 'string', 'max:2000'],
+            'description' => [$isCourse ? 'required' : 'nullable', 'string', 'max:2000'],
         ];
     }
 
-    private function isTrainingCenter(): bool
+    /** نوع المدخل ثابت لا يُغيَّر بالتعديل — يُقرأ من السجل نفسه */
+    private function isCourseEntry(): bool
     {
-        return (bool) $this->route('experience')?->teacher?->isTrainingCenter();
+        return (bool) $this->route('experience')?->isOfferedCourse();
     }
 
     public function attributes(): array
     {
-        if ($this->isTrainingCenter()) {
+        if ($this->isCourseEntry()) {
             return ['title' => 'اسم الدورة', 'description' => 'وصف الدورة'];
         }
 

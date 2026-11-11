@@ -15,6 +15,7 @@ class SessionAttendee extends Model
         'joined_at',
         'left_at',
         'duration_minutes',
+        'quality_rating_requested_at',
         'absence_notified_at',
         'absence_reason',
         'deducted_from_balance',

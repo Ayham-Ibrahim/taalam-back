@@ -281,16 +281,21 @@ class TeacherService
 
     public function addExperience(Teacher $teacher, array $data): TeacherExperience
     {
-        if ($teacher->experiences()->count() >= Teacher::MAX_EXPERIENCES) {
+        $kind = $data['kind'] ?? TeacherExperience::KIND_EXPERIENCE;
+        $isCourse = $teacher->isTrainingCenter() || $kind === TeacherExperience::KIND_OFFERED_COURSE;
+
+        // الحد لكل قسم على حدة (الخبرات والدورات المتاحة للمدرس الجامعي منفصلان)
+        if ($teacher->experiences()->where('kind', $kind)->count() >= Teacher::MAX_EXPERIENCES) {
             throw ValidationException::withMessages([
-                'experiences' => [$teacher->isTrainingCenter()
+                'experiences' => [$isCourse
                     ? 'لا يمكن إضافة أكثر من '.Teacher::MAX_EXPERIENCES.' دورات — احذف دورة قديمة أولاً.'
                     : 'لا يمكن إضافة أكثر من '.Teacher::MAX_EXPERIENCES.' خبرات — احذف خبرة قديمة أولاً.'],
             ]);
         }
 
         $experience = $teacher->experiences()->create([
-            ...$this->experienceAttributes($teacher, $data),
+            'kind' => $kind,
+            ...$this->experienceAttributes($isCourse, $data),
             'sort_order' => ($teacher->experiences()->max('sort_order') ?? -1) + 1,
         ]);
 
@@ -303,7 +308,7 @@ class TeacherService
     {
         $before = ['title' => $experience->title];
 
-        $experience->update($this->experienceAttributes($experience->teacher, $data));
+        $experience->update($this->experienceAttributes($experience->isOfferedCourse(), $data));
 
         $this->audit('teacher.experience_updated', $experience, $before, ['title' => $experience->title]);
 
@@ -311,18 +316,16 @@ class TeacherService
     }
 
     /**
-     * للمركز التدريبي القسم هو "الدورات المتاحة": اسم الدورة ووصفها فقط — الجهة والموقع
-     * والفترة لا معنى لها فتُفرَّغ (حتى لا تبقى قيم برامج سابقة قديمة عند التعديل).
+     * "دورة متاحة" (كل مدخلات المركز التدريبي، أو offered_course للمدرس الجامعي): اسم الدورة
+     * ووصفها فقط — الجهة والموقع والفترة لا معنى لها فتُفرَّغ (حتى لا تبقى قيم قديمة عند التعديل).
      */
-    private function experienceAttributes(Teacher $teacher, array $data): array
+    private function experienceAttributes(bool $isCourse, array $data): array
     {
-        $isCenter = $teacher->isTrainingCenter();
-
         return [
             'title' => $data['title'],
-            'company' => $isCenter ? null : ($data['company'] ?? null),
-            'period' => $isCenter ? null : $data['period'],
-            'location' => $isCenter ? null : ($data['location'] ?? null),
+            'company' => $isCourse ? null : ($data['company'] ?? null),
+            'period' => $isCourse ? null : $data['period'],
+            'location' => $isCourse ? null : ($data['location'] ?? null),
             'description' => $data['description'] ?? null,
         ];
     }

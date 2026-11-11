@@ -19,8 +19,8 @@ class AcademicSupporterSearchController extends Controller
         $this->assertUniversityStudent($request);
 
         $supporters = AcademicSupporter::query()
-            ->select(['id', 'user_id', 'bio', 'qualification', 'experience_years'])
-            ->where('status', 'active')
+            ->select(['id', 'user_id', 'teacher_id', 'bio', 'qualification', 'experience_years'])
+            ->visibleToStudents()
             ->when($request->filled('subject_id'), function ($q) use ($request) {
                 $q->whereHas('subjects', fn ($sq) => $sq->where('subjects.id', $request->integer('subject_id')));
             })
@@ -35,7 +35,7 @@ class AcademicSupporterSearchController extends Controller
     {
         $this->assertUniversityStudent($request);
 
-        abort_unless($academicSupporter->status === 'active', 404);
+        abort_unless(AcademicSupporter::whereKey($academicSupporter->id)->visibleToStudents()->exists(), 404);
 
         $academicSupporter->load([
             'user:id,name,avatar_path',

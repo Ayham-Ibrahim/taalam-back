@@ -68,6 +68,54 @@ class TeacherExperiencesTest extends TestCase
             ->assertJsonValidationErrors(['period']);
     }
 
+    public function test_university_teacher_has_a_separate_offered_courses_section(): void
+    {
+        $user = User::factory()->teacher()->create();
+        $teacher = Teacher::create(['user_id' => $user->id, 'teacher_type' => 'university', 'status' => 'verified']);
+        $token = $user->createToken('t')->plainTextToken;
+
+        // خبرة سابقة عادية (الفترة إلزامية) تبقى كما هي
+        $this->as($token)->postJson("/api/teachers/{$teacher->id}/experiences", [
+            'title' => 'محاضر في جامعة دمشق',
+            'period' => '2018 - 2023',
+        ])->assertStatus(201)->assertJsonPath('data.kind', 'experience');
+
+        // دورة متاحة: الوصف إلزامي، والفترة/الجهة لا تُحفظ
+        $this->as($token)->postJson("/api/teachers/{$teacher->id}/experiences", ['kind' => 'offered_course', 'title' => 'دورة بايثون'])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['description'])
+            ->assertJsonMissingValidationErrors(['period']);
+
+        $course = $this->as($token)->postJson("/api/teachers/{$teacher->id}/experiences", [
+            'kind' => 'offered_course',
+            'title' => 'دورة بايثون',
+            'description' => 'أساسيات البرمجة للمبتدئين',
+            'period' => 'تُتجاهَل',
+        ])->assertStatus(201);
+
+        $this->assertDatabaseHas('teacher_experiences', [
+            'id' => $course->json('data.id'), 'kind' => 'offered_course', 'period' => null,
+        ]);
+
+        // التعديل يحافظ على نوع المدخل: الدورة تُعدَّل بلا فترة
+        $this->as($token)->putJson("/api/teacher-experiences/{$course->json('data.id')}", [
+            'title' => 'دورة بايثون المتقدمة',
+            'description' => 'وصف جديد',
+        ])->assertStatus(200);
+
+        $this->getJson("/api/teachers/{$teacher->id}")
+            ->assertStatus(200)
+            ->assertJsonPath('data.experiences.0.kind', 'experience')
+            ->assertJsonPath('data.experiences.1.kind', 'offered_course')
+            ->assertJsonPath('data.experiences.1.title', 'دورة بايثون المتقدمة');
+
+        // مدرس المدارس لا يملك هذا القسم
+        [$schoolTeacher, $schoolToken] = $this->createTeacher();
+        $this->as($schoolToken)->postJson("/api/teachers/{$schoolTeacher->id}/experiences", [
+            'kind' => 'offered_course', 'title' => 'دورة', 'description' => 'وصف',
+        ])->assertStatus(422)->assertJsonValidationErrors(['kind']);
+    }
+
     public function test_experiences_appear_on_the_public_profile_of_a_verified_teacher(): void
     {
         $user = User::factory()->teacher()->create();

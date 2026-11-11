@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Str;
 
 class ClassSession extends Model
 {
@@ -44,6 +45,8 @@ class ClassSession extends Model
         'attendance_outcome',
         'teacher_payout_percent',
         'teacher_compensation_amount',
+        // رمز رابط تقييم الجودة — يُعرض صراحةً عبر ClassSessionResource لمن يحق له فقط
+        'quality_rating_token',
     ];
 
     /** دخل المعلم وطالب واحد على الأقل — مستحق كامل */
@@ -73,6 +76,24 @@ class ClassSession extends Model
             'reminder_sent_at' => 'datetime',
             'is_makeup' => 'boolean',
         ];
+    }
+
+    /**
+     * رمز رابط تقييم جودة الجلسة (عشوائي، 48 حرفاً) — يُنشأ مرة واحدة عند أول حاجة إليه
+     * (إرسال الطلب بعد انتهاء الجلسة، أو زر النسخ عند المعلم) ثم يبقى ثابتاً. الإسناد
+     * مشروط بأن يكون فارغاً كي لا يولّد طلبان متزامنان رمزين مختلفين.
+     */
+    public function ensureQualityRatingToken(): string
+    {
+        if ($this->quality_rating_token) {
+            return $this->quality_rating_token;
+        }
+
+        static::whereKey($this->id)->whereNull('quality_rating_token')->update(['quality_rating_token' => Str::random(48)]);
+
+        $this->quality_rating_token = static::whereKey($this->id)->value('quality_rating_token');
+
+        return $this->quality_rating_token;
     }
 
     public function booking()

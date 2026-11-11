@@ -169,6 +169,12 @@ class Teacher extends Model
         return $this->hasMany(Review::class);
     }
 
+    /** ملف الداعم المرتبط (مدرس جامعي يقدّم باقات دعم أكاديمي) — انظر AcademicSupporter::teacher */
+    public function academicSupporter()
+    {
+        return $this->hasOne(AcademicSupporter::class);
+    }
+
     public function isTrainingCenter(): bool
     {
         return $this->teacher_type === 'training_center';

@@ -27,6 +27,8 @@ class AcademicSupporterController extends Controller
 
         $supporters = AcademicSupporter::query()
             ->with('user:id,name,email,phone')
+            // ملفات الداعم المرتبطة بمدرس جامعي تُدار من صفحة المدرس نفسه، لا كحساب داعم منفصل
+            ->whereNull('teacher_id')
             ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))
             ->when($request->filled('search'), function ($q) use ($request) {
                 $search = $request->string('search');

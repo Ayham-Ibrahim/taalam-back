@@ -12,6 +12,8 @@ class PublicAcademicSupporterResource extends JsonResource
     {
         return [
             'id' => $this->id,
+            // مدرس جامعي يقدّم باقات دعم — الواجهة تعرض شارة "مدرس جامعي" ورابط بروفايله
+            'teacherId' => $this->teacher_id,
             'name' => $this->user?->name,
             'avatar' => $this->user?->avatar_path,
             'bio' => $this->bio,

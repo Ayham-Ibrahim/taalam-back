@@ -23,6 +23,8 @@ class AdminTeacherResource extends JsonResource
             'email' => $this->user?->email,
             'phone' => $this->user?->phone,
             'type' => $this->teacher_type,
+            // ملف الداعم المرتبط (مدرس جامعي فُعّلت له باقات الدعم الأكاديمي) — null إن لم تُفعَّل
+            'academicSupporterId' => $this->whenLoaded('academicSupporter', fn () => $this->academicSupporter?->id),
             'status' => $this->displayStatus(),
             'rawStatus' => $this->status,
             'canApprove' => $this->canApprove(),
@@ -51,7 +53,7 @@ class AdminTeacherResource extends JsonResource
                 'id' => $f->id, 'question' => $f->question, 'answer' => $f->answer,
             ])),
             'experiences' => $this->whenLoaded('experiences', fn () => $this->experiences->map(fn ($e) => [
-                'id' => $e->id, 'title' => $e->title, 'company' => $e->company,
+                'id' => $e->id, 'kind' => $e->kind, 'title' => $e->title, 'company' => $e->company,
                 'period' => $e->period, 'location' => $e->location, 'description' => $e->description,
             ])),
             'subjects' => $this->whenLoaded('subjects', fn () => $this->subjects->map(fn ($s) => ['id' => $s->id, 'name' => $s->name_ar])),

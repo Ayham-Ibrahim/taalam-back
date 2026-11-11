@@ -141,6 +141,7 @@ class TeacherController extends Controller
         $this->authorize('view', $teacher);
 
         $teacher->load([
+            'academicSupporter:id,teacher_id',
             'user:id,name,email,phone,avatar_path',
             // الأحدث أولاً — قد يرفع المعلم أكثر من وثيقة لنفس النوع بعد رفض
             // سابق؛ الواجهة تعرض أول تطابق لكل نوع فقط، فيجب أن يكون الأحدث.
