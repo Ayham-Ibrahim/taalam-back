@@ -5,7 +5,7 @@ namespace App\Http\Requests\Employee;
 use App\Models\Employee;
 use Illuminate\Foundation\Http\FormRequest;
 
-/** توليد كشوف رواتب شهر لكل الموظفين النشطين — الشهر الحالي افتراضياً */
+/** توليد كشوف رواتب شهر لكل الموظفين النشطين — الشهر الحالي افتراضياً، مع أسعار صرفه اختيارياً */
 class GeneratePayrollRequest extends FormRequest
 {
     public function authorize(): bool
@@ -31,6 +31,12 @@ class GeneratePayrollRequest extends FormRequest
                     }
                 },
             ],
+            ...UpdatePayrollRatesRequest::rateRules(required: false),
         ];
+    }
+
+    public function attributes(): array
+    {
+        return (new UpdatePayrollRatesRequest)->attributes();
     }
 }

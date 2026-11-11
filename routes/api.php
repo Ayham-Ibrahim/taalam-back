@@ -27,6 +27,7 @@ use App\Http\Controllers\Payment\PaymentWebhookController;
 use App\Http\Controllers\Payout\PayoutController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\Report\AcademicSupportFinanceReportController;
+use App\Http\Controllers\Report\StudentsReportController;
 use App\Http\Controllers\Report\TeacherSessionsReportController;
 use App\Http\Controllers\Reschedule\RescheduleRequestController;
 use App\Http\Controllers\Review\ReviewController;
@@ -177,6 +178,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('support-package-purchases/{supportPackagePurchase}', [SupportPackagePurchaseController::class, 'show']);
     Route::post('support-packages/{supportPackage}/purchases', [SupportPackagePurchaseController::class, 'store']);
     Route::post('support-package-purchases/{supportPackagePurchase}/checkout', [SupportPackagePurchaseController::class, 'checkout']);
+    Route::get('support-package-purchases/{supportPackagePurchase}/invoice', [SupportPackagePurchaseController::class, 'downloadInvoice']);
 
     Route::get('badges', [BadgeController::class, 'index']);
     Route::post('teachers/{teacher}/badges', [BadgeController::class, 'grant']);
@@ -314,6 +316,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('payroll/report', [EmployeePayrollController::class, 'report']);
     Route::get('payroll/export', [EmployeePayrollController::class, 'export']);
     Route::post('payroll/generate', [EmployeePayrollController::class, 'generate']);
+    Route::get('payroll/rates', [EmployeePayrollController::class, 'rates']);
+    Route::put('payroll/rates', [EmployeePayrollController::class, 'updateRates']);
     Route::get('payroll', [EmployeePayrollController::class, 'index']);
     Route::post('payroll/{salary}/mark-paid', [EmployeePayrollController::class, 'markPaid']);
 
@@ -322,6 +326,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('reports/teacher-sessions', [TeacherSessionsReportController::class, 'index']);
     Route::get('reports/academic-support/export', [AcademicSupportFinanceReportController::class, 'export']);
     Route::get('reports/academic-support', [AcademicSupportFinanceReportController::class, 'index']);
+    Route::get('reports/students/export', [StudentsReportController::class, 'export']);
+    Route::get('reports/students', [StudentsReportController::class, 'index']);
 
     Route::get('me/reviews', [ReviewController::class, 'myReviews']);
     Route::get('reviews', [ReviewController::class, 'index']);

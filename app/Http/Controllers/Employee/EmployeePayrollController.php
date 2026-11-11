@@ -7,6 +7,7 @@ use App\Exports\PayrollReportExport;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Employee\GeneratePayrollRequest;
 use App\Http\Requests\Employee\MarkSalaryPaidRequest;
+use App\Http\Requests\Employee\UpdatePayrollRatesRequest;
 use App\Http\Resources\Employee\EmployeeSalaryResource;
 use App\Models\Employee;
 use App\Models\EmployeeSalary;
@@ -18,7 +19,7 @@ class EmployeePayrollController extends Controller
 {
     public function __construct(private readonly EmployeePayrollService $payrollService) {}
 
-    /** كشف الرواتب — عادةً لشهر واحد (month)، مع مجاميعه في additional_data */
+    /** كشف الرواتب — عادةً لشهر واحد (month)، مع مجاميعه بالدرهم في additional_data */
     public function index(Request $request)
     {
         $this->authorize('viewAny', Employee::class);
@@ -28,9 +29,9 @@ class EmployeePayrollController extends Controller
         $query = $this->filteredQuery($request);
 
         $summary = (clone $query)->toBase()
-            ->selectRaw('COUNT(*) AS count, COALESCE(SUM(base_salary), 0) AS base_total, COALESCE(SUM(bonuses_total), 0) AS bonuses_total')
-            ->selectRaw('COALESCE(SUM(deductions_total), 0) AS deductions_total, COALESCE(SUM(net_amount), 0) AS net_total')
-            ->selectRaw("COALESCE(SUM(CASE WHEN status = 'paid' THEN net_amount END), 0) AS paid_total")
+            ->selectRaw('COUNT(*) AS count, COALESCE(SUM(base_salary_aed), 0) AS base_total, COALESCE(SUM(bonuses_total_aed), 0) AS bonuses_total')
+            ->selectRaw('COALESCE(SUM(deductions_total_aed), 0) AS deductions_total, COALESCE(SUM(net_amount_aed), 0) AS net_total')
+            ->selectRaw("COALESCE(SUM(CASE WHEN status = 'paid' THEN net_amount_aed END), 0) AS paid_total")
             ->first();
 
         $salaries = $query->with(['employee:id,name,job_title', 'payer:id,name'])
@@ -41,6 +42,7 @@ class EmployeePayrollController extends Controller
         return $this->paginateWithData(
             $salaries->through(fn (EmployeeSalary $s) => new EmployeeSalaryResource($s)),
             [
+                'currency' => Employee::BASE_CURRENCY,
                 'count' => (int) $summary->count,
                 'baseTotal' => round((float) $summary->base_total, 2),
                 'bonusesTotal' => round((float) $summary->bonuses_total, 2),
@@ -55,13 +57,45 @@ class EmployeePayrollController extends Controller
     public function generate(GeneratePayrollRequest $request)
     {
         $month = $request->validated('month');
-        $created = $this->payrollService->generateMonth($month);
+        $created = $this->payrollService->generateMonth($month, array_filter($request->validated('rates') ?? []), $request->user());
 
         return $this->success(
             ['month' => $month, 'created' => $created],
             $created > 0 ? "تم توليد {$created} كشف راتب لشهر {$month}" : "كشوف شهر {$month} مولَّدة مسبقاً وتم تحديثها",
             $created > 0 ? 201 : 200,
         );
+    }
+
+    /** أسعار صرف شهر: المحفوظة له، أو آخر سعر محفوظ كاقتراح (saved=false) */
+    public function rates(Request $request)
+    {
+        $this->authorize('viewAny', Employee::class);
+
+        $request->validate(['month' => ['nullable', 'date_format:Y-m']]);
+
+        $month = $request->input('month', now()->format('Y-m'));
+
+        return $this->success($this->ratesPayload($month));
+    }
+
+    /** حفظ أسعار شهر — يعيد حساب كشوفه غير المدفوعة، ومرفوض بعد دفع أي كشف فيه */
+    public function updateRates(UpdatePayrollRatesRequest $request)
+    {
+        $month = $request->validated('month');
+
+        $this->payrollService->updateRates($month, array_filter($request->validated('rates')), $request->user());
+
+        return $this->success($this->ratesPayload($month), 'تم حفظ أسعار الصرف');
+    }
+
+    /** locked: دُفع كشف في الشهر فلا تُعدَّل أسعاره */
+    private function ratesPayload(string $month): array
+    {
+        return [
+            'month' => $month,
+            'locked' => $this->payrollService->ratesLocked($month),
+            'rates' => $this->payrollService->ratesFor($month),
+        ];
     }
 
     public function markPaid(MarkSalaryPaidRequest $request, EmployeeSalary $salary)

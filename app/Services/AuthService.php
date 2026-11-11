@@ -80,6 +80,7 @@ class AuthService
                 'role' => 'teacher',
                 'password' => $data['password'],
                 'is_active' => true,
+                'timezone' => $data['timezone'] ?? 'Asia/Riyadh',
                 ...LegalPage::acceptanceFor(LegalPage::TEACHER_POLICY),
             ]);
 

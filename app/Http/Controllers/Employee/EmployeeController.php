@@ -37,7 +37,7 @@ class EmployeeController extends Controller
 
         $summary = [
             'activeEmployees' => Employee::where('is_active', true)->count(),
-            'monthlyBasePayroll' => round((float) Employee::where('is_active', true)->sum('base_salary'), 2),
+            'monthlyBasePayroll' => $this->payrollService->currentMonthlyBasePayroll(), // بالدرهم
         ];
 
         return $this->paginateWithData($employees->through(fn (Employee $e) => new EmployeeResource($e)), $summary);

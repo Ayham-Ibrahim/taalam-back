@@ -38,6 +38,8 @@ class ClassSessionResource extends JsonResource
             'scheduled_at' => $this->scheduled_at,
             'duration_min' => $this->duration_min,
             'original_scheduled_at' => $this->original_scheduled_at,
+            // للأدمن فقط: يعرض مواعيد الجلسة ويُدخلها بها، لا بتوقيت متصفحه (ClassSession::studentTimezone)
+            'student_timezone' => $this->when($isAdmin, fn () => $this->resource->studentTimezone()),
             'status' => $this->status,
             // داخلي للأدمن فقط (ClassSession::$hidden) — لا أثر ظاهر للطالب/المعلم
             'attendance_outcome' => $this->when($isAdmin, fn () => $this->attendance_outcome),

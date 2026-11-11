@@ -45,6 +45,7 @@ class TeacherService
                 'phone' => $data['phone'] ?? null,
                 'role' => 'teacher',
                 'password' => null,
+                'timezone' => $data['timezone'] ?? 'Asia/Riyadh',
             ]);
 
             $teacher = Teacher::create([
@@ -88,6 +89,7 @@ class TeacherService
                 'role' => 'teacher',
                 'password' => $data['password'],
                 'is_active' => true,
+                'timezone' => $data['timezone'] ?? 'Asia/Riyadh',
             ]);
 
             $teacher = Teacher::create([
@@ -140,7 +142,7 @@ class TeacherService
         $this->audit('teacher.password_reset_by_admin', $teacher, [], [], null, $admin->id);
     }
 
-    public function acceptInvitation(string $token, string $password): array
+    public function acceptInvitation(string $token, string $password, ?string $timezone = null): array
     {
         $invitation = AccountInvitation::with('user.teacher')->where('token', $token)->first();
 
@@ -150,12 +152,14 @@ class TeacherService
             ]);
         }
 
-        return DB::transaction(function () use ($invitation, $password) {
+        return DB::transaction(function () use ($invitation, $password, $timezone) {
             $user = $invitation->user;
             // قبول الدعوة يشترط الموافقة على سياسة المعلم (AcceptInvitationRequest)
             $user->update([
                 'password' => $password,
                 'is_active' => true,
+                // منطقة متصفح المعلم لحظة القبول = مكانه الفعلي، تطغى على ما اختاره الأدمن عند الدعوة
+                ...($timezone ? ['timezone' => $timezone] : []),
                 ...LegalPage::acceptanceFor(LegalPage::TEACHER_POLICY),
             ]);
 

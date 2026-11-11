@@ -18,6 +18,8 @@ class AcceptInvitationRequest extends FormRequest
             'token' => ['required', 'string', 'max:255'],
             'password' => ['required', 'confirmed', Password::defaults()],
             'accept_policy' => ['accepted'],
+            // منطقة متصفح المعلم لحظة قبول الدعوة — تطغى على ما اختاره الأدمن عند الدعوة (مكانه الفعلي)
+            'timezone' => ['nullable', 'string', 'max:64', 'timezone:all_with_bc'],
         ];
     }
 

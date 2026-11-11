@@ -88,6 +88,7 @@ class TeacherController extends Controller
         $result = $this->teacherService->acceptInvitation(
             $request->validated('token'),
             $request->validated('password'),
+            $request->validated('timezone'),
         );
 
         return $this->success($result, 'تم تفعيل الحساب بنجاح');

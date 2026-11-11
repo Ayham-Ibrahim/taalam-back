@@ -20,6 +20,8 @@ class CreateStudentAccountRequest extends FormRequest
             'email' => ['required', 'email', 'max:150', 'unique:users,email'],
             'phone' => ['nullable', 'string', 'max:25', 'unique:users,phone'],
             'password' => ['required', Password::defaults()],
+            // يختارها الأدمن من القائمة — بلا قيمة تبقى الافتراضية (Asia/Riyadh)
+            'timezone' => ['nullable', 'string', 'max:64', 'timezone:all_with_bc'],
         ];
     }
 }

@@ -101,6 +101,15 @@ class ClassSession extends Model
         return $this->belongsTo(Booking::class);
     }
 
+    /**
+     * منطقة الطالب الزمنية — يُفسَّر بها موعد يُدخله الأدمن ويُعرض له. جلسات الدورات
+     * (بلا حجز) وحساب بلا منطقة → Asia/Dubai.
+     */
+    public function studentTimezone(): string
+    {
+        return $this->loadMissing('booking.student.user')->booking?->student?->user?->timezone ?? 'Asia/Dubai';
+    }
+
     public function course()
     {
         return $this->belongsTo(Course::class);

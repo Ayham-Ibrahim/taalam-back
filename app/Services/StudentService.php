@@ -31,6 +31,7 @@ class StudentService
                 'role' => 'student',
                 'password' => $data['password'],
                 'is_active' => true,
+                'timezone' => $data['timezone'] ?? 'Asia/Riyadh',
             ]);
 
             $student = Student::create([

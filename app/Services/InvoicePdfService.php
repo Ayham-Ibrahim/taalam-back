@@ -6,6 +6,7 @@ use App\Models\Booking;
 use App\Models\Enrollment;
 use App\Models\Payout;
 use App\Models\PayoutItem;
+use App\Models\SupportPackagePurchase;
 use Mpdf\Mpdf;
 use Mpdf\Output\Destination;
 use RuntimeException;
@@ -73,6 +74,40 @@ class InvoicePdfService
     }
 
     /**
+     * باقة الدعم لا جلسات لها ولا عمود reference — المرجع مشتق من الـ id بنفس
+     * الصيغة التي يعرضها الفرونت في قائمة الفواتير.
+     */
+    public function forSupportPackagePurchase(SupportPackagePurchase $purchase): string
+    {
+        if ($purchase->status !== 'confirmed') {
+            throw new RuntimeException('لا توجد فاتورة لاشتراك لم يُدفع');
+        }
+
+        $purchase->loadMissing(['student.user', 'academicSupporter.user', 'supportPackage.subjects', 'payments']);
+
+        return $this->render([
+            'reference' => self::supportPackagePurchaseReference($purchase),
+            'issueDate' => $this->paidAt($purchase),
+            'studentName' => $purchase->student?->user?->name,
+            'studentEmail' => $purchase->student?->user?->contactEmail(),
+            'teacherName' => $purchase->academicSupporter?->user?->name,
+            'teacherLabel' => 'الداعم الأكاديمي',
+            'itemTitle' => $purchase->supportPackage?->title,
+            'subject' => $purchase->supportPackage?->subjects->pluck('name_ar')->join('، ') ?: null,
+            'showSessions' => false,
+            'amount' => $purchase->amount,
+            'currency' => $purchase->currency,
+            'paymentMethod' => 'Stripe',
+            'statusLabel' => $this->statusLabel($purchase->status),
+        ]);
+    }
+
+    public static function supportPackagePurchaseReference(SupportPackagePurchase $purchase): string
+    {
+        return 'SP-'.str_pad((string) $purchase->id, 6, '0', STR_PAD_LEFT);
+    }
+
+    /**
      * كشف مستحقات (لا فاتورة طالب) — متاح بحالتيه (غير مدفوع/مدفوع): بنوده ثابتة منذ التوليد، والحالة
      * ومرجع التحويل يظهران فيه. قالب منفصل عن invoices.pdf (بند واحد ثابت) لأن كشف المستحقات يحتاج
      * سطراً لكل جلسة ضمن الفترة.
@@ -116,7 +151,7 @@ class InvoicePdfService
         };
     }
 
-    private function paidAt(Booking|Enrollment $record): string
+    private function paidAt(Booking|Enrollment|SupportPackagePurchase $record): string
     {
         $paidAt = $record->payments->firstWhere('status', 'paid')?->paid_at ?? $record->confirmed_at ?? $record->created_at;
 

@@ -27,6 +27,8 @@ class RegisterTeacherRequest extends FormRequest
             'password' => ['required', 'confirmed', Password::defaults()],
             // موافقة صريحة على سياسة المعلم (legal_pages: teacher-policy) — تُحفظ في users.policy_accepted_at
             'accept_policy' => ['accepted'],
+            // منطقة متصفح المعلم الفعلية وقت التسجيل — تُلتقَط مرة واحدة هنا فقط
+            'timezone' => ['nullable', 'string', 'max:64', 'timezone:all_with_bc'],
         ];
     }
 
