@@ -28,6 +28,7 @@ class ClassSession extends Model
         'attendance_outcome',
         'teacher_payout_percent',
         'teacher_compensation_amount',
+        'teacher_compensation_percent',
         'started_at',
         'ended_at',
         'cancellation_reason',
@@ -45,6 +46,7 @@ class ClassSession extends Model
         'attendance_outcome',
         'teacher_payout_percent',
         'teacher_compensation_amount',
+        'teacher_compensation_percent',
         // رمز رابط تقييم الجودة — يُعرض صراحةً عبر ClassSessionResource لمن يحق له فقط
         'quality_rating_token',
     ];
@@ -52,7 +54,7 @@ class ClassSession extends Model
     /** دخل المعلم وطالب واحد على الأقل — مستحق كامل */
     public const OUTCOME_ATTENDED = 'attended';
 
-    /** دخل المعلم ولم يدخل أي طالب — تعويض ثابت من الإعداد (teacher_compensation_amount) بدل مستحقها */
+    /** دخل المعلم ولم يدخل أي طالب — تعويض بنسبة الإعداد من قيمتها (teacher_compensation_amount) بدل مستحقها */
     public const OUTCOME_STUDENT_NO_SHOW = 'student_no_show';
 
     /** لم يدخل المعلم خلال المهلة (student_no_show_after_minutes) — لا مستحق، ولو دخل بعدها */
@@ -69,6 +71,7 @@ class ClassSession extends Model
         return [
             'teacher_payout_percent' => 'decimal:2',
             'teacher_compensation_amount' => 'decimal:2',
+            'teacher_compensation_percent' => 'decimal:2',
             'scheduled_at' => 'datetime',
             'original_scheduled_at' => 'datetime',
             'started_at' => 'datetime',

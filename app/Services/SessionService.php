@@ -28,6 +28,7 @@ class SessionService
         private readonly BigBlueButtonService $bbb,
         private readonly NotificationService $notifications,
         private readonly ScheduleConflictService $conflicts,
+        private readonly PayoutService $payouts,
     ) {}
 
     /**
@@ -400,7 +401,7 @@ class SessionService
      *
      * الحالة تبقى 'completed' لكل جلسة منتهية كما كانت (لا أثر ظاهر للطالب/المعلم)، لكن
      * تُحسم معها نتيجة الحضور التلقائي من session_join_logs ونسبة مستحق المعلم منها
-     * (راجع attendanceOutcome)، ولغياب الطلاب مبلغ التعويض الثابت بدل النسبة — يُثبَّتان
+     * (راجع attendanceOutcome)، ولغياب الطلاب مبلغ التعويض (نسبة الإعداد من قيمة الجلسة) — يُثبَّتان
      * لحظتها فلا يغيّر تعديل الإعداد لاحقاً جلسات سابقة. سجل الانضمام لا يُكتب إلا ضمن نافذة الجلسة (resolveJoinUrl)، فهو
      * نهائي بمجرد انتهاء وقتها.
      *
@@ -412,7 +413,7 @@ class SessionService
     public function completeEndedSessions(): int
     {
         $trackedSince = SessionJoinLog::trackingStartedAt();
-        $noShowCompensation = (float) $this->settings->get('student_no_show_teacher_compensation_amount', 0);
+        $noShowCompensationPercent = (float) $this->settings->get('student_no_show_teacher_compensation_percent', 0);
         $lateMinutes = (int) $this->settings->get('student_no_show_after_minutes', 20);
         $completed = 0;
 
@@ -426,13 +427,21 @@ class SessionService
                 'booking as has_paid_booking' => fn ($q) => $q->whereIn('status', ClassSession::PAID_BOOKING_STATUSES),
                 'booking as is_free_booking' => fn ($q) => $q->whereHas('package', fn ($p) => $p->where('student_price', '<=', 0)),
             ])
-            ->chunkById(200, function ($sessions) use ($trackedSince, $noShowCompensation, $lateMinutes, &$completed) {
+            ->chunkById(200, function ($sessions) use ($trackedSince, $noShowCompensationPercent, $lateMinutes, &$completed) {
                 foreach ($sessions as $session) {
                     $isPaid = $session->has_any_attendee ? $session->has_paid_attendee : $session->has_paid_booking;
 
                     $outcome = $isPaid
                         ? $this->attendanceOutcome($session, $trackedSince, $lateMinutes)
                         : ClassSession::OUTCOME_NO_PAID_ATTENDEE;
+
+                    // غياب الطلاب: نسبة من قيمة الجلسة مرة واحدة بدل مستحقها، يتحمّلها هامش المنصة.
+                    // لا تعويض عن جلسة تعويضية — يُصرف مرة واحدة على الأصلية لكل سلسلة تعويض.
+                    // ولا عن جلسة باقة مجانية — لا مستحق للمعلم عنها أصلاً فلا شيء يُعوَّض
+                    $compensated = $outcome === ClassSession::OUTCOME_STUDENT_NO_SHOW && ! $session->is_makeup && ! $session->is_free_booking;
+                    $compensation = $compensated
+                        ? round(($this->payouts->sessionValues(collect([$session]))[$session->id] ?? 0.0) * $noShowCompensationPercent / 100, 2)
+                        : null;
 
                     $completed += ClassSession::whereKey($session->id)
                         ->where('status', 'scheduled')
@@ -446,12 +455,8 @@ class SessionService
                                 ClassSession::OUTCOME_UNTRACKED => null,
                                 default => 100,
                             },
-                            // غياب الطلاب: مبلغ ثابت مرة واحدة للجلسة بدل مستحقها، يتحمّله هامش المنصة.
-                            // لا تعويض عن جلسة تعويضية — يُصرف مرة واحدة على الأصلية لكل سلسلة تعويض.
-                            // ولا عن جلسة باقة مجانية — لا مستحق للمعلم عنها أصلاً فلا شيء يُعوَّض
-                            'teacher_compensation_amount' => $outcome === ClassSession::OUTCOME_STUDENT_NO_SHOW && ! $session->is_makeup && ! $session->is_free_booking
-                                ? $noShowCompensation
-                                : null,
+                            'teacher_compensation_amount' => $compensation,
+                            'teacher_compensation_percent' => $compensated ? $noShowCompensationPercent : null,
                         ]);
                 }
             });

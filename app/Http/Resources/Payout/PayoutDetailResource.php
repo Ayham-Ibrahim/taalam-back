@@ -47,6 +47,9 @@ class PayoutDetailResource extends PayoutResource
                         'compensationAmount' => $this->when($isFinance, fn () => $session?->teacher_compensation_amount !== null
                             ? (float) $session->teacher_compensation_amount
                             : null),
+                        'compensationPercent' => $this->when($isFinance, fn () => $session?->teacher_compensation_percent !== null
+                            ? (float) $session->teacher_compensation_percent
+                            : null),
                     ];
                 })
                 ->all(),

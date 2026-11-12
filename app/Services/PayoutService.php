@@ -725,6 +725,23 @@ class PayoutService
     }
 
     /**
+     * قيمة كل جلسة للمعلم قبل نسبة الحضور والسقفين: حصتها من مستحق الدورة، أو مجموع حصص
+     * حجوزاتها المدفوعة. أساس تعويض غياب الطلاب النسبي (SessionService::completeEndedSessions).
+     *
+     * @return array<int, float> [class_session_id => value]
+     */
+    public function sessionValues(Collection $sessions): array
+    {
+        $values = $this->courseSessionValues($sessions);
+
+        foreach ($this->bookingShares($sessions)['shares'] as $sessionId => $shares) {
+            $values[$sessionId] = array_sum($shares);
+        }
+
+        return $values;
+    }
+
+    /**
      * دورة: مستحق المركز الكلي من كل تسجيلات الدورة المدفوعة ÷ عدد جلساتها — مرة واحدة
      * لكل دورة لا لكل جلسة.
      *
