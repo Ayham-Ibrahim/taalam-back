@@ -5,6 +5,7 @@ use App\Jobs\CreateMissingBbbRoomsJob;
 use App\Jobs\ExpireStaleBookingsJob;
 use App\Jobs\FetchSessionRecordingsJob;
 use App\Jobs\SendSessionQualityRatingRequestsJob;
+use App\Jobs\SendSubscriptionEndedEmailsJob;
 use App\Jobs\SendSessionRemindersJob;
 use App\Services\RankingService;
 use Illuminate\Foundation\Inspiring;
@@ -26,6 +27,9 @@ Schedule::job(new SendSessionRemindersJob)->everyMinute();
 
 // عند بدء الجلسة ودخول المعلم والطالب: رابط تقييم جودتها للطالب + إشعار شكر بنفس الرابط للمعلم.
 Schedule::job(new SendSessionQualityRatingRequestsJob)->everyMinute();
+
+// انتهت كل جلسات اشتراك الطالب بباقة: بريد لحسابه يدعوه للتجديد مع رابط بروفايل المعلم.
+Schedule::job(new SendSubscriptionEndedEmailsJob)->everyFiveMinutes();
 
 // شبكة أمان: إنشاء غرفة BBB لأي جلسة مدفوعة قادمة بقيت بلا رابط انضمام لأي سبب.
 Schedule::job(new CreateMissingBbbRoomsJob)->everyFiveMinutes();
