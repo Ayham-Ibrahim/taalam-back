@@ -114,6 +114,9 @@ Route::post('webhooks/stripe', [PaymentWebhookController::class, 'stripe']);
 // بحث السوق العام، ملف المعلم العام، باقاته النشطة، وتقييماته — بلا مصادقة عمداً.
 // الحجز نفسه فقط يتطلب تسجيل الدخول (داخل مجموعة auth:sanctum أدناه).
 Route::get('teachers/search', [TeacherSearchController::class, 'index']);
+// قبل teachers/{teacher} العام — وإلا يُلتقط "export" كمعرّف معلم
+Route::middleware('auth:sanctum')->get('teachers/export', [TeacherController::class, 'export']);
+Route::middleware('auth:sanctum')->get('teachers/export/columns', [TeacherController::class, 'exportColumns']);
 Route::get('teachers/{teacher}', [TeacherController::class, 'show']);
 Route::get('teachers/{teacher}/packages', [PackageController::class, 'indexForTeacher']);
 Route::get('teachers/{teacher}/courses', [CourseController::class, 'indexForTeacher']);
@@ -382,6 +385,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('students/import', [StudentImportController::class, 'store']);
     Route::post('students/create-account', [StudentController::class, 'store']);
     Route::get('students', [StudentController::class, 'index']);
+    // قبل students/{student} — وإلا يُلتقط "export" كمعرّف طالب
+    Route::get('students/export', [StudentController::class, 'export']);
+    Route::get('students/export/columns', [StudentController::class, 'exportColumns']);
     Route::get('students/{student}', [StudentController::class, 'show']);
     Route::put('students/{student}', [StudentController::class, 'update']);
     Route::put('students/{student}/password', [StudentController::class, 'resetPassword']);

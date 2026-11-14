@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Teacher;
 
+use App\Exports\TeachersExport;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Teacher\AcceptInvitationRequest;
 use App\Http\Requests\Teacher\AdminResetTeacherPasswordRequest;
@@ -20,7 +21,9 @@ use App\Models\Badge;
 use App\Models\Teacher;
 use App\Services\AuthService;
 use App\Services\TeacherService;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
+use Maatwebsite\Excel\Facades\Excel;
 
 class TeacherController extends Controller
 {
@@ -33,8 +36,35 @@ class TeacherController extends Controller
     {
         $this->authorize('viewAny', Teacher::class);
 
-        $teachers = Teacher::query()
+        $teachers = $this->filteredQuery($request)
             ->with('user:id,name,email,phone')
+            ->paginate($request->integer('per_page', 20));
+
+        return $this->paginate($teachers->through(fn (Teacher $teacher) => new AdminTeacherResource($teacher)));
+    }
+
+    /** نفس قائمة index (بفلاترها) كملف Excel كامل بلا صفحات — بالأعمدة المختارة (columns[]) أو كلها */
+    public function export(Request $request)
+    {
+        $this->authorize('viewAny', Teacher::class);
+
+        $columns = $request->validate(TeachersExport::columns()->rules())['columns'] ?? null;
+
+        return Excel::download(new TeachersExport($this->filteredQuery($request), $columns), 'teachers.xlsx');
+    }
+
+    /** الأعمدة المتاحة للتصدير — تعرضها الواجهة للاختيار */
+    public function exportColumns()
+    {
+        $this->authorize('viewAny', Teacher::class);
+
+        return $this->success(TeachersExport::columns()->options());
+    }
+
+    /** فلاتر صفحة إدارة المعلمين — مشتركة بين القائمة والتصدير كي يطابق الملف ما يراه الأدمن */
+    private function filteredQuery(Request $request): Builder
+    {
+        return Teacher::query()
             ->when($request->filled('status'), fn ($q) => $this->applyStatusFilter($q, $request->string('status')->value()))
             ->when($request->filled('teacher_type'), fn ($q) => $q->where('teacher_type', $request->string('teacher_type')))
             ->when($request->filled('search'), function ($q) use ($request) {
@@ -44,10 +74,7 @@ class TeacherController extends Controller
                         ->orWhere('email', 'like', "%{$search}%");
                 });
             })
-            ->latest()
-            ->paginate($request->integer('per_page', 20));
-
-        return $this->paginate($teachers->through(fn (Teacher $teacher) => new AdminTeacherResource($teacher)));
+            ->latest();
     }
 
     /**
