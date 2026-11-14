@@ -23,8 +23,9 @@ class PackageService
     /**
      * باقة حملة مخفضة ينشئها الأدمن باسم معلم — فردية دائماً، نشطة فوراً بلا دورة مراجعة
      * وهامش: السعر الذي يحدده الأدمن هو سعر الطالب، ومبلغه كله للمنصة (teacher_price = 0،
-     * platform_revenue = السعر) لأن المعلم يأخذ عنها راتباً شهرياً ثابتاً. طلبات حجزها تمر
-     * بموافقة المعلم على الموعد كأي باقة فردية، وتظهر لحسابات الحملة فقط.
+     * platform_revenue = السعر) لأن المعلم يأخذ عنها راتباً شهرياً ثابتاً. حجزها ينتقل
+     * إلى الدفع مباشرة بلا موافقة المعلم (BookingService::requestIndividualBooking)، وتظهر
+     * لحسابات الحملة فقط. أوقاتها نوافذ يحددها الأدمن (syncCampaignSchedules) لا أيام توفّر المعلم.
      */
     public function createCampaignPackage(Teacher $teacher, User $admin, array $data): Package
     {
@@ -39,7 +40,8 @@ class PackageService
 
             $package = Package::create([
                 'teacher_id' => $teacher->id,
-                'schedule_timezone' => $teacher->loadMissing('user')->user->timezone ?? 'UTC',
+                // الأدمن يُدخل ساعات النوافذ بمنطقته هو (أو المحددة صراحةً) لا منطقة المعلم
+                'schedule_timezone' => $data['schedule_timezone'] ?? $admin->timezone ?? 'UTC',
                 'title' => $data['title'],
                 'description' => $data['description'] ?? null,
                 'subject_id' => $data['subject_id'] ?? null,
@@ -67,7 +69,7 @@ class PackageService
                 $package->stages()->sync($data['stage_ids']);
             }
 
-            $this->syncSchedules($package, $data['schedules'], $teacher);
+            $this->syncCampaignSchedules($package, $data['schedules']);
 
             $this->audit('package.campaign_created', $package, [], [
                 'teacher_id' => $teacher->id,
@@ -250,6 +252,32 @@ class PackageService
         $this->audit('package.enabled', $package);
 
         return $package;
+    }
+
+    /**
+     * نوافذ باقة الحملة — بلا ربط بأيام توفّر المعلم (الأدمن يحددها). كل صف يوم أسبوع مع
+     * ساعات اختيارية (بلا ساعات = اليوم كله)، ويجب أن تتسع النافذة لجلسة كاملة على الأقل.
+     */
+    private function syncCampaignSchedules(Package $package, array $schedules): void
+    {
+        $durationMinutes = (int) $this->settings->get('session_duration_minutes', 60);
+
+        foreach ($schedules as $schedule) {
+            $start = $schedule['start_time'] ?? null;
+            $end = $schedule['end_time'] ?? null;
+
+            if ($start && $end && Carbon::parse($start)->diffInMinutes(Carbon::parse($end)) < $durationMinutes) {
+                throw ValidationException::withMessages([
+                    'schedules' => ["كل وقت متاح يجب أن يتسع لجلسة كاملة ({$durationMinutes} دقيقة) على الأقل"],
+                ]);
+            }
+
+            $package->schedules()->create([
+                'day_of_week' => (int) $schedule['day_of_week'],
+                'start_time' => $start,
+                'end_time' => $end,
+            ]);
+        }
     }
 
     /**

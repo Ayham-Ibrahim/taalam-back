@@ -162,7 +162,72 @@ class CampaignPackageTest extends TestCase
 
         $booking = app(BookingService::class)->requestIndividualBooking($student->fresh(), $campaignPackage, $this->slots(Carbon::now()->next(3), 5));
 
-        $this->assertSame('pending_teacher_confirmation', $booking->status);
+        $this->assertSame('pending_payment', $booking->status);
+    }
+
+    public function test_admin_sets_campaign_windows_with_hours_regardless_of_teacher_availability(): void
+    {
+        Notification::fake();
+        $teacher = $this->teacher();
+        $admin = User::factory()->admin()->create(['timezone' => 'Asia/Dubai']);
+
+        // المعلم بلا أي أيام توفّر — الأدمن يحدد النوافذ بنفسه
+        $this->as($admin->createToken('t')->plainTextToken)
+            ->postJson('/api/admin/campaign-packages', [
+                'teacher_id' => $teacher->id,
+                'title' => 'باقة الحملة',
+                'sessions_count' => 2,
+                'price' => 100,
+                'schedules' => [
+                    ['day_of_week' => 1, 'start_time' => '16:00', 'end_time' => '20:00'],
+                    ['day_of_week' => 1, 'start_time' => '08:00', 'end_time' => '10:00'],
+                    ['day_of_week' => 5],
+                ],
+            ])->assertStatus(201)
+            ->assertJsonPath('data.schedule_timezone', 'Asia/Dubai')
+            ->assertJsonCount(3, 'data.schedules');
+
+        $this->as($admin->createToken('t2')->plainTextToken)
+            ->postJson('/api/admin/campaign-packages', [
+                'teacher_id' => $teacher->id, 'title' => 'ضيقة', 'sessions_count' => 1, 'price' => 100,
+                'schedules' => [['day_of_week' => 1, 'start_time' => '16:00', 'end_time' => '16:30']],
+            ])->assertStatus(422);
+    }
+
+    public function test_campaign_booking_skips_teacher_approval_and_respects_windows_and_conflicts(): void
+    {
+        $teacher = $this->teacher();
+        $package = $this->campaignPackage($teacher, sessions: 1);
+        $package->schedules()->delete();
+        $package->schedules()->create(['day_of_week' => 3, 'start_time' => '16:00', 'end_time' => '20:00']);
+        $service = app(BookingService::class);
+        $day = Carbon::now()->next(3)->toDateString();
+
+        // خارج النافذة، وجلسة تتجاوز نهايتها (19:30 + 60 دقيقة)، ويوم غير متاح
+        foreach (['15:00', '19:30'] as $time) {
+            try {
+                $service->requestIndividualBooking($this->campaignStudent(), $package, [['date' => $day, 'start_time' => $time]]);
+                $this->fail("قُبل موعد خارج النافذة: {$time}");
+            } catch (ValidationException $e) {
+                $this->assertArrayHasKey('slots', $e->errors());
+            }
+        }
+
+        $first = $this->campaignStudent();
+        $booking = $service->requestIndividualBooking($first, $package, [['date' => $day, 'start_time' => '17:00']]);
+
+        $this->assertSame('pending_payment', $booking->status);
+        $this->assertNotNull($booking->hold_expires_at);
+        $this->assertCount(1, $booking->sessions);
+        $this->assertSame('pending', $booking->payments()->sole()->status);
+
+        // نفس موعد المعلم لطالب آخر — تعارض
+        try {
+            $service->requestIndividualBooking($this->campaignStudent(), $package, [['date' => $day, 'start_time' => '17:30']]);
+            $this->fail('حُجز موعد يتعارض مع جلسة المعلم');
+        } catch (ValidationException) {
+            $this->assertSame(1, ClassSession::count());
+        }
     }
 
     public function test_regular_student_cannot_book_campaign_package_nor_use_coupons_on_it(): void
@@ -251,11 +316,11 @@ class CampaignPackageTest extends TestCase
         return $package;
     }
 
-    private function campaignPackage(Teacher $teacher): Package
+    private function campaignPackage(Teacher $teacher, int $sessions = 5): Package
     {
         $package = Package::create([
             'teacher_id' => $teacher->id, 'title' => 'حملة', 'session_format' => 'individual', 'capacity' => 1,
-            'audience' => Package::AUDIENCE_CAMPAIGN, 'sessions_count' => 5, 'teacher_price' => 0,
+            'audience' => Package::AUDIENCE_CAMPAIGN, 'sessions_count' => $sessions, 'teacher_price' => 0,
             'platform_margin_percent' => 100, 'student_price' => 150, 'platform_revenue' => 150,
             'status' => 'active', 'approved_at' => now(),
         ]);

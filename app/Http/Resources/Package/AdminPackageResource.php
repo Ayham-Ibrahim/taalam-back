@@ -28,6 +28,8 @@ class AdminPackageResource extends JsonResource
             'is_trial' => (bool) $this->is_trial,
             // campaign: باقة حملة مخفضة — لحسابات الحملة فقط، مبلغها للمنصة والمعلم براتب ثابت
             'audience' => $this->audience ?? 'public',
+            // منطقة ساعات schedules (start_time/end_time) — لازمة لعرض نوافذ باقة الحملة بمنطقة المشاهد
+            'schedule_timezone' => $this->schedule_timezone,
             'capacity' => $this->capacity,
             'enrolled_count' => $this->enrolled_count,
             'sessions_count' => $this->sessions_count,
