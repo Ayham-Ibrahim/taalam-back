@@ -18,24 +18,30 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-// مرة واحدة بعد إضافة جدول regions (ويمكن إعادته بأمان): يطابق students.city النصّي
-// القديم مع الولايات للطلاب بلا region_id، ويطبع القيم غير المطابقة لمراجعتها يدوياً.
+// مرة واحدة بعد إضافة جدولي countries/regions (ويمكن إعادته بأمان): يطابق students.city
+// و students.country النصّيين القديمين مع الولايات/الدول للطلاب بلا موقع، ويطبع القيم غير
+// المطابقة لمراجعتها يدوياً. الولاية تضبط دولتها تلقائياً (Student::saving).
 Artisan::command('students:match-regions {--dry-run : عرض النتيجة دون حفظ}', function (RegionMatcher $matcher) {
-    $students = Student::query()->whereNull('region_id')->whereNotNull('city')->get(['id', 'city']);
+    $students = Student::query()
+        ->whereNull('country_id')
+        ->where(fn ($q) => $q->whereNotNull('city')->orWhereNotNull('country'))
+        ->get(['id', 'city', 'country', 'country_id', 'region_id']);
     $matched = 0;
     $unmatched = [];
 
     foreach ($students as $student) {
         $regionId = $matcher->match($student->city);
+        $countryId = $regionId ? null : $matcher->matchCountry($student->country);
 
-        if ($regionId === null) {
-            $unmatched[$student->city] = ($unmatched[$student->city] ?? 0) + 1;
+        if ($regionId === null && $countryId === null) {
+            $key = trim(($student->country ?? '').' / '.($student->city ?? ''), ' /');
+            $unmatched[$key] = ($unmatched[$key] ?? 0) + 1;
 
             continue;
         }
 
         if (! $this->option('dry-run')) {
-            $student->update(['region_id' => $regionId]);
+            $student->update($regionId ? ['region_id' => $regionId] : ['country_id' => $countryId]);
         }
         $matched++;
     }
@@ -45,9 +51,9 @@ Artisan::command('students:match-regions {--dry-run : عرض النتيجة دو
     if ($unmatched) {
         arsort($unmatched);
         $this->warn('قيم لم تُطابَق:');
-        $this->table(['city', 'عدد الطلاب'], collect($unmatched)->map(fn ($count, $city) => [$city, $count])->values()->all());
+        $this->table(['country / city', 'عدد الطلاب'], collect($unmatched)->map(fn ($count, $value) => [$value, $count])->values()->all());
     }
-})->purpose('Match legacy students.city values to regions');
+})->purpose('Match legacy students.city/country values to regions and countries');
 
 Schedule::job(new ExpireStaleBookingsJob)->everyMinute();
 

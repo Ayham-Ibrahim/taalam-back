@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Student;
 
 use App\Models\Student;
+use App\Support\StudentLocationRules;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rules\Password;
 
@@ -22,7 +23,12 @@ class CreateStudentAccountRequest extends FormRequest
             'password' => ['required', Password::defaults()],
             // يختارها الأدمن من القائمة — بلا قيمة تبقى الافتراضية (Asia/Riyadh)
             'timezone' => ['nullable', 'string', 'max:64', 'timezone:all_with_bc'],
-            'region_id' => ['nullable', 'exists:regions,id'],
+            ...StudentLocationRules::rules($this->input('country_id')),
         ];
+    }
+
+    public function messages(): array
+    {
+        return StudentLocationRules::messages();
     }
 }

@@ -23,12 +23,29 @@ class Student extends Model
         'birth_date',
         'city',
         'country',
+        'country_id',
         'region_id',
         'guardian_name',
         'guardian_phone',
         'imported',
         'imported_by',
     ];
+
+    /**
+     * الدولة تتبع الولاية دائماً: ولاية جديدة (أو دولة فارغة مع ولاية) تضبط دولتها، وتغيير
+     * الدولة يُسقط ولاية لا تتبعها — فلا يختلفان أبداً مهما كان مصدر التعديل (نموذج، استيراد، أمر).
+     */
+    protected static function booted(): void
+    {
+        static::saving(function (Student $student) {
+            if ($student->region_id && ($student->isDirty('region_id') || $student->country_id === null)) {
+                $student->country_id = Region::whereKey($student->region_id)->value('country_id');
+            } elseif ($student->region_id && $student->isDirty('country_id')
+                && Region::whereKey($student->region_id)->value('country_id') !== (int) $student->country_id) {
+                $student->region_id = null;
+            }
+        });
+    }
 
     protected function casts(): array
     {
@@ -46,6 +63,12 @@ class Student extends Model
     public function curriculum()
     {
         return $this->belongsTo(Curriculum::class);
+    }
+
+    /** الدولة من جدول countries — ليست country() لأن عمود students.country النصّي القديم يحمل الاسم نفسه */
+    public function locationCountry()
+    {
+        return $this->belongsTo(Country::class, 'country_id');
     }
 
     public function region()

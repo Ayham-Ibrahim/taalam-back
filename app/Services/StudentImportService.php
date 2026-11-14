@@ -123,6 +123,7 @@ class StudentImportService
             'birth_date' => $data['birth_date'] ?? null,
             'city' => $data['city'] ?? null,
             'country' => $data['country'] ?? null,
+            'country_id' => $data['country_id'] ?? null,
             'region_id' => $data['region_id'] ?? null,
             'guardian_name' => $data['guardian_name'] ?? null,
             'guardian_phone' => $data['guardian_phone'] ?? null,
@@ -202,6 +203,9 @@ class StudentImportService
         } else {
             $data['region_id'] = $this->regionMatcher->match($data['city'] ?? null);
         }
+
+        // الدولة نص حر قديماً في هذه الملفات — تُطابَق بهدوء؛ الولاية إن وُجدت تضبطها على أي حال
+        $data['country_id'] = $this->regionMatcher->matchCountry($data['country'] ?? null);
 
         if (! empty($data['curriculum_code'])) {
             $data['curriculum_id'] = $this->resolveByCode(Curriculum::class, $data['curriculum_code'], 'curriculum_code');

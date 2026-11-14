@@ -53,6 +53,7 @@ class AuthService
                 'birth_date' => $data['birth_date'] ?? null,
                 'guardian_name' => $data['guardian_name'] ?? null,
                 'guardian_phone' => $data['guardian_phone'] ?? null,
+                'country_id' => $data['country_id'] ?? null,
                 'region_id' => $data['region_id'] ?? null,
             ]);
 
@@ -89,7 +90,7 @@ class AuthService
                 'password' => $data['password'],
                 'timezone' => $data['timezone'] ?? 'Asia/Riyadh',
                 ...LegalPage::acceptanceFor(LegalPage::STUDENT_POLICY),
-            ], ['region_id' => $data['region_id'] ?? null]);
+            ], ['country_id' => $data['country_id'] ?? null, 'region_id' => $data['region_id'] ?? null]);
 
             $user->setRelation('student', $student);
 

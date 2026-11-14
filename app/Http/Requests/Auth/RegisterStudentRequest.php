@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Auth;
 
+use App\Support\StudentLocationRules;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
@@ -38,8 +39,8 @@ class RegisterStudentRequest extends FormRequest
             'course_field_id' => ['required_if:education_type,training', 'nullable', 'exists:course_fields,id'],
             'level' => ['required_if:education_type,training', 'nullable', Rule::in(['beginner', 'intermediate', 'advanced'])],
 
-            // الولاية — تغذي تقارير التسويق (ولاية × منهاج)
-            'region_id' => ['nullable', 'exists:regions,id'],
+            // الدولة والولاية — تغذي تقارير التسويق (موقع × منهاج)
+            ...StudentLocationRules::rules($this->input('country_id')),
 
             'birth_date' => ['nullable', 'date', 'before:today'],
             'guardian_name' => ['nullable', 'string', 'max:150'],
@@ -58,6 +59,7 @@ class RegisterStudentRequest extends FormRequest
             'password' => 'كلمة المرور',
             'education_type' => 'نوع التعليم',
             'curriculum_id' => 'المنهج',
+            'country_id' => 'الدولة',
             'region_id' => 'الولاية',
             'stage_id' => 'المرحلة',
             'university_id' => 'الجامعة',
@@ -65,5 +67,10 @@ class RegisterStudentRequest extends FormRequest
             'course_field_id' => 'مجال الدورة',
             'accept_policy' => 'الموافقة على سياسة الطالب',
         ];
+    }
+
+    public function messages(): array
+    {
+        return StudentLocationRules::messages();
     }
 }

@@ -10,6 +10,7 @@ use App\Http\Requests\Student\UploadStudentAvatarRequest;
 use App\Http\Resources\Student\StudentIndexResource;
 use App\Http\Resources\Student\StudentProfileResource;
 use App\Models\Student;
+use App\Support\StudentLocationRules;
 use App\Services\AuthService;
 use App\Services\StudentService;
 use Illuminate\Http\Request;
@@ -37,13 +38,32 @@ class StudentController extends Controller
         return $this->success(new StudentProfileResource($student), 'تم تحديث الملف الشخصي بنجاح');
     }
 
+    /**
+     * الطالب يحدد دولته وولايته وحدهما — PUT /students/{id} يتطلب كل الحقول الأكاديمية،
+     * وهذا لنافذة تطلب الموقع فقط ممن أكمل ملفه قبل إضافته.
+     */
+    public function updateMyLocation(Request $request)
+    {
+        $student = $request->user()->student;
+        abort_unless($student, 403);
+
+        $data = $request->validate(
+            StudentLocationRules::rules($request->input('country_id'), requireCountry: true),
+            StudentLocationRules::messages(),
+        );
+
+        $student->update(['country_id' => $data['country_id'], 'region_id' => $data['region_id'] ?? null]);
+
+        return $this->success($student->only(['country_id', 'region_id']), 'تم حفظ الموقع');
+    }
+
     /** بحث/فهرسة الطلاب — يغذي منتقي الحجز اليدوي لدى الأدمن (StudentPolicy::viewAny) */
     public function index(Request $request)
     {
         $this->authorize('viewAny', Student::class);
 
         $students = Student::query()
-            ->with(['user:id,name,email,phone,avatar_path,is_active,created_at', 'region:id,name_ar'])
+            ->with(['user:id,name,email,phone,avatar_path,is_active,created_at', 'locationCountry:id,name_ar', 'region:id,name_ar'])
             ->when($request->filled('search'), function ($query) use ($request) {
                 $search = $request->string('search');
                 $query->whereHas('user', function ($userQuery) use ($search) {
@@ -52,6 +72,7 @@ class StudentController extends Controller
                 });
             })
             ->when($request->filled('education_type'), fn ($q) => $q->where('education_type', $request->string('education_type')->value()))
+            ->when($request->filled('country_id'), fn ($q) => $q->where('country_id', $request->integer('country_id')))
             ->when($request->filled('region_id'), fn ($q) => $q->where('region_id', $request->integer('region_id')))
             ->latest()
             ->paginate($request->integer('per_page', 20));
@@ -63,7 +84,7 @@ class StudentController extends Controller
     {
         $this->authorize('view', $student);
 
-        $student->load(['user:id,name,email,phone,avatar_path,whatsapp,gender', 'curriculum:id,name_ar', 'region:id,name_ar', 'stage:id,name_ar', 'university:id,name_ar', 'major:id,name_ar', 'courseField:id,name_ar']);
+        $student->load(['user:id,name,email,phone,avatar_path,whatsapp,gender', 'curriculum:id,name_ar', 'locationCountry:id,name_ar', 'region:id,name_ar', 'stage:id,name_ar', 'university:id,name_ar', 'major:id,name_ar', 'courseField:id,name_ar']);
 
         return $this->success(new StudentProfileResource($student));
     }

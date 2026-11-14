@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Student;
 
+use App\Support\StudentLocationRules;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -29,8 +30,8 @@ class UpdateStudentProfileRequest extends FormRequest
             'course_field_id' => ['required_if:education_type,training', 'nullable', 'exists:course_fields,id'],
             'level' => ['required_if:education_type,training', 'nullable', Rule::in(['beginner', 'intermediate', 'advanced'])],
 
-            // الولاية — تغذي تقارير التسويق (ولاية × منهاج)
-            'region_id' => ['nullable', 'exists:regions,id'],
+            // الدولة والولاية — تغذي تقارير التسويق (موقع × منهاج)
+            ...StudentLocationRules::rules($this->input('country_id')),
 
             'birth_date' => ['nullable', 'date', 'before:today'],
             // ولي الأمر يخص الطالب المدرسي فقط — الجامعي/التدريبي راشد قانونياً
@@ -46,6 +47,7 @@ class UpdateStudentProfileRequest extends FormRequest
         return [
             'education_type' => 'نوع التعليم',
             'curriculum_id' => 'المنهج',
+            'country_id' => 'الدولة',
             'region_id' => 'الولاية',
             'stage_id' => 'المرحلة',
             'grade' => 'الصف الدراسي',
@@ -60,6 +62,7 @@ class UpdateStudentProfileRequest extends FormRequest
     public function messages(): array
     {
         return [
+            ...StudentLocationRules::messages(),
             'grade.integer' => 'الصف الدراسي يجب أن يكون رقمًا صحيحًا بين 1 و 12.',
             'grade.min' => 'الصف الدراسي يجب أن يكون بين 1 و 12.',
             'grade.max' => 'الصف الدراسي يجب أن يكون بين 1 و 12.',

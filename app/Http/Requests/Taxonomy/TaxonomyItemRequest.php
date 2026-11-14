@@ -65,11 +65,19 @@ class TaxonomyItemRequest extends FormRequest
                 'name_ar' => ['required', 'string', 'max:60'],
                 'is_active' => ['nullable', 'boolean'],
             ],
-            'regions' => [
-                'code' => ['required', 'string', 'max:30', Rule::unique('regions', 'code')->ignore($id)],
+            'countries' => [
+                'code' => ['required', 'string', 'max:10', Rule::unique('countries', 'code')->ignore($id)],
                 'name_ar' => ['required', 'string', 'max:100'],
                 'name_en' => ['nullable', 'string', 'max:100'],
-                'country' => ['nullable', 'string', 'max:80'],
+                'sort_order' => ['nullable', 'integer', 'min:0', 'max:10000'],
+                'is_active' => ['nullable', 'boolean'],
+            ],
+            'regions' => [
+                'country_id' => ['required', 'exists:countries,id'],
+                // الرمز فريد داخل الدولة فقط
+                'code' => ['required', 'string', 'max:30', Rule::unique('regions', 'code')->where('country_id', $this->input('country_id'))->ignore($id)],
+                'name_ar' => ['required', 'string', 'max:100'],
+                'name_en' => ['nullable', 'string', 'max:100'],
                 'sort_order' => ['nullable', 'integer', 'min:0', 'max:10000'],
                 'is_active' => ['nullable', 'boolean'],
             ],
@@ -93,6 +101,8 @@ class TaxonomyItemRequest extends FormRequest
             'education_type.required' => 'نوع التعليم مطلوب',
             'education_type.in' => 'نوع التعليم غير صالح',
             'country.max' => 'اسم الدولة طويل جداً',
+            'country_id.required' => 'اختر الدولة',
+            'country_id.exists' => 'الدولة غير موجودة',
             'grade_from.required_with' => 'حدّد الصف الأول للمرحلة',
             'grade_to.required_with' => 'حدّد الصف الأخير للمرحلة',
             'grade_to.gte' => 'الصف الأخير يجب ألا يسبق الصف الأول',

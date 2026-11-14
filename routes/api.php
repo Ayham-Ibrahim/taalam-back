@@ -73,6 +73,8 @@ Route::prefix('auth')->group(function () {
 Route::middleware(['auth:sanctum', 'throttle:uploads'])->post('me/avatar', [ProfileController::class, 'uploadAvatar']);
 Route::middleware('auth:sanctum')->delete('me/avatar', [ProfileController::class, 'deleteAvatar']);
 Route::middleware('auth:sanctum')->put('me/profile', [ProfileController::class, 'updateProfile']);
+// الطالب يحدد دولته وولايته وحدهما (نافذة تطلبهما ممن سجّل قبل إضافتهما) — بلا بقية الحقول الأكاديمية
+Route::middleware('auth:sanctum')->put('me/location', [StudentController::class, 'updateMyLocation']);
 Route::middleware(['auth:sanctum', 'throttle:password-change'])->put('me/password', [ProfileController::class, 'updatePassword']);
 
 // حسابات الإخوة — الطالب الأساسي يضيف إخوته ويبدّل بين حسابات العائلة (SiblingAccountService)

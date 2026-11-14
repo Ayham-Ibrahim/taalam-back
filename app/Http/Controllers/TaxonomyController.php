@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\Taxonomy\TaxonomyItemRequest;
+use App\Models\Country;
 use App\Models\CourseField;
 use App\Models\Curriculum;
 use App\Models\Language;
@@ -23,6 +24,7 @@ class TaxonomyController extends Controller
         'majors' => Major::class,
         'course_fields' => CourseField::class,
         'languages' => Language::class,
+        'countries' => Country::class,
         'regions' => Region::class,
     ];
 
@@ -35,6 +37,7 @@ class TaxonomyController extends Controller
         'majors' => false,
         'course_fields' => true,
         'languages' => false,
+        'countries' => true,
         'regions' => true,
     ];
 
