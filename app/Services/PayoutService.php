@@ -798,9 +798,11 @@ class PayoutService
             ->merge($bookingSessions->pluck('booking_id')->filter())
             ->unique();
 
-        // سطر الحضور يبقى بعد انتهاء/إلغاء الحجز — المدفوع فقط يُحتسب مستحقاً
+        // سطر الحضور يبقى بعد انتهاء/إلغاء الحجز — المدفوع فقط يُحتسب مستحقاً. حجز باقة
+        // الحملة خارج المستحقات كلياً (المعلم براتب ثابت عنها) — teacher_amount له صفر أصلاً
         $bookingsById = Booking::whereIn('id', $allBookingIds)
             ->whereIn('status', ClassSession::PAID_BOOKING_STATUSES)
+            ->where('excluded_from_payouts', false)
             ->where('sessions_total', '>', 0)
             ->get()
             ->keyBy('id');

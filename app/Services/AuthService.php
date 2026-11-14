@@ -2,10 +2,12 @@
 
 namespace App\Services;
 
+use App\Models\Campaign;
 use App\Models\LegalPage;
 use App\Models\Student;
 use App\Models\Teacher;
 use App\Models\User;
+use App\Traits\LogsAuditEvents;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -16,6 +18,8 @@ use Illuminate\Validation\ValidationException;
 
 class AuthService
 {
+    use LogsAuditEvents;
+
     /**
      * timezone (إن أُرسلت) = منطقة متصفح الطالب الفعلية وقت إنشاء الحساب —
      * تُلتقَط مرة واحدة هنا فقط، لا تُعاد مزامنتها تلقائياً بعد ذلك في أي جلسة
@@ -25,20 +29,18 @@ class AuthService
     public function registerStudent(array $data): array
     {
         return DB::transaction(function () use ($data) {
-            $user = User::create([
+            [$user, $student] = $this->createOrUpgradeGuestStudent([
                 'name' => $data['name'],
                 'email' => $data['email'],
                 'phone' => $data['phone'] ?? null,
                 'whatsapp' => $data['whatsapp'] ?? null,
                 'gender' => $data['gender'] ?? null,
                 'role' => 'student',
+                'account_type' => User::ACCOUNT_REGULAR,
                 'password' => $data['password'],
                 'timezone' => $data['timezone'] ?? 'Asia/Riyadh',
                 ...LegalPage::acceptanceFor(LegalPage::STUDENT_POLICY),
-            ]);
-
-            $student = Student::create([
-                'user_id' => $user->id,
+            ], [
                 'education_type' => $data['education_type'],
                 'curriculum_id' => $data['curriculum_id'] ?? null,
                 'stage_id' => $data['stage_id'] ?? null,
@@ -60,6 +62,95 @@ class AuthService
                 'token' => $user->createToken('api')->plainTextToken,
             ];
         });
+    }
+
+    /**
+     * تسجيل من رابط حملة: الاسم والبريد والهاتف وكلمة المرور فقط — حساب campaign مرتبط
+     * بالحملة دائماً (campaign_id)، يرى الباقات العادية ولا يحجزها حتى يحوّل حسابه.
+     * بيانات التعليم (education_type...) تبقى فارغة ويكملها من ملفه لاحقاً.
+     */
+    public function registerCampaignStudent(Campaign $campaign, array $data): array
+    {
+        if (! $campaign->isOpen()) {
+            throw ValidationException::withMessages([
+                'campaign' => ['هذه الحملة غير متاحة للتسجيل حالياً'],
+            ]);
+        }
+
+        return DB::transaction(function () use ($campaign, $data) {
+            [$user, $student] = $this->createOrUpgradeGuestStudent([
+                'name' => $data['name'],
+                'email' => $data['email'],
+                'phone' => $data['phone'],
+                'role' => 'student',
+                'account_type' => User::ACCOUNT_CAMPAIGN,
+                'campaign_id' => $campaign->id,
+                'password' => $data['password'],
+                'timezone' => $data['timezone'] ?? 'Asia/Riyadh',
+                ...LegalPage::acceptanceFor(LegalPage::STUDENT_POLICY),
+            ], []);
+
+            $user->setRelation('student', $student);
+
+            return [
+                'user' => $user,
+                'token' => $user->createToken('api')->plainTextToken,
+            ];
+        });
+    }
+
+    /** حساب الحملة يتحول لحساب طبيعي: يحجز كل الباقات، ويبقى حقه في باقة الحملة (campaign_id دائم) */
+    public function convertCampaignAccount(User $user): User
+    {
+        if (! $user->isUnconvertedCampaignAccount()) {
+            throw ValidationException::withMessages([
+                'account' => ['هذا الحساب ليس حساب حملة بانتظار التحويل'],
+            ]);
+        }
+
+        $user->update([
+            'account_type' => User::ACCOUNT_REGULAR,
+            'converted_at' => now(),
+        ]);
+
+        $this->audit('user.campaign_account_converted', $user);
+
+        return $user;
+    }
+
+    /**
+     * زائر حجز الباقة المجانية ببريده فقط له حساب ظل (guest) بنفس البريد — تسجيله لاحقاً
+     * يحوّل ذلك الحساب نفسه (ومعه حجوزاته وجلساته) بدل رفض البريد كمستخدم. غير ذلك حساب جديد.
+     *
+     * @return array{0: User, 1: Student}
+     */
+    public function createOrUpgradeGuestStudent(array $userAttributes, array $studentAttributes): array
+    {
+        $guest = User::where('email', $userAttributes['email'])
+            ->where('account_type', User::ACCOUNT_GUEST)
+            ->lockForUpdate()
+            ->first();
+
+        if (! $guest) {
+            $user = User::create($userAttributes);
+            $student = Student::create(['user_id' => $user->id, ...$studentAttributes]);
+
+            return [$user, $student];
+        }
+
+        $guest->update($userAttributes);
+
+        $student = $guest->student()->first();
+
+        if ($student) {
+            $student->update($studentAttributes);
+        } else {
+            $student = Student::create(['user_id' => $guest->id, ...$studentAttributes]);
+        }
+
+        $this->audit('user.guest_account_upgraded', $guest, [], ['account_type' => $guest->account_type]);
+
+        return [$guest, $student];
     }
 
     /**
@@ -251,7 +342,11 @@ class AuthService
         $status = Password::reset(
             ['email' => $email, 'password' => $newPassword, 'token' => $token],
             function (User $user, string $password) {
-                $user->update(['password' => $password]);
+                // حساب ظل لزائر أثبت ملكية بريده بهذا الرابط — يصبح حساباً طبيعياً يدخل به
+                $user->update([
+                    'password' => $password,
+                    'account_type' => $user->isGuestAccount() ? User::ACCOUNT_REGULAR : $user->account_type,
+                ]);
 
                 // إبطال كل الجلسات القائمة — طلب إعادة تعيين كلمة المرور يعني
                 // غالباً أن الجلسات الحالية (إن وُجدت) لم تعد تُمثِّل صاحب الحساب بالضرورة.

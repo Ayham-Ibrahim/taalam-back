@@ -107,8 +107,8 @@ class MetaController extends Controller
                 'curricula' => Curriculum::where('is_active', true)->orderBy('sort_order')->get(['id', 'name_ar'])
                     ->map(fn ($c) => ['value' => $c->id, 'label' => $c->name_ar])->all(),
                 'priceRange' => [
-                    'min' => (int) (Package::where('status', 'active')->min('student_price') ?? 50),
-                    'max' => (int) (Package::where('status', 'active')->max('student_price') ?? 550),
+                    'min' => (int) (Package::where('status', 'active')->publicAudience()->min('student_price') ?? 50),
+                    'max' => (int) (Package::where('status', 'active')->publicAudience()->max('student_price') ?? 550),
                 ],
             ];
         });

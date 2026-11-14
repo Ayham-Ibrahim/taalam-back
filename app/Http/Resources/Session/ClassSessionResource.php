@@ -51,6 +51,8 @@ class ClassSessionResource extends JsonResource
                 $isAdmin && array_key_exists('payout_amount', $this->resource->getAttributes()),
                 fn () => $this->payout_amount,
             ),
+            // جلسة باقة حملة: لا مستحق عنها للمعلم — يغطيها راتبه الشهري الثابت
+            'covered_by_salary' => $this->whenLoaded('booking', fn () => (bool) $this->booking?->excluded_from_payouts),
             'started_at' => $this->started_at,
             'ended_at' => $this->ended_at,
             'cancellation_reason' => $this->cancellation_reason,

@@ -96,6 +96,30 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perHour(10)->by('register:'.$request->ip());
         });
 
+        // رمز تحقق بريد الزائر (الجلسة المجانية بلا حساب) — كل طلب يرسل بريداً: حد لكل بريد
+        // يمنع إغراق صندوق شخص بعينه، وحد لكل IP يمنع الإرسال لعناوين كثيرة من مصدر واحد.
+        RateLimiter::for('guest-otp', function (Request $request) use ($apiRateLimitingEnabled) {
+            if (! $apiRateLimitingEnabled) {
+                return Limit::none();
+            }
+
+            $email = Str::transliterate(Str::lower((string) $request->input('email')));
+
+            return [
+                Limit::perHour(5)->by('guest-otp-email:'.$email),
+                Limit::perHour(20)->by('guest-otp-ip:'.$request->ip()),
+            ];
+        });
+
+        // الحجز بالرمز — تخمين الرمز محدود أصلاً بعدد المحاولات على كل رمز، وهذا حد إضافي لكل IP
+        RateLimiter::for('guest-trial', function (Request $request) use ($apiRateLimitingEnabled) {
+            if (! $apiRateLimitingEnabled) {
+                return Limit::none();
+            }
+
+            return Limit::perHour(20)->by('guest-trial:'.$request->ip());
+        });
+
         // رفع ملفات (صورة شخصية، وثيقة توثيق) — عملية مكلفة (تخزين + تحقق أبعاد/نوع)
         // لكل مستخدم موثّق فقط (المسارات كلها خلف auth:sanctum أصلاً)؛ 15/دقيقة يكفي
         // أي استخدام شرعي (إعادة محاولة رفع بعد خطأ) ويمنع استنزاف مساحة التخزين.

@@ -38,7 +38,7 @@ class PackageController extends Controller
                 'enrolled_count', 'sessions_count',
                 'teacher_price', 'platform_margin_percent', 'student_price', 'platform_revenue',
                 'currency', 'discount_percent', 'grades', 'status', 'submitted_at', 'approved_at',
-                'approved_by', 'rejection_reason', 'created_at',
+                'approved_by', 'rejection_reason', 'created_at', 'audience',
             ])
             ->with(['teacher:id,user_id,teacher_type', 'teacher.user:id,name', 'subject:id,name_ar', 'curricula:id,name_ar', 'schedules'])
             ->when(! $user->isAdmin(), fn ($q) => $q->whereHas('teacher', fn ($t) => $t->where('user_id', $user->id)))
@@ -47,6 +47,7 @@ class PackageController extends Controller
                 fn ($q) => $q->where('teacher_id', $request->integer('owner'))
             )
             ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))
+            ->when($request->filled('audience'), fn ($q) => $q->where('audience', $request->string('audience')))
             ->latest()
             ->paginate($request->integer('per_page', 20));
 
@@ -72,13 +73,15 @@ class PackageController extends Controller
      * يعرض هذا الوسم فعلاً)، لا أن تختفي بصمت من القائمة. المنع الفعلي من
      * الحجز يبقى عبر Package::isBookable() في BookingService/busySlots، لا هنا.
      */
-    public function indexForTeacher(Teacher $teacher)
+    public function indexForTeacher(Request $request, Teacher $teacher)
     {
         abort_unless($teacher->isVerified(), 404);
 
         $packages = Package::query()
             ->where('teacher_id', $teacher->id)
             ->where('status', 'active')
+            // مسار عام بلا auth:sanctum — التوكن (إن أُرسل) يُقرأ يدوياً: باقات الحملة لحسابات الحملة فقط
+            ->visibleTo($request->user('sanctum'))
             ->with(['subject:id,name_ar', 'curricula:id,name_ar', 'stages', 'schedules'])
             ->latest()
             ->paginate(20);
@@ -121,7 +124,7 @@ class PackageController extends Controller
         // عن منطقة الملف الشخصي، وإلا يُجلَب يوم غير الذي تقارن به الواجهة.
         $timezone = $request->string('timezone')->value();
         abort_if($timezone && ! in_array($timezone, timezone_identifiers_list(), true), 422, 'المنطقة الزمنية غير صالحة');
-        $timezone = $timezone ?: ($request->user()->timezone ?? 'UTC');
+        $timezone = $timezone ?: ($request->user('sanctum')?->timezone ?? 'UTC');
 
         $dayStart = Carbon::parse($date, $timezone)->startOfDay()->setTimezone(config('app.timezone'));
         $dayEnd = Carbon::parse($date, $timezone)->startOfDay()->addDay()->setTimezone(config('app.timezone'));
