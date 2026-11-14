@@ -41,7 +41,7 @@ class AuthService
                 'timezone' => $data['timezone'] ?? 'Asia/Riyadh',
                 ...LegalPage::acceptanceFor(LegalPage::STUDENT_POLICY),
             ], [
-                'education_type' => $data['education_type'],
+                'education_type' => $data['education_type'] ?? null,
                 'curriculum_id' => $data['curriculum_id'] ?? null,
                 'stage_id' => $data['stage_id'] ?? null,
                 'grade' => $data['grade'] ?? null,

@@ -26,7 +26,9 @@ class RegisterStudentRequest extends FormRequest
             'password' => ['required', 'confirmed', Password::defaults()],
             // منطقة متصفح الطالب الفعلية وقت التسجيل — تُلتقَط مرة واحدة هنا فقط (راجع AuthService::registerStudent)
             'timezone' => ['nullable', 'string', 'max:64', 'timezone:all_with_bc'],
-            'education_type' => ['required', Rule::in(['school', 'university', 'training'])],
+            // اختياري: الواجهة تنشئ الحساب أولاً ثم تطلب الملف الدراسي في /complete-profile
+            // (education_type=null يحجز الطالب هناك). إن أُرسل تبقى شروطه كما هي.
+            'education_type' => ['nullable', Rule::in(['school', 'university', 'training'])],
 
             'curriculum_id' => ['required_if:education_type,school', 'nullable', 'exists:curricula,id'],
             'stage_id' => ['required_if:education_type,school', 'nullable', 'exists:stages,id'],

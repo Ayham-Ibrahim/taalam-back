@@ -40,6 +40,21 @@ class RegisterStudentTest extends TestCase
         $this->assertDatabaseHas('students', ['curriculum_id' => $curriculumId, 'stage_id' => $stageId]);
     }
 
+    public function test_student_can_register_with_account_fields_only_and_complete_profile_later(): void
+    {
+        $response = $this->postJson('/api/auth/register/student', [
+            'name' => 'أحمد محمد',
+            'email' => 'account.only@example.com',
+            'password' => 'Password123!',
+            'password_confirmation' => 'Password123!',
+            'accept_policy' => true,
+        ]);
+
+        // education_type=null هو ما يحجز الطالب على /complete-profile في الواجهة
+        $response->assertStatus(201)->assertJsonPath('data.user.student.education_type', null);
+        $this->assertNull(User::where('email', 'account.only@example.com')->first()->student->education_type);
+    }
+
     public function test_school_registration_requires_curriculum_and_stage(): void
     {
         $response = $this->postJson('/api/auth/register/student', [
