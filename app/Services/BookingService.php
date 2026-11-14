@@ -41,6 +41,9 @@ class BookingService
      * بعدد يساوي sessions_count بالضبط، كل عنصر ['date' => 'Y-m-d', 'start_time' => 'H:i'].
      * لا جلسات ولا دفع بعد؛ الحجز يبقى pending_teacher_confirmation حتى يوافق
      * المعلم صراحةً (approveIndividualRequest) أو يرفضه (rejectIndividualRequest).
+     *
+     * باقة الحملة استثناء: بلا موافقة معلم — المواعيد يجب أن تقع ضمن النوافذ التي حددها
+     * الأدمن، وتُنشأ الجلسات فوراً وينتقل الحجز للدفع (pending_payment) في نفس الطلب.
      */
     public function requestIndividualBooking(Student $student, Package $package, array $slots, ?string $couponCode = null): Booking
     {
@@ -56,8 +59,11 @@ class BookingService
 
         $this->assertSlotsCountMatchesPackage($package, $slots);
 
-        foreach ($slots as $slot) {
-            $this->assertDateMatchesPackageDays($package, Carbon::parse($slot['date']));
+        // باقة الحملة: نوافذها بساعات ومنطقة الباقة — تُفحص على اللحظة الفعلية أدناه لا تاريخ الطالب الخام
+        if (! $package->isCampaign()) {
+            foreach ($slots as $slot) {
+                $this->assertDateMatchesPackageDays($package, Carbon::parse($slot['date']));
+            }
         }
 
         $this->assertNoOpenBookingForPackage($student, $package);
@@ -72,15 +78,21 @@ class BookingService
         $anchors = $this->slotsToAnchors($slots, $timezone);
         $this->assertSlotsNotInPast($anchors);
         $this->assertSlotsDontOverlapEachOther($anchors, $durationMinutes);
+
+        if ($package->isCampaign()) {
+            $this->assertSlotsWithinCampaignWindows($package, $anchors, $durationMinutes);
+        }
+
         $this->conflicts->assertNoConflict($student, $package->teacher_id, $anchors, $durationMinutes);
 
         // معاملة لازمة الآن حتى بلا دفع بعد: حجز الكوبون (lockForUpdate + increment)
         // يجب أن يُلغى تلقائياً (rollback) لو فشل أي فحص لاحق قبل إنشاء الحجز نفسه.
-        return DB::transaction(function () use ($student, $package, $slots, $timezone, $couponCode) {
+        return DB::transaction(function () use ($student, $package, $slots, $timezone, $couponCode, $anchors) {
             $this->assertOneTimeRightsAvailable($student, $package);
 
-            return $this->createBookingRecord($student, $package, array_merge([
-                'status' => 'pending_teacher_confirmation',
+            $booking = $this->createBookingRecord($student, $package, array_merge([
+                // باقة الحملة بلا موافقة المعلم: الموعد يُثبَّت فوراً وينتقل الحجز للدفع
+                'status' => $package->isCampaign() ? 'pending_payment' : 'pending_teacher_confirmation',
                 // العمودان القديمان يبقيان مملوءين بأول جلسة فقط (توافقاً مع أي كود
                 // لم يُحدَّث بعد) — requested_slots هو مصدر الحقيقة الكامل والوحيد.
                 'requested_date' => $slots[0]['date'],
@@ -91,6 +103,20 @@ class BookingService
                 'requested_timezone' => $timezone,
                 'hold_expires_at' => null,
             ], $this->resolveCouponOverrides($couponCode, $package)));
+
+            if (! $package->isCampaign()) {
+                return $booking;
+            }
+
+            // قفل صف المعلم: طلبا حملة متزامنان على نفس الموعد يمرّان بالتتابع، فيرى
+            // الثاني جلسات الأول في فحص التعارض الملزم داخل scheduleIndividualSessions
+            Teacher::whereKey($package->teacher_id)->lockForUpdate()->first();
+
+            $this->scheduleIndividualSessions($booking, $anchors);
+
+            $this->audit('booking.campaign_booked', $booking, [], [], null, $student->user_id);
+
+            return $booking->fresh(['sessions']);
         });
     }
 
@@ -121,34 +147,8 @@ class BookingService
             // requested_slots أُدخِلت كوقت حائط محلي لدى الطالب — slotsToAnchors
             // تفسّرها كذلك وتحوّلها فعلياً لتوقيت النظام (UTC) قبل إنشاء الجلسات.
             $anchors = $this->slotsToAnchors($this->requestedSlots($booking), $booking->requested_timezone ?? 'UTC');
-            $durationMinutes = $this->defaultSessionDurationMinutes();
 
-            // الفحص الملزم فعلياً — الجلسات الحقيقية تُنشأ خلال ثوانٍ من هنا، فأي
-            // تعارض (بما فيه حجز آخر تسارع للموافقة عليه بين طلب هذا الطالب
-            // ولحظة موافقة المعلم) يجب أن يمنع إنشاءها نهائياً، لا فقط تحذيراً.
-            $this->conflicts->assertNoConflict($booking->student, $booking->package->teacher_id, $anchors, $durationMinutes);
-
-            $sessions = $this->sessionsFromSlots($booking->package, $booking, $anchors);
-
-            foreach ($sessions as $session) {
-                $this->registerAttendee($session, $booking->student, booking: $booking);
-            }
-
-            // باقة فردية مجانية (student_price = 0): لا شيء يُدفع، وStripe يرفض جلسة دفع بمبلغ
-            // صفر — فموافقة المعلم تؤكّد الحجز مباشرة عبر confirmBooking (نفس ما يفعله webhook
-            // الدفع: confirmed + غرف BBB) بلا Payment معلَّق ولا مهلة دفع.
-            $isFree = (float) $booking->package->student_price <= 0;
-
-            $booking->update([
-                'status' => 'pending_payment',
-                'hold_expires_at' => $isFree ? null : now()->addMinutes((int) $this->settings->get('booking_payment_hold_minutes', 15)),
-            ]);
-
-            if ($isFree) {
-                $this->confirmBooking($booking);
-            } else {
-                $this->createPendingPayment($booking);
-            }
+            $this->scheduleIndividualSessions($booking, $anchors);
 
             $this->audit('booking.request_approved', $booking, [], [], null, $teacher->id);
 
@@ -158,6 +158,43 @@ class BookingService
         $this->notifyGuestOfDecision($approved, approved: true);
 
         return $approved;
+    }
+
+    /**
+     * تُنشئ جلسات الحجز الفردي من مواعيده وتنقله للدفع — بعد موافقة المعلم، أو فوراً لباقة
+     * الحملة (لا موافقة فيها). يُستدعى داخل معاملة.
+     */
+    private function scheduleIndividualSessions(Booking $booking, Collection $anchors): void
+    {
+        $booking->loadMissing(['package', 'student']);
+        $durationMinutes = $this->defaultSessionDurationMinutes();
+
+        // الفحص الملزم فعلياً — الجلسات الحقيقية تُنشأ خلال ثوانٍ من هنا، فأي
+        // تعارض (بما فيه حجز آخر تسارع للموافقة عليه بين طلب هذا الطالب
+        // ولحظة موافقة المعلم) يجب أن يمنع إنشاءها نهائياً، لا فقط تحذيراً.
+        $this->conflicts->assertNoConflict($booking->student, $booking->package->teacher_id, $anchors, $durationMinutes);
+
+        $sessions = $this->sessionsFromSlots($booking->package, $booking, $anchors);
+
+        foreach ($sessions as $session) {
+            $this->registerAttendee($session, $booking->student, booking: $booking);
+        }
+
+        // باقة فردية مجانية (student_price = 0): لا شيء يُدفع، وStripe يرفض جلسة دفع بمبلغ
+        // صفر — فموافقة المعلم تؤكّد الحجز مباشرة عبر confirmBooking (نفس ما يفعله webhook
+        // الدفع: confirmed + غرف BBB) بلا Payment معلَّق ولا مهلة دفع.
+        $isFree = (float) $booking->package->student_price <= 0;
+
+        $booking->update([
+            'status' => 'pending_payment',
+            'hold_expires_at' => $isFree ? null : now()->addMinutes((int) $this->settings->get('booking_payment_hold_minutes', 15)),
+        ]);
+
+        if ($isFree) {
+            $this->confirmBooking($booking);
+        } else {
+            $this->createPendingPayment($booking);
+        }
     }
 
     /** المعلم يرفض طلب الحجز — لا جلسات أُنشئت ولا دفع تم، فلا شيء لاسترداده. */
@@ -459,6 +496,41 @@ class BookingService
                 ]);
             }
         });
+    }
+
+    /**
+     * باقة الحملة: كل جلسة (بدايتها ونهايتها) يجب أن تقع داخل إحدى النوافذ التي حددها الأدمن —
+     * بعد تحويلها لمنطقة الباقة (schedule_timezone) التي أُدخلت بها الساعات. نافذة بلا ساعات
+     * تغطي اليوم كله.
+     */
+    private function assertSlotsWithinCampaignWindows(Package $package, Collection $anchors, int $durationMinutes): void
+    {
+        $windows = $package->schedules()->get(['day_of_week', 'start_time', 'end_time']);
+        $timezone = $package->schedule_timezone ?? 'UTC';
+
+        foreach ($anchors as $anchor) {
+            $start = $anchor->copy()->setTimezone($timezone);
+            $end = $start->copy()->addMinutes($durationMinutes);
+
+            $fits = $windows->contains(function ($window) use ($start, $end) {
+                if ((int) $window->day_of_week !== $start->dayOfWeek) {
+                    return false;
+                }
+
+                $windowStart = $start->copy()->setTimeFromTimeString((string) ($window->start_time ?? '00:00'));
+                $windowEnd = $window->end_time
+                    ? $start->copy()->setTimeFromTimeString((string) $window->end_time)
+                    : $start->copy()->startOfDay()->addDay();
+
+                return $start->gte($windowStart) && $end->lte($windowEnd);
+            });
+
+            if (! $fits) {
+                throw ValidationException::withMessages([
+                    'slots' => ['أحد المواعيد المختارة خارج الأوقات المتاحة لهذه الباقة'],
+                ]);
+            }
+        }
     }
 
     private function assertDateMatchesPackageDays(Package $package, Carbon $date): void

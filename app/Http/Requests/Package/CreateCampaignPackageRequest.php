@@ -5,8 +5,10 @@ namespace App\Http\Requests\Package;
 use Illuminate\Foundation\Http\FormRequest;
 
 /**
- * باقة حملة: فردية دائماً — schedules أيام متاحة فقط (day_of_week ضمن أيام توفّر المعلم،
- * يتحقق منها PackageService::syncSchedules)، والطالب يختار التاريخ والوقت عند طلب الحجز.
+ * باقة حملة: فردية دائماً — schedules نوافذ متاحة يحددها الأدمن بغض النظر عن أيام توفّر
+ * المعلم: يوم أسبوع مع ساعات (start_time/end_time) اختيارية — بلا ساعات = اليوم كله، ويجوز
+ * أكثر من نافذة لليوم نفسه. الأوقات بمنطقة schedule_timezone (افتراضياً منطقة الأدمن)،
+ * والطالب يختار موعد كل جلسة ضمنها (PackageService::syncCampaignSchedules).
  */
 class CreateCampaignPackageRequest extends FormRequest
 {
@@ -25,7 +27,10 @@ class CreateCampaignPackageRequest extends FormRequest
             'sessions_count' => ['required', 'integer', 'min:1', 'max:50'],
             'price' => ['required', 'numeric', 'min:0.01', 'max:99999999'],
             'schedules' => ['required', 'array', 'min:1'],
-            'schedules.*.day_of_week' => ['required', 'integer', 'between:0,6', 'distinct'],
+            'schedules.*.day_of_week' => ['required', 'integer', 'between:0,6'],
+            'schedules.*.start_time' => ['nullable', 'required_with:schedules.*.end_time', 'date_format:H:i'],
+            'schedules.*.end_time' => ['nullable', 'required_with:schedules.*.start_time', 'date_format:H:i', 'after:schedules.*.start_time'],
+            'schedule_timezone' => ['nullable', 'string', 'timezone:all_with_bc'],
             'curriculum_ids' => ['nullable', 'array'],
             'curriculum_ids.*' => ['integer', 'exists:curricula,id'],
             'stage_ids' => ['nullable', 'array'],
@@ -42,7 +47,10 @@ class CreateCampaignPackageRequest extends FormRequest
             'title' => 'عنوان الباقة',
             'sessions_count' => 'عدد الجلسات',
             'price' => 'السعر',
-            'schedules' => 'الأيام المتاحة',
+            'schedules' => 'الأوقات المتاحة',
+            'schedules.*.start_time' => 'بداية الوقت المتاح',
+            'schedules.*.end_time' => 'نهاية الوقت المتاح',
+            'schedule_timezone' => 'المنطقة الزمنية',
         ];
     }
 }

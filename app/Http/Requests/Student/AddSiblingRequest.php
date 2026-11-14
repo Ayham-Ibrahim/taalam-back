@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Student;
 
+use App\Support\StudentLocationRules;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -37,6 +38,9 @@ class AddSiblingRequest extends FormRequest
             'course_field_id' => ['required_if:education_type,training', 'nullable', 'exists:course_fields,id'],
             'level' => ['required_if:education_type,training', 'nullable', Rule::in(['beginner', 'intermediate', 'advanced'])],
 
+            // الدولة والولاية — تغذي تقارير التسويق (موقع × منهاج)
+            ...StudentLocationRules::rules($this->input('country_id')),
+
             'birth_date' => ['nullable', 'date', 'before:today'],
             'guardian_name' => ['nullable', 'string', 'max:150'],
             'guardian_phone' => ['nullable', 'string', 'max:25'],
@@ -49,11 +53,18 @@ class AddSiblingRequest extends FormRequest
             'name' => 'الاسم',
             'education_type' => 'نوع التعليم',
             'curriculum_id' => 'المنهج',
+            'country_id' => 'الدولة',
+            'region_id' => 'الولاية',
             'stage_id' => 'المرحلة',
             'grade' => 'الصف الدراسي',
             'university_id' => 'الجامعة',
             'major_id' => 'التخصص',
             'course_field_id' => 'مجال الدورة',
         ];
+    }
+
+    public function messages(): array
+    {
+        return StudentLocationRules::messages();
     }
 }

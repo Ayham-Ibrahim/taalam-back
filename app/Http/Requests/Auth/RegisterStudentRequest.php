@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Auth;
 
+use App\Support\StudentLocationRules;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
@@ -25,7 +26,9 @@ class RegisterStudentRequest extends FormRequest
             'password' => ['required', 'confirmed', Password::defaults()],
             // منطقة متصفح الطالب الفعلية وقت التسجيل — تُلتقَط مرة واحدة هنا فقط (راجع AuthService::registerStudent)
             'timezone' => ['nullable', 'string', 'max:64', 'timezone:all_with_bc'],
-            'education_type' => ['required', Rule::in(['school', 'university', 'training'])],
+            // اختياري: الواجهة تنشئ الحساب أولاً ثم تطلب الملف الدراسي في /complete-profile
+            // (education_type=null يحجز الطالب هناك). إن أُرسل تبقى شروطه كما هي.
+            'education_type' => ['nullable', Rule::in(['school', 'university', 'training'])],
 
             'curriculum_id' => ['required_if:education_type,school', 'nullable', 'exists:curricula,id'],
             'stage_id' => ['required_if:education_type,school', 'nullable', 'exists:stages,id'],
@@ -37,6 +40,9 @@ class RegisterStudentRequest extends FormRequest
 
             'course_field_id' => ['required_if:education_type,training', 'nullable', 'exists:course_fields,id'],
             'level' => ['required_if:education_type,training', 'nullable', Rule::in(['beginner', 'intermediate', 'advanced'])],
+
+            // الدولة والولاية — تغذي تقارير التسويق (موقع × منهاج)
+            ...StudentLocationRules::rules($this->input('country_id')),
 
             'birth_date' => ['nullable', 'date', 'before:today'],
             'guardian_name' => ['nullable', 'string', 'max:150'],
@@ -55,11 +61,18 @@ class RegisterStudentRequest extends FormRequest
             'password' => 'كلمة المرور',
             'education_type' => 'نوع التعليم',
             'curriculum_id' => 'المنهج',
+            'country_id' => 'الدولة',
+            'region_id' => 'الولاية',
             'stage_id' => 'المرحلة',
             'university_id' => 'الجامعة',
             'major_id' => 'التخصص',
             'course_field_id' => 'مجال الدورة',
             'accept_policy' => 'الموافقة على سياسة الطالب',
         ];
+    }
+
+    public function messages(): array
+    {
+        return StudentLocationRules::messages();
     }
 }

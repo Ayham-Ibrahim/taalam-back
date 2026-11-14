@@ -30,6 +30,7 @@ use App\Http\Controllers\Payment\PaymentWebhookController;
 use App\Http\Controllers\Payout\PayoutController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\Report\AcademicSupportFinanceReportController;
+use App\Http\Controllers\Report\StudentsLocationReportController;
 use App\Http\Controllers\Report\StudentsReportController;
 use App\Http\Controllers\Report\TeacherSessionsReportController;
 use App\Http\Controllers\Reschedule\RescheduleRequestController;
@@ -73,6 +74,8 @@ Route::prefix('auth')->group(function () {
 Route::middleware(['auth:sanctum', 'throttle:uploads'])->post('me/avatar', [ProfileController::class, 'uploadAvatar']);
 Route::middleware('auth:sanctum')->delete('me/avatar', [ProfileController::class, 'deleteAvatar']);
 Route::middleware('auth:sanctum')->put('me/profile', [ProfileController::class, 'updateProfile']);
+// الطالب يحدد دولته وولايته وحدهما (نافذة تطلبهما ممن سجّل قبل إضافتهما) — بلا بقية الحقول الأكاديمية
+Route::middleware('auth:sanctum')->put('me/location', [StudentController::class, 'updateMyLocation']);
 Route::middleware(['auth:sanctum', 'throttle:password-change'])->put('me/password', [ProfileController::class, 'updatePassword']);
 
 // حسابات الإخوة — الطالب الأساسي يضيف إخوته ويبدّل بين حسابات العائلة (SiblingAccountService)
@@ -111,6 +114,9 @@ Route::post('webhooks/stripe', [PaymentWebhookController::class, 'stripe']);
 // بحث السوق العام، ملف المعلم العام، باقاته النشطة، وتقييماته — بلا مصادقة عمداً.
 // الحجز نفسه فقط يتطلب تسجيل الدخول (داخل مجموعة auth:sanctum أدناه).
 Route::get('teachers/search', [TeacherSearchController::class, 'index']);
+// قبل teachers/{teacher} العام — وإلا يُلتقط "export" كمعرّف معلم
+Route::middleware('auth:sanctum')->get('teachers/export', [TeacherController::class, 'export']);
+Route::middleware('auth:sanctum')->get('teachers/export/columns', [TeacherController::class, 'exportColumns']);
 Route::get('teachers/{teacher}', [TeacherController::class, 'show']);
 Route::get('teachers/{teacher}/packages', [PackageController::class, 'indexForTeacher']);
 Route::get('teachers/{teacher}/courses', [CourseController::class, 'indexForTeacher']);
@@ -347,6 +353,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('reports/teacher-sessions', [TeacherSessionsReportController::class, 'index']);
     Route::get('reports/academic-support/export', [AcademicSupportFinanceReportController::class, 'export']);
     Route::get('reports/academic-support', [AcademicSupportFinanceReportController::class, 'index']);
+    // تقرير التسويق: الطلاب حسب الموقع (دولة ← ولاية) × المنهج
+    Route::get('reports/students-location/export', [StudentsLocationReportController::class, 'export']);
+    Route::get('reports/students-location/students', [StudentsLocationReportController::class, 'students']);
+    Route::get('reports/students-location', [StudentsLocationReportController::class, 'index']);
     Route::get('reports/students/export', [StudentsReportController::class, 'export']);
     Route::get('reports/students', [StudentsReportController::class, 'index']);
 
@@ -375,6 +385,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('students/import', [StudentImportController::class, 'store']);
     Route::post('students/create-account', [StudentController::class, 'store']);
     Route::get('students', [StudentController::class, 'index']);
+    // قبل students/{student} — وإلا يُلتقط "export" كمعرّف طالب
+    Route::get('students/export', [StudentController::class, 'export']);
+    Route::get('students/export/columns', [StudentController::class, 'exportColumns']);
     Route::get('students/{student}', [StudentController::class, 'show']);
     Route::put('students/{student}', [StudentController::class, 'update']);
     Route::put('students/{student}/password', [StudentController::class, 'resetPassword']);

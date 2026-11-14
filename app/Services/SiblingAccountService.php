@@ -22,6 +22,11 @@ class SiblingAccountService
     public function add(User $primary, array $data): User
     {
         return DB::transaction(function () use ($primary, $data) {
+            // نفس الأسرة غالباً بنفس الموقع — يُورَث من الأساسي ما لم يُحدَّد للأخ
+            $location = filled($data['country_id'] ?? null) || filled($data['region_id'] ?? null)
+                ? ['country_id' => $data['country_id'] ?? null, 'region_id' => $data['region_id'] ?? null]
+                : ($primary->student()->first(['country_id', 'region_id'])?->only(['country_id', 'region_id']) ?? []);
+
             $sibling = User::create([
                 'name' => $data['name'],
                 'email' => null,
@@ -50,6 +55,7 @@ class SiblingAccountService
                 'birth_date' => $data['birth_date'] ?? null,
                 'guardian_name' => $data['guardian_name'] ?? null,
                 'guardian_phone' => $data['guardian_phone'] ?? null,
+                ...$location,
             ]);
 
             $sibling->setRelation('student', $student);

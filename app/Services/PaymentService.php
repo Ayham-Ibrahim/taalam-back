@@ -376,7 +376,9 @@ class PaymentService
     private function frontendPaymentUrl(string $path, array $query = []): string
     {
         $baseUrl = rtrim((string) config('app.frontend_url', config('app.url')), '/');
-        $queryString = http_build_query($query);
+        // http_build_query يرمّز الأقواس (%7B...%7D) فلا يتعرف Stripe على {CHECKOUT_SESSION_ID}
+        // ولا يستبدله بمعرّف الجلسة — يجب أن يبقى حرفياً في success_url
+        $queryString = str_replace('%7BCHECKOUT_SESSION_ID%7D', '{CHECKOUT_SESSION_ID}', http_build_query($query));
 
         return $baseUrl.$path.($queryString !== '' ? '?'.$queryString : '');
     }

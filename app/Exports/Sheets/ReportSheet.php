@@ -6,6 +6,7 @@ use Maatwebsite\Excel\Concerns\FromArray;
 use Maatwebsite\Excel\Concerns\ShouldAutoSize;
 use Maatwebsite\Excel\Concerns\WithEvents;
 use Maatwebsite\Excel\Concerns\WithHeadings;
+use Maatwebsite\Excel\Concerns\WithStrictNullComparison;
 use Maatwebsite\Excel\Concerns\WithStyles;
 use Maatwebsite\Excel\Concerns\WithTitle;
 use Maatwebsite\Excel\Events\AfterSheet;
@@ -16,8 +17,9 @@ use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 /**
  * ورقة تقرير عامة لملفات Excel متعددة الأوراق — عربية (من اليمين لليسار)، صف عناوين
  * بخلفية زرقاء (لون المنصة الأساسي) ونص أبيض، وصف إجمالي اختياري عريض بآخر الجدول.
+ * WithStrictNullComparison: الصفر يُكتب 0 لا خلية فارغة (الافتراضي يعامله كـ null).
  */
-class ReportSheet implements FromArray, ShouldAutoSize, WithEvents, WithHeadings, WithStyles, WithTitle
+class ReportSheet implements FromArray, ShouldAutoSize, WithEvents, WithHeadings, WithStrictNullComparison, WithStyles, WithTitle
 {
     private const HEADER_COLOR = '3B5998';
 

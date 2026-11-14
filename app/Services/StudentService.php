@@ -36,6 +36,8 @@ class StudentService
 
             $student = Student::create([
                 'user_id' => $user->id,
+                'country_id' => $data['country_id'] ?? null,
+                'region_id' => $data['region_id'] ?? null,
             ]);
 
             $this->notifications->send(

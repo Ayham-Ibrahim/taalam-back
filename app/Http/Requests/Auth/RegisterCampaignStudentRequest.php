@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Auth;
 
+use App\Support\StudentLocationRules;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
@@ -22,6 +23,8 @@ class RegisterCampaignStudentRequest extends FormRequest
             'phone' => ['required', 'string', 'max:25', 'unique:users,phone'],
             'password' => ['required', 'confirmed', Password::defaults()],
             'timezone' => ['nullable', 'string', 'max:64'],
+            // موقع الطالب القادم من الحملة — يقيس به التسويق وصول كل حملة جغرافياً
+            ...StudentLocationRules::rules($this->input('country_id')),
             'accept_policy' => ['accepted'],
         ];
     }
@@ -32,8 +35,15 @@ class RegisterCampaignStudentRequest extends FormRequest
             'name' => 'الاسم',
             'email' => 'البريد الإلكتروني',
             'phone' => 'رقم الهاتف',
+            'country_id' => 'الدولة',
+            'region_id' => 'الولاية',
             'password' => 'كلمة المرور',
             'accept_policy' => 'الموافقة على سياسة الطالب',
         ];
+    }
+
+    public function messages(): array
+    {
+        return StudentLocationRules::messages();
     }
 }

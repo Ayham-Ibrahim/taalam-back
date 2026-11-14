@@ -23,6 +23,10 @@ class StudentIndexResource extends JsonResource
             'avatar' => $this->user->avatar_path,
             'is_active' => $this->user->is_active,
             'education_type' => $this->education_type,
+            'country' => $this->whenLoaded('locationCountry', fn () => $this->locationCountry?->name_ar),
+            'country_id' => $this->country_id,
+            'region' => $this->whenLoaded('region', fn () => $this->region?->name_ar),
+            'region_id' => $this->region_id,
             'imported' => $this->imported,
             'created_at' => $this->user->created_at,
         ];

@@ -34,7 +34,7 @@ class BookingController extends Controller
 
         $bookings = Booking::query()
             ->with([
-                'package:id,title,session_format,subject_id',
+                'package:id,title,session_format,subject_id,audience',
                 'package.subject:id,name_ar',
                 'package.curricula:id,name_ar',
                 'package.schedules:id,package_id,start_time,end_time',
@@ -66,7 +66,7 @@ class BookingController extends Controller
                 ->where('status', 'pending')
                 ->latest(),
             'payments',
-            'package:id,title,description,session_format,sessions_count',
+            'package:id,title,description,session_format,sessions_count,audience',
             'package.subject:id,name_ar',
             'package.curricula:id,name_ar',
             'package.schedules:id,package_id,start_time,end_time',
@@ -86,7 +86,10 @@ class BookingController extends Controller
             $request->validated('coupon_code'),
         );
 
-        return $this->success($booking, 'تم إرسال طلب الحجز، بانتظار موافقة المعلم', 201);
+        // باقة الحملة لا تنتظر موافقة المعلم — الحجز ينتقل للدفع (checkout) مباشرة
+        $message = $package->isCampaign() ? 'تم تثبيت الموعد، أكمل الدفع لتأكيد الحجز' : 'تم إرسال طلب الحجز، بانتظار موافقة المعلم';
+
+        return $this->success($booking, $message, 201);
     }
 
     /** المعلم يوافق على طلب حجز فردي — تُنشأ الجلسات ويُنشأ الدفع المعلَّق. */

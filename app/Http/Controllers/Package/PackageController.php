@@ -38,7 +38,7 @@ class PackageController extends Controller
                 'enrolled_count', 'sessions_count',
                 'teacher_price', 'platform_margin_percent', 'student_price', 'platform_revenue',
                 'currency', 'discount_percent', 'grades', 'status', 'submitted_at', 'approved_at',
-                'approved_by', 'rejection_reason', 'created_at', 'audience',
+                'approved_by', 'rejection_reason', 'created_at', 'audience', 'schedule_timezone',
             ])
             ->with(['teacher:id,user_id,teacher_type', 'teacher.user:id,name', 'subject:id,name_ar', 'curricula:id,name_ar', 'schedules'])
             ->when(! $user->isAdmin(), fn ($q) => $q->whereHas('teacher', fn ($t) => $t->where('user_id', $user->id)))
