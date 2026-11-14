@@ -16,6 +16,10 @@ class CouponService
 {
     public function create(Package $package, User $creator, array $data): Coupon
     {
+        if ($package->isCampaign()) {
+            throw ValidationException::withMessages(['package' => ['لا يمكن إنشاء كوبون لباقة حملة.']]);
+        }
+
         return Coupon::create([
             'code' => $this->normalizeCode($data['code'] ?? null) ?? $this->generateUniqueCode(),
             'package_id' => $package->id,
@@ -106,6 +110,11 @@ class CouponService
      */
     public function validateAndReserve(string $code, Package $package): array
     {
+        // باقة الحملة مخفضة أصلاً ومبلغها كله للمنصة — لا كوبونات عليها
+        if ($package->isCampaign()) {
+            throw ValidationException::withMessages(['coupon_code' => ['لا يمكن استخدام كود خصم على باقات الحملة.']]);
+        }
+
         // كوبون الباقة الواحدة (package_id) أو كوبون أدمن متعدد الباقات (coupon_package) — الكود فريد عالمياً فلا تعارض
         $coupon = Coupon::where('code', $this->normalizeCode($code))
             ->where(fn ($q) => $q->where('package_id', $package->id)

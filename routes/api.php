@@ -11,6 +11,8 @@ use App\Http\Controllers\AcademicSupporter\AcademicSupporterSearchController;
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\Booking\BookingController;
 use App\Http\Controllers\Booking\EnrollmentController;
+use App\Http\Controllers\Booking\GuestTrialBookingController;
+use App\Http\Controllers\Campaign\CampaignController;
 use App\Http\Controllers\Complaint\ComplaintController;
 use App\Http\Controllers\Coupon\CouponController;
 use App\Http\Controllers\Coupon\MultiPackageCouponController;
@@ -21,6 +23,7 @@ use App\Http\Controllers\LegalPageController;
 use App\Http\Controllers\MetaController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\Package\AvailabilityController;
+use App\Http\Controllers\Package\CampaignPackageController;
 use App\Http\Controllers\Package\PackageController;
 use App\Http\Controllers\SupportPackage\SupportPackageController;
 use App\Http\Controllers\Payment\PaymentWebhookController;
@@ -121,6 +124,17 @@ Route::get('meta/stats', [MetaController::class, 'stats']);
 Route::get('meta/filters', [MetaController::class, 'filters']);
 Route::get('meta/contact-info', [MetaController::class, 'contactInfo']);
 
+// أوقات معلم الباقة المشغولة — عامة كي يرى الزائر (حجز الجلسة المجانية بلا حساب) الأوقات المتاحة
+Route::get('packages/{package}/busy-slots', [PackageController::class, 'busySlots']);
+
+// حجز الباقة المجانية بلا حساب — رمز تحقق على البريد ثم الحجز به (GuestTrialBookingService)
+Route::middleware('throttle:guest-otp')->post('packages/{package}/guest-trial/code', [GuestTrialBookingController::class, 'sendCode']);
+Route::middleware('throttle:guest-trial')->post('packages/{package}/guest-trial/bookings', [GuestTrialBookingController::class, 'store']);
+
+// صفحة هبوط الحملة الإعلانية والتسجيل من رابطها — بلا مصادقة عمداً
+Route::get('campaigns/{slug}', [CampaignController::class, 'show']);
+Route::middleware('throttle:register')->post('campaigns/{slug}/register', [CampaignController::class, 'register']);
+
 // سياسة الخصوصية والشروط والأحكام — قراءة عامة، التعديل محمي ضمن مجموعة auth:sanctum أدناه
 Route::get('legal-pages/{legalPage:slug}', [LegalPageController::class, 'show']);
 
@@ -187,7 +201,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('packages', [PackageController::class, 'index']);
     Route::post('packages', [PackageController::class, 'store']);
     Route::get('packages/{package}', [PackageController::class, 'show']);
-    Route::get('packages/{package}/busy-slots', [PackageController::class, 'busySlots']);
     Route::put('packages/{package}', [PackageController::class, 'update']);
     Route::post('packages/{package}/submit', [PackageController::class, 'submit']);
     Route::post('packages/{package}/disable', [PackageController::class, 'disable']);
@@ -240,6 +253,14 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('packages/{package}/bookings/individual', [BookingController::class, 'bookIndividual']);
     Route::post('packages/{package}/bookings/group', [BookingController::class, 'joinGroup']);
     Route::post('packages/{package}/bookings/manual', [BookingController::class, 'createManual']);
+
+    // حسابات الحملة: باقاتها المخفضة، والتحويل لحساب طبيعي. الأدمن: الحملات وباقاتها
+    Route::get('campaign-packages', [CampaignPackageController::class, 'index']);
+    Route::post('me/convert-account', [CampaignController::class, 'convertAccount']);
+    Route::get('admin/campaigns', [CampaignController::class, 'index']);
+    Route::post('admin/campaigns', [CampaignController::class, 'store']);
+    Route::put('admin/campaigns/{campaign}', [CampaignController::class, 'update']);
+    Route::post('admin/campaign-packages', [CampaignPackageController::class, 'store']);
     Route::post('bookings/{booking}/approve', [BookingController::class, 'approveRequest']);
     Route::post('bookings/{booking}/reject', [BookingController::class, 'rejectRequest']);
     Route::post('bookings/{booking}/checkout', [BookingController::class, 'checkout']);

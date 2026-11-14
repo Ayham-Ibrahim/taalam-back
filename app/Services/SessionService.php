@@ -426,6 +426,7 @@ class SessionService
                 'attendees as has_any_attendee',
                 'booking as has_paid_booking' => fn ($q) => $q->whereIn('status', ClassSession::PAID_BOOKING_STATUSES),
                 'booking as is_free_booking' => fn ($q) => $q->whereHas('package', fn ($p) => $p->where('student_price', '<=', 0)),
+                'booking as is_excluded_from_payouts' => fn ($q) => $q->where('excluded_from_payouts', true),
             ])
             ->chunkById(200, function ($sessions) use ($trackedSince, $noShowCompensationPercent, $lateMinutes, &$completed) {
                 foreach ($sessions as $session) {
@@ -437,8 +438,9 @@ class SessionService
 
                     // غياب الطلاب: نسبة من قيمة الجلسة مرة واحدة بدل مستحقها، يتحمّلها هامش المنصة.
                     // لا تعويض عن جلسة تعويضية — يُصرف مرة واحدة على الأصلية لكل سلسلة تعويض.
-                    // ولا عن جلسة باقة مجانية — لا مستحق للمعلم عنها أصلاً فلا شيء يُعوَّض
-                    $compensated = $outcome === ClassSession::OUTCOME_STUDENT_NO_SHOW && ! $session->is_makeup && ! $session->is_free_booking;
+                    // ولا عن جلسة باقة مجانية — لا مستحق للمعلم عنها أصلاً فلا شيء يُعوَّض.
+                    // ولا عن جلسة باقة حملة — المعلم يأخذ عنها راتباً ثابتاً لا مستحقاً لكل جلسة
+                    $compensated = $outcome === ClassSession::OUTCOME_STUDENT_NO_SHOW && ! $session->is_makeup && ! $session->is_free_booking && ! $session->is_excluded_from_payouts;
                     $compensation = $compensated
                         ? round(($this->payouts->sessionValues(collect([$session]))[$session->id] ?? 0.0) * $noShowCompensationPercent / 100, 2)
                         : null;

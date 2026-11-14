@@ -54,11 +54,11 @@ class TeacherSearchController extends Controller
                 // (subject_stage) — الأخير كان يُظهر معلماً حتى لو لم تستهدف أي
                 // من باقاته الفعلية هذه المرحلة إطلاقاً، لمجرد أن مادته عموماً
                 // مصنَّفة لها إدارياً.
-                $q->whereHas('packages', fn ($pq) => $pq->bookable()
+                $q->whereHas('packages', fn ($pq) => $pq->bookable()->publicAudience()
                     ->whereHas('stages', fn ($sq) => $sq->where('stages.id', $stageId)));
             })
             ->when($filters['grade'] ?? null, function ($q, $grade) {
-                $q->whereHas('packages', fn ($pq) => $pq->bookable()
+                $q->whereHas('packages', fn ($pq) => $pq->bookable()->publicAudience()
                     ->whereJsonContains('grades', (int) $grade));
             })
             ->when($filters['language_id'] ?? null, function ($q, $languageId) {
@@ -82,7 +82,7 @@ class TeacherSearchController extends Controller
             // إحداهما فوق الحد الأدنى والأخرى تحت الحد الأقصى بمعزل عن بعضهما.
             ->when(($filters['min_price'] ?? null) !== null || ($filters['max_price'] ?? null) !== null, function ($q) use ($filters) {
                 $q->whereHas('packages', function ($pq) use ($filters) {
-                    $pq->bookable();
+                    $pq->bookable()->publicAudience();
                     if (($filters['min_price'] ?? null) !== null) {
                         $pq->where('student_price', '>=', $filters['min_price']);
                     }
@@ -115,6 +115,7 @@ class TeacherSearchController extends Controller
         $stagesByTeacher = Package::query()
             ->whereIn('teacher_id', $teacherIds)
             ->bookable()
+            ->publicAudience()
             ->with('stages:id,name_ar')
             ->get(['id', 'teacher_id'])
             ->groupBy('teacher_id')
@@ -123,6 +124,7 @@ class TeacherSearchController extends Controller
         $priceRangeByTeacher = Package::query()
             ->whereIn('teacher_id', $teacherIds)
             ->bookable()
+            ->publicAudience()
             ->selectRaw('teacher_id, MIN(student_price) as min_price, MAX(student_price) as max_price')
             ->groupBy('teacher_id')
             ->get()

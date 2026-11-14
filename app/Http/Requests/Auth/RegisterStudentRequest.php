@@ -17,7 +17,8 @@ class RegisterStudentRequest extends FormRequest
     {
         return [
             'name' => ['required', 'string', 'max:150'],
-            'email' => ['required', 'email', 'max:150', 'unique:users,email'],
+            // حساب الظل (guest) لزائر حجز الجلسة المجانية لا يمنع التسجيل — يتحول هو نفسه (AuthService::createOrUpgradeGuestStudent)
+            'email' => ['required', 'email', 'max:150', Rule::unique('users', 'email')->where(fn ($q) => $q->where('account_type', '!=', 'guest'))],
             'phone' => ['nullable', 'string', 'max:25', 'unique:users,phone'],
             'whatsapp' => ['nullable', 'string', 'max:25'],
             'gender' => ['nullable', Rule::in(['male', 'female'])],

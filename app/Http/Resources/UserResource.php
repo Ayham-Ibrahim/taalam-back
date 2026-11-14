@@ -22,6 +22,11 @@ class UserResource extends JsonResource
             // حساب أخ مضاف على حساب طالب أساسي (بلا إيميل — يُفتح بالتبديل فقط)
             'primary_user_id' => $this->primary_user_id,
             'is_sibling_account' => $this->primary_user_id !== null,
+            // regular | campaign (سجّل من حملة ولم يحوّل — يرى الباقات العادية ولا يحجزها) | guest
+            'account_type' => $this->account_type ?? 'regular',
+            // جاء من حملة (دائم، يبقى بعد التحويل) — يرى باقات الحملة ويحق له حجز واحدة منها
+            'is_from_campaign' => $this->campaign_id !== null,
+            'converted_at' => $this->converted_at,
             'avatar_path' => $this->avatar_path,
             'timezone' => $this->timezone,
             'timezone_auto' => $this->timezone_auto,

@@ -56,6 +56,14 @@ class TeacherSessionsReportService
             return ['rows' => [], 'totals' => $this->totals(collect())];
         }
 
+        // جلسات باقات الحملة: لا مستحق للمعلم عنها (راتب ثابت) — تُعد منفصلة، وحصة المنصة منها
+        // (كل ما دفعه الطالب ÷ جلساته) على الأصلية فقط، فلا تُحتسب مرتين مع تعويضيتها
+        $campaignBookings = Booking::whereIn('id', $completed->pluck('booking_id')->filter()->unique())
+            ->where('excluded_from_payouts', true)
+            ->whereIn('status', ClassSession::PAID_BOOKING_STATUSES)
+            ->get(['id', 'platform_amount', 'sessions_total'])
+            ->keyBy('id');
+
         $teacherAmounts = $this->payouts->sessionPayoutAmounts($completed);
         $teachers = Teacher::whereIn('id', $completed->pluck('teacher_id')->unique())->with('user:id,name')->get()->keyBy('id');
 
@@ -86,10 +94,11 @@ class TeacherSessionsReportService
         // قيمة الجلسة الفائتة بلا تعويضية تبقى للمنصة — تنتقل للمعلم إن أُنشئت تعويضية
         $forfeited = $this->forfeitedSessionAmounts($completed);
 
-        $rows = $completed->groupBy('teacher_id')->map(function (Collection $group, int $tId) use ($teacherAmounts, $pendingSettlements, $settlementItems, $platformAmounts, $compensation, $fixedCompensations, $forfeited, $teachers) {
+        $rows = $completed->groupBy('teacher_id')->map(function (Collection $group, int $tId) use ($teacherAmounts, $pendingSettlements, $settlementItems, $platformAmounts, $compensation, $fixedCompensations, $forfeited, $teachers, $campaignBookings) {
             $row = [
                 'teacherId' => $tId,
                 'teacherName' => $teachers->get($tId)?->user?->name,
+                'campaignSessionsCount' => 0,
                 'sessionsCount' => 0,
                 'studentNoShowCount' => 0,
                 'teacherAbsentCount' => 0,
@@ -102,6 +111,20 @@ class TeacherSessionsReportService
             ];
 
             foreach ($group as $session) {
+                $campaignBooking = $session->booking_id ? $campaignBookings->get($session->booking_id) : null;
+
+                if ($campaignBooking) {
+                    if ($session->attendance_outcome !== ClassSession::OUTCOME_TEACHER_ABSENT) {
+                        $row['campaignSessionsCount']++;
+                    }
+
+                    if ($session->makeup_for_session_id === null && $campaignBooking->sessions_total > 0) {
+                        $row['platformRevenue'] += (float) $campaignBooking->platform_amount / $campaignBooking->sessions_total;
+                    }
+
+                    continue;
+                }
+
                 $amount = $teacherAmounts[$session->id] ?? ['amount' => 0.0, 'paid' => false];
                 $pending = $pendingSettlements[$session->id] ?? 0.0;
 
@@ -144,7 +167,7 @@ class TeacherSessionsReportService
 
             return $row;
         })
-            ->filter(fn (array $row) => $row['sessionsCount'] > 0 || $row['teacherAbsentCount'] > 0 || $row['platformRevenue'] != 0.0)
+            ->filter(fn (array $row) => $row['sessionsCount'] > 0 || $row['campaignSessionsCount'] > 0 || $row['teacherAbsentCount'] > 0 || $row['platformRevenue'] != 0.0)
             ->sortByDesc('platformRevenue')
             ->values();
 
@@ -155,7 +178,7 @@ class TeacherSessionsReportService
     {
         $totals = [];
 
-        foreach (['sessionsCount', 'studentNoShowCount', 'teacherAbsentCount', 'unpaidCount'] as $key) {
+        foreach (['campaignSessionsCount', 'sessionsCount', 'studentNoShowCount', 'teacherAbsentCount', 'unpaidCount'] as $key) {
             $totals[$key] = (int) $rows->sum($key);
         }
 

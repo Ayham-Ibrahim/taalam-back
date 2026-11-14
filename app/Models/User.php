@@ -3,6 +3,7 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Support\EmailNormalizer;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -26,6 +27,9 @@ class User extends Authenticatable
         'phone',
         'whatsapp',
         'role',
+        'account_type',
+        'campaign_id',
+        'converted_at',
         'primary_user_id',
         'password',
         'avatar_path',
@@ -63,7 +67,24 @@ class User extends Authenticatable
             'timezone_auto' => 'boolean',
             'policy_accepted_at' => 'datetime',
             'policy_version' => 'datetime',
+            'converted_at' => 'datetime',
         ];
+    }
+
+    public const ACCOUNT_REGULAR = 'regular';
+
+    public const ACCOUNT_CAMPAIGN = 'campaign';
+
+    public const ACCOUNT_GUEST = 'guest';
+
+    /** normalized_email يتبع email دائماً — أي مسار يكتب البريد (تسجيل، تعديل ملف، أدمن) */
+    protected static function booted(): void
+    {
+        static::saving(function (User $user) {
+            if ($user->isDirty('email') || ($user->email !== null && $user->normalized_email === null)) {
+                $user->normalized_email = EmailNormalizer::normalize($user->email);
+            }
+        });
     }
 
     public function teacher()
@@ -91,6 +112,29 @@ class User extends Authenticatable
     public function siblingAccounts()
     {
         return $this->hasMany(User::class, 'primary_user_id');
+    }
+
+    public function campaign()
+    {
+        return $this->belongsTo(Campaign::class);
+    }
+
+    /** حساب ظل لزائر حجز الباقة المجانية ببريده فقط — لا كلمة مرور ولا دخول */
+    public function isGuestAccount(): bool
+    {
+        return $this->account_type === self::ACCOUNT_GUEST;
+    }
+
+    /** سجّل من رابط حملة ولم يحوّل حسابه بعد — لا يحجز الباقات العادية المدفوعة */
+    public function isUnconvertedCampaignAccount(): bool
+    {
+        return $this->account_type === self::ACCOUNT_CAMPAIGN;
+    }
+
+    /** جاء من حملة (دائم، يبقى بعد التحويل) — يرى باقات الحملة ويحق له حجز واحدة منها */
+    public function isFromCampaign(): bool
+    {
+        return $this->campaign_id !== null;
     }
 
     public function isSiblingAccount(): bool

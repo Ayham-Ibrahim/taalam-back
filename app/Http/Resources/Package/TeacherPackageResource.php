@@ -21,6 +21,8 @@ class TeacherPackageResource extends JsonResource
             'subject' => $this->whenLoaded('subject', fn () => $this->subject?->name_ar),
             'session_format' => $this->session_format,
             'is_trial' => (bool) $this->is_trial,
+            // campaign: باقة حملة مخفضة — لحسابات الحملة فقط، مبلغها للمنصة والمعلم براتب ثابت
+            'audience' => $this->audience ?? 'public',
             'capacity' => $this->capacity,
             'enrolled_count' => $this->enrolled_count,
             'sessions_count' => $this->sessions_count,

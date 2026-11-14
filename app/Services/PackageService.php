@@ -4,15 +4,86 @@ namespace App\Services;
 
 use App\Models\Package;
 use App\Models\Teacher;
+use App\Models\User;
+use App\Notifications\CampaignPackageAssigned;
 use App\Traits\LogsAuditEvents;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class PackageService
 {
     use LogsAuditEvents;
 
-    public function __construct(private readonly SettingsService $settings) {}
+    public function __construct(
+        private readonly SettingsService $settings,
+        private readonly NotificationService $notifications,
+    ) {}
+
+    /**
+     * باقة حملة مخفضة ينشئها الأدمن باسم معلم — فردية دائماً، نشطة فوراً بلا دورة مراجعة
+     * وهامش: السعر الذي يحدده الأدمن هو سعر الطالب، ومبلغه كله للمنصة (teacher_price = 0،
+     * platform_revenue = السعر) لأن المعلم يأخذ عنها راتباً شهرياً ثابتاً. طلبات حجزها تمر
+     * بموافقة المعلم على الموعد كأي باقة فردية، وتظهر لحسابات الحملة فقط.
+     */
+    public function createCampaignPackage(Teacher $teacher, User $admin, array $data): Package
+    {
+        if ($teacher->isTrainingCenter() || ! $teacher->isVerified()) {
+            throw ValidationException::withMessages([
+                'teacher_id' => ['يجب أن يكون المعلم موثّقاً وليس مركزاً تدريبياً'],
+            ]);
+        }
+
+        return DB::transaction(function () use ($teacher, $admin, $data) {
+            $price = round((float) $data['price'], 2);
+
+            $package = Package::create([
+                'teacher_id' => $teacher->id,
+                'schedule_timezone' => $teacher->loadMissing('user')->user->timezone ?? 'UTC',
+                'title' => $data['title'],
+                'description' => $data['description'] ?? null,
+                'subject_id' => $data['subject_id'] ?? null,
+                'session_format' => 'individual',
+                'is_trial' => false,
+                'audience' => Package::AUDIENCE_CAMPAIGN,
+                'capacity' => 1,
+                'sessions_count' => $data['sessions_count'],
+                'teacher_price' => 0,
+                'platform_margin_percent' => 100,
+                'student_price' => $price,
+                'platform_revenue' => $price,
+                'grades' => ! empty($data['grades']) ? array_values($data['grades']) : null,
+                'status' => 'active',
+                'submitted_at' => now(),
+                'approved_at' => now(),
+                'approved_by' => $admin->id,
+            ]);
+
+            if (! empty($data['curriculum_ids'])) {
+                $package->curricula()->sync($data['curriculum_ids']);
+            }
+
+            if (! empty($data['stage_ids'])) {
+                $package->stages()->sync($data['stage_ids']);
+            }
+
+            $this->syncSchedules($package, $data['schedules'], $teacher);
+
+            $this->audit('package.campaign_created', $package, [], [
+                'teacher_id' => $teacher->id,
+                'student_price' => $price,
+                'sessions_count' => $package->sessions_count,
+            ], null, $admin->id);
+
+            DB::afterCommit(fn () => $this->notifications->send(
+                $teacher->user,
+                new CampaignPackageAssigned($package),
+                'package.campaign_assigned',
+            ));
+
+            return $package->fresh(['curricula', 'stages', 'schedules', 'teacher.user:id,name', 'subject:id,name_ar']);
+        });
+    }
 
     public function createDraft(Teacher $teacher, array $data): Package
     {

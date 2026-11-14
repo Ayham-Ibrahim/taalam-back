@@ -10,7 +10,10 @@ use App\Models\Package;
 use App\Models\Payment;
 use App\Models\SessionAttendee;
 use App\Models\Student;
+use App\Models\Teacher;
 use App\Models\User;
+use App\Notifications\GuestTrialBookingStatus;
+use App\Support\EmailNormalizer;
 use App\Traits\LogsAuditEvents;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -28,6 +31,7 @@ class BookingService
         private readonly SettingsService $settings,
         private readonly ScheduleConflictService $conflicts,
         private readonly CouponService $coupons,
+        private readonly NotificationService $notifications,
     ) {}
 
     /**
@@ -47,6 +51,8 @@ class BookingService
                 'package' => ['هذه الباقة ليست فردية'],
             ]);
         }
+
+        $this->assertAudienceAllows($student, $package);
 
         $this->assertSlotsCountMatchesPackage($package, $slots);
 
@@ -71,6 +77,8 @@ class BookingService
         // معاملة لازمة الآن حتى بلا دفع بعد: حجز الكوبون (lockForUpdate + increment)
         // يجب أن يُلغى تلقائياً (rollback) لو فشل أي فحص لاحق قبل إنشاء الحجز نفسه.
         return DB::transaction(function () use ($student, $package, $slots, $timezone, $couponCode) {
+            $this->assertOneTimeRightsAvailable($student, $package);
+
             return $this->createBookingRecord($student, $package, array_merge([
                 'status' => 'pending_teacher_confirmation',
                 // العمودان القديمان يبقيان مملوءين بأول جلسة فقط (توافقاً مع أي كود
@@ -109,7 +117,7 @@ class BookingService
 
         $this->assertPackageBookable($booking->package);
 
-        return DB::transaction(function () use ($booking, $teacher) {
+        $approved = DB::transaction(function () use ($booking, $teacher) {
             // requested_slots أُدخِلت كوقت حائط محلي لدى الطالب — slotsToAnchors
             // تفسّرها كذلك وتحوّلها فعلياً لتوقيت النظام (UTC) قبل إنشاء الجلسات.
             $anchors = $this->slotsToAnchors($this->requestedSlots($booking), $booking->requested_timezone ?? 'UTC');
@@ -146,6 +154,10 @@ class BookingService
 
             return $booking->fresh(['sessions']);
         });
+
+        $this->notifyGuestOfDecision($approved, approved: true);
+
+        return $approved;
     }
 
     /** المعلم يرفض طلب الحجز — لا جلسات أُنشئت ولا دفع تم، فلا شيء لاسترداده. */
@@ -174,7 +186,27 @@ class BookingService
 
         $this->audit('booking.request_rejected', $booking, [], [], $reason, $teacher->id);
 
+        $this->notifyGuestOfDecision($booking, approved: false);
+
         return $booking;
+    }
+
+    /**
+     * الزائر (حساب ظل بلا دخول) لا يرى قرار المعلم في المنصة — يصله بالبريد. الحساب العادي
+     * يراه في صفحة حجوزاته كالمعتاد. رابط الانضمام نفسه يصله لاحقاً مع تذكير الجلسة
+     * (SendSessionRemindersJob) كأي طالب.
+     */
+    private function notifyGuestOfDecision(Booking $booking, bool $approved): void
+    {
+        $user = $booking->loadMissing('student.user')->student?->user;
+
+        if (! $user?->isGuestAccount()) {
+            return;
+        }
+
+        $status = $approved ? GuestTrialBookingStatus::APPROVED : GuestTrialBookingStatus::REJECTED;
+
+        $this->notifications->send($user, new GuestTrialBookingStatus($booking, $status), 'guest_trial.'.$status);
     }
 
     /**
@@ -455,6 +487,8 @@ class BookingService
             ]);
         }
 
+        $this->assertAudienceAllows($student, $package);
+
         if ($package->enrolled_count >= $package->capacity) {
             throw ValidationException::withMessages([
                 'package' => ['اكتمل نصاب هذه المجموعة'],
@@ -467,6 +501,8 @@ class BookingService
         $this->assertNoOpenBookingForPackage($student, $package);
 
         return DB::transaction(function () use ($student, $package, $couponCode) {
+            $this->assertOneTimeRightsAvailable($student, $package);
+
             $booking = $this->createBookingRecord($student, $package, $this->resolveCouponOverrides($couponCode, $package));
 
             // sessionsFor() قد تكون هذه أول عملية انضمام (تُنشئ جلسات المجموعة
@@ -650,6 +686,92 @@ class BookingService
         }
     }
 
+    /**
+     * من يحق له حجز الباقة حسب جمهورها (الحجز الذاتي فقط — الأدمن يحجز يدوياً لمن يشاء):
+     * باقة الحملة لمن جاء من حملة فقط (ولو حوّل حسابه)، وحساب الحملة قبل تحويله لا يحجز
+     * الباقات العادية المدفوعة — يراها فقط. الباقة المجانية مستثناة: لا شيء يُدفع فيها.
+     */
+    private function assertAudienceAllows(Student $student, Package $package): void
+    {
+        $user = $student->loadMissing('user')->user;
+
+        if ($package->isCampaign()) {
+            if (! $user?->isFromCampaign()) {
+                throw ValidationException::withMessages([
+                    'package' => ['هذه الباقة غير متاحة للحجز'],
+                ]);
+            }
+
+            return;
+        }
+
+        if ($user?->isUnconvertedCampaignAccount() && ! $package->is_trial) {
+            throw ValidationException::withMessages([
+                'account' => ['حوّل حسابك إلى حساب طبيعي لتتمكن من حجز هذه الباقة'],
+            ]);
+        }
+    }
+
+    /**
+     * حقوق "مرة واحدة" — داخل معاملة الحجز نفسها وبعد قفل، فلا ينجح طلبان متزامنان معاً.
+     * الطلب المرفوض/المنتهي (cancelled/expired) أو المحذوف لا يستهلك الحق.
+     *
+     * - الباقة المجانية: مرة لكل بريد مع كل معلم — البريد بعد التوحيد (EmailNormalizer)،
+     *   وحساب الأخ (بلا بريد) يُحسب على بريد الحساب الأساسي، والزائر والمسجّل يتشاركان الحد.
+     *   القفل على صف المعلم: كل طلبات تجربته تمر بالتتابع.
+     * - باقة الحملة: مرة واحدة لكل حساب على كل باقات الحملة مجتمعة. القفل على صف الطالب.
+     */
+    private function assertOneTimeRightsAvailable(Student $student, Package $package): void
+    {
+        if ($package->is_trial) {
+            $email = EmailNormalizer::normalize($student->loadMissing('user.primaryAccount')->user?->contactEmail());
+
+            Teacher::whereKey($package->teacher_id)->lockForUpdate()->first();
+
+            if ($email !== null && $this->trialUsedWithTeacher($email, $package->teacher_id)) {
+                throw ValidationException::withMessages([
+                    'package' => ['استخدمت الجلسة المجانية مع هذا المعلم مسبقاً — يحق لكل بريد جلسة مجانية واحدة مع كل معلم'],
+                ]);
+            }
+        }
+
+        if ($package->isCampaign()) {
+            Student::whereKey($student->id)->lockForUpdate()->first();
+
+            $used = Booking::where('student_id', $student->id)
+                ->whereNotIn('status', ['cancelled', 'expired'])
+                ->whereHas('package', fn ($q) => $q->campaignAudience())
+                ->exists();
+
+            if ($used) {
+                throw ValidationException::withMessages([
+                    'package' => ['يحق لك حجز باقة واحدة فقط من باقات الحملة وقد استخدمت هذا الحق'],
+                ]);
+            }
+        }
+    }
+
+    public function trialUsedWithTeacher(string $normalizedEmail, int $teacherId): bool
+    {
+        return Booking::query()
+            ->where('teacher_id', $teacherId)
+            ->whereNotIn('status', ['cancelled', 'expired'])
+            ->whereHas('package', fn ($q) => $q->where('is_trial', true))
+            ->whereHas('student.user', fn ($u) => $u->where(fn ($w) => $w
+                ->where('normalized_email', $normalizedEmail)
+                ->orWhereHas('primaryAccount', fn ($p) => $p->where('normalized_email', $normalizedEmail))))
+            ->exists();
+    }
+
+    /** هل استخدم الحساب حقه في باقة الحملة — للعرض في قائمة باقات الحملة */
+    public function campaignRightUsed(Student $student): bool
+    {
+        return Booking::where('student_id', $student->id)
+            ->whereNotIn('status', ['cancelled', 'expired'])
+            ->whereHas('package', fn ($q) => $q->campaignAudience())
+            ->exists();
+    }
+
     private function studentTimezone(Student $student): string
     {
         return $student->loadMissing('user')->user->timezone ?? 'UTC';
@@ -665,7 +787,9 @@ class BookingService
      */
     private function incrementEnrolledCount(Package $package): void
     {
-        if ($package->isIndividual()) {
+        // الفردية: capacity=1 تعني "طالب واحد لكل جلسة" لا للباقة كلها (راجع PackageObserver) — العدّاد
+        // يقف عند السعة (يكفي لعرض "عليها حجوزات")، وإلا يكسر ثاني حجز مؤكَّد قيد chk_packages_enrolled
+        if ($package->isIndividual() && $package->enrolled_count >= $package->capacity) {
             return;
         }
 
@@ -685,6 +809,8 @@ class BookingService
             'platform_amount' => $package->platform_revenue,
             'margin_percent_snapshot' => $package->platform_margin_percent,
             'currency' => $package->currency,
+            // باقة الحملة: المعلم يأخذ راتباً ثابتاً عنها — الحجز خارج المستحقات وتعويض الغياب
+            'excluded_from_payouts' => $package->isCampaign(),
             'sessions_total' => $package->sessions_count,
             'sessions_used' => 0,
             'sessions_remaining' => $package->sessions_count,

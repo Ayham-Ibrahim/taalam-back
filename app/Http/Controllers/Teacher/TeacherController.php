@@ -124,7 +124,7 @@ class TeacherController extends Controller
             // المراحل/الصفوف المعروضة للطالب مُشتقّة من باقات المعلم الفعلية
             // القابلة للحجز فقط (PublicTeacherResource) — لا من تصنيف عام، ولا
             // من باقات مسودة/معطّلة لا يمكن للطالب حجزها أصلاً.
-            $teacher->load(['packages' => fn ($q) => $q->bookable()->with('stages')]);
+            $teacher->load(['packages' => fn ($q) => $q->bookable()->publicAudience()->with('stages')]);
         }
 
         $teacher->setAttribute('stats', $this->teacherService->getStats($teacher));

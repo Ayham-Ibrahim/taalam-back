@@ -18,7 +18,13 @@ class Package extends Model
     protected $attributes = [
         'currency' => 'AED',
         'session_duration_min' => 60,
+        'audience' => self::AUDIENCE_PUBLIC,
     ];
+
+    public const AUDIENCE_PUBLIC = 'public';
+
+    /** باقة حملة مخفضة: ينشئها الأدمن، تظهر لحسابات الحملة فقط، ومبلغها كله للمنصة */
+    public const AUDIENCE_CAMPAIGN = 'campaign';
 
     protected $fillable = [
         'teacher_id',
@@ -28,6 +34,7 @@ class Package extends Model
         'subject_id',
         'session_format',
         'is_trial',
+        'audience',
         'capacity',
         'enrolled_count',
         'sessions_count',
@@ -105,6 +112,32 @@ class Package extends Model
     public function isIndividual(): bool
     {
         return $this->session_format === 'individual';
+    }
+
+    public function isCampaign(): bool
+    {
+        return $this->audience === self::AUDIENCE_CAMPAIGN;
+    }
+
+    /** الباقات المعروضة للجميع — كل عرض عام (بحث، ملف المعلم، الإحصائيات) يمر عبرها */
+    public function scopePublicAudience(Builder $query): Builder
+    {
+        return $query->where('packages.audience', self::AUDIENCE_PUBLIC);
+    }
+
+    public function scopeCampaignAudience(Builder $query): Builder
+    {
+        return $query->where('packages.audience', self::AUDIENCE_CAMPAIGN);
+    }
+
+    /** العامة للجميع، وباقات الحملة فقط لمن جاء من حملة (يبقى حقه بعد تحويل حسابه) */
+    public function scopeVisibleTo(Builder $query, ?User $user): Builder
+    {
+        if ($user?->isFromCampaign()) {
+            return $query;
+        }
+
+        return $query->publicAudience();
     }
 
     /**

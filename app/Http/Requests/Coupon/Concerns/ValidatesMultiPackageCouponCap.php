@@ -28,8 +28,14 @@ trait ValidatesMultiPackageCouponCap
     ): void {
         $columns = ['id', 'title', 'status', 'platform_margin_percent', 'platform_revenue', 'currency'];
 
+        $packages = Package::whereIn('id', $packageIds)->get([...$columns, 'audience']);
+
+        foreach ($packages->filter(fn (Package $package) => $package->isCampaign()) as $package) {
+            $validator->errors()->add('package_ids', "الباقة «{$package->title}» باقة حملة — لا كوبونات عليها.");
+        }
+
         $items = [
-            ['الباقة', Package::whereIn('id', $packageIds)->get($columns), $attachedPackageIds],
+            ['الباقة', $packages->reject(fn (Package $package) => $package->isCampaign()), $attachedPackageIds],
             ['الدورة', Course::whereIn('id', $courseIds)->get($columns), $attachedCourseIds],
         ];
 

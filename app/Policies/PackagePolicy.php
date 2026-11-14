@@ -34,14 +34,15 @@ class PackagePolicy
         return $user->loadMissing('teacher')->teacher?->id === $package->teacher_id;
     }
 
+    /** باقة الحملة ينشئها الأدمن باسم المعلم — تعطيلها وتفعيلها للأدمن وحده */
     public function disable(User $user, Package $package): bool
     {
-        return $user->isAdmin() || $user->loadMissing('teacher')->teacher?->id === $package->teacher_id;
+        return $user->isAdmin() || (! $package->isCampaign() && $user->loadMissing('teacher')->teacher?->id === $package->teacher_id);
     }
 
     public function enable(User $user, Package $package): bool
     {
-        return $user->isAdmin() || $user->loadMissing('teacher')->teacher?->id === $package->teacher_id;
+        return $user->isAdmin() || (! $package->isCampaign() && $user->loadMissing('teacher')->teacher?->id === $package->teacher_id);
     }
 
     public function approve(User $user): bool
