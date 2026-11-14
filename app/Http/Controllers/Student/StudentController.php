@@ -43,7 +43,7 @@ class StudentController extends Controller
         $this->authorize('viewAny', Student::class);
 
         $students = Student::query()
-            ->with('user:id,name,email,phone,avatar_path,is_active,created_at')
+            ->with(['user:id,name,email,phone,avatar_path,is_active,created_at', 'region:id,name_ar'])
             ->when($request->filled('search'), function ($query) use ($request) {
                 $search = $request->string('search');
                 $query->whereHas('user', function ($userQuery) use ($search) {
@@ -52,6 +52,7 @@ class StudentController extends Controller
                 });
             })
             ->when($request->filled('education_type'), fn ($q) => $q->where('education_type', $request->string('education_type')->value()))
+            ->when($request->filled('region_id'), fn ($q) => $q->where('region_id', $request->integer('region_id')))
             ->latest()
             ->paginate($request->integer('per_page', 20));
 
@@ -62,7 +63,7 @@ class StudentController extends Controller
     {
         $this->authorize('view', $student);
 
-        $student->load(['user:id,name,email,phone,avatar_path,whatsapp,gender', 'curriculum:id,name_ar', 'stage:id,name_ar', 'university:id,name_ar', 'major:id,name_ar', 'courseField:id,name_ar']);
+        $student->load(['user:id,name,email,phone,avatar_path,whatsapp,gender', 'curriculum:id,name_ar', 'region:id,name_ar', 'stage:id,name_ar', 'university:id,name_ar', 'major:id,name_ar', 'courseField:id,name_ar']);
 
         return $this->success(new StudentProfileResource($student));
     }

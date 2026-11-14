@@ -7,7 +7,9 @@ use App\Jobs\FetchSessionRecordingsJob;
 use App\Jobs\SendSessionQualityRatingRequestsJob;
 use App\Jobs\SendSubscriptionEndedEmailsJob;
 use App\Jobs\SendSessionRemindersJob;
+use App\Models\Student;
 use App\Services\RankingService;
+use App\Support\RegionMatcher;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -15,6 +17,37 @@ use Illuminate\Support\Facades\Schedule;
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
+
+// مرة واحدة بعد إضافة جدول regions (ويمكن إعادته بأمان): يطابق students.city النصّي
+// القديم مع الولايات للطلاب بلا region_id، ويطبع القيم غير المطابقة لمراجعتها يدوياً.
+Artisan::command('students:match-regions {--dry-run : عرض النتيجة دون حفظ}', function (RegionMatcher $matcher) {
+    $students = Student::query()->whereNull('region_id')->whereNotNull('city')->get(['id', 'city']);
+    $matched = 0;
+    $unmatched = [];
+
+    foreach ($students as $student) {
+        $regionId = $matcher->match($student->city);
+
+        if ($regionId === null) {
+            $unmatched[$student->city] = ($unmatched[$student->city] ?? 0) + 1;
+
+            continue;
+        }
+
+        if (! $this->option('dry-run')) {
+            $student->update(['region_id' => $regionId]);
+        }
+        $matched++;
+    }
+
+    $this->info("طوبق {$matched} من {$students->count()} طالب".($this->option('dry-run') ? ' (تجربة — لم يُحفظ شيء)' : ''));
+
+    if ($unmatched) {
+        arsort($unmatched);
+        $this->warn('قيم لم تُطابَق:');
+        $this->table(['city', 'عدد الطلاب'], collect($unmatched)->map(fn ($count, $city) => [$city, $count])->values()->all());
+    }
+})->purpose('Match legacy students.city values to regions');
 
 Schedule::job(new ExpireStaleBookingsJob)->everyMinute();
 

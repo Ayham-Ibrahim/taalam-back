@@ -12,6 +12,7 @@ use App\Models\University;
 use App\Models\User;
 use App\Rules\EmailHasMailExchangeRecord;
 use App\Rules\NotSpreadsheetFormula;
+use App\Support\RegionMatcher;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -41,6 +42,7 @@ class StudentImportService
         private readonly SettingsService $settings,
         private readonly StudentService $studentService,
         private readonly NotificationService $notifications,
+        private readonly RegionMatcher $regionMatcher,
     ) {}
 
     public function processBatch(ImportBatch $batch): void
@@ -121,6 +123,7 @@ class StudentImportService
             'birth_date' => $data['birth_date'] ?? null,
             'city' => $data['city'] ?? null,
             'country' => $data['country'] ?? null,
+            'region_id' => $data['region_id'] ?? null,
             'guardian_name' => $data['guardian_name'] ?? null,
             'guardian_phone' => $data['guardian_phone'] ?? null,
             'imported' => true,
@@ -146,6 +149,7 @@ class StudentImportService
             'phone' => $this->normalizeValue($row['phone'] ?? $row['phone1'] ?? null),
             'city' => $this->normalizeValue($row['city'] ?? null),
             'country' => $this->normalizeValue($row['country'] ?? null),
+            'region' => $this->normalizeValue($row['region'] ?? null),
             'education_type' => $this->normalizeValue($row['education_type'] ?? null),
             'curriculum_code' => $this->normalizeValue($row['curriculum_code'] ?? null),
             'stage_code' => $this->normalizeValue($row['stage_code'] ?? null),
@@ -167,6 +171,7 @@ class StudentImportService
             'phone' => ['nullable', 'string', 'max:25', 'unique:users,phone'],
             'city' => ['nullable', 'string', 'max:100', new NotSpreadsheetFormula],
             'country' => ['nullable', 'string', 'max:100', new NotSpreadsheetFormula],
+            'region' => ['nullable', 'string', 'max:100'],
             'education_type' => ['nullable', Rule::in(['school', 'university', 'training'])],
             'curriculum_code' => ['nullable', 'string'],
             'stage_code' => ['nullable', 'string'],
@@ -187,6 +192,16 @@ class StudentImportService
         }
 
         $data = $validator->validated();
+
+        // عمود region صريح (اسم أو رمز) يجب أن يُعرَف وإلا يُرفض الصف — كبقية الرموز.
+        // بدونه نحاول city بهدوء: ملفات الشركاء تحمل المدينة نصاً حراً، وعدم مطابقتها
+        // لا يستحق رفض طالب صالح، فتبقى ولايته فارغة.
+        if (! empty($data['region'])) {
+            $data['region_id'] = $this->regionMatcher->match($data['region'])
+                ?? throw ValidationException::withMessages(['region' => ['الولاية "'.$data['region'].'" غير معروفة']]);
+        } else {
+            $data['region_id'] = $this->regionMatcher->match($data['city'] ?? null);
+        }
 
         if (! empty($data['curriculum_code'])) {
             $data['curriculum_id'] = $this->resolveByCode(Curriculum::class, $data['curriculum_code'], 'curriculum_code');

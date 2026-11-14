@@ -9,6 +9,7 @@ use App\Models\Curriculum;
 use App\Models\Language;
 use App\Models\Major;
 use App\Models\Package;
+use App\Models\Region;
 use App\Models\Review;
 use App\Models\Stage;
 use App\Models\Subject;
@@ -49,7 +50,7 @@ class AppServiceProvider extends ServiceProvider
         Model::preventLazyLoading(! $this->app->environment('production'));
         Model::preventSilentlyDiscardingAttributes(! $this->app->environment('production'));
 
-        foreach ([Curriculum::class, Stage::class, Subject::class, University::class, Major::class, CourseField::class, Language::class] as $model) {
+        foreach ([Curriculum::class, Stage::class, Subject::class, University::class, Major::class, CourseField::class, Language::class, Region::class] as $model) {
             Gate::policy($model, TaxonomyPolicy::class);
         }
 

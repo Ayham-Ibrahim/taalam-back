@@ -23,6 +23,7 @@ class Student extends Model
         'birth_date',
         'city',
         'country',
+        'region_id',
         'guardian_name',
         'guardian_phone',
         'imported',
@@ -45,6 +46,11 @@ class Student extends Model
     public function curriculum()
     {
         return $this->belongsTo(Curriculum::class);
+    }
+
+    public function region()
+    {
+        return $this->belongsTo(Region::class);
     }
 
     public function stage()

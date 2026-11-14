@@ -19,6 +19,8 @@ class StudentProfileResource extends JsonResource
             'education_type' => $this->education_type,
             'curriculum' => $this->whenLoaded('curriculum', fn () => $this->curriculum?->name_ar),
             'curriculum_id' => $this->curriculum_id,
+            'region' => $this->whenLoaded('region', fn () => $this->region?->name_ar),
+            'region_id' => $this->region_id,
             'stage' => $this->whenLoaded('stage', fn () => $this->stage?->name_ar),
             'stage_id' => $this->stage_id,
             'grade' => $this->grade,

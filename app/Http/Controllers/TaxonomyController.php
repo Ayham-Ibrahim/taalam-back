@@ -7,6 +7,7 @@ use App\Models\CourseField;
 use App\Models\Curriculum;
 use App\Models\Language;
 use App\Models\Major;
+use App\Models\Region;
 use App\Models\Stage;
 use App\Models\Subject;
 use App\Models\University;
@@ -22,6 +23,7 @@ class TaxonomyController extends Controller
         'majors' => Major::class,
         'course_fields' => CourseField::class,
         'languages' => Language::class,
+        'regions' => Region::class,
     ];
 
     // الجداول التي لا تملك عمود sort_order (universities/majors/languages)
@@ -33,6 +35,7 @@ class TaxonomyController extends Controller
         'majors' => false,
         'course_fields' => true,
         'languages' => false,
+        'regions' => true,
     ];
 
     private const CACHE_TTL = 3600;

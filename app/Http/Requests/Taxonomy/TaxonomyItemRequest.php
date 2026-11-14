@@ -65,6 +65,14 @@ class TaxonomyItemRequest extends FormRequest
                 'name_ar' => ['required', 'string', 'max:60'],
                 'is_active' => ['nullable', 'boolean'],
             ],
+            'regions' => [
+                'code' => ['required', 'string', 'max:30', Rule::unique('regions', 'code')->ignore($id)],
+                'name_ar' => ['required', 'string', 'max:100'],
+                'name_en' => ['nullable', 'string', 'max:100'],
+                'country' => ['nullable', 'string', 'max:80'],
+                'sort_order' => ['nullable', 'integer', 'min:0', 'max:10000'],
+                'is_active' => ['nullable', 'boolean'],
+            ],
             default => [],
         };
     }

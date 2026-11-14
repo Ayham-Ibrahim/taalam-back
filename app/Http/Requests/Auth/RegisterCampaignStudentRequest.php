@@ -22,6 +22,8 @@ class RegisterCampaignStudentRequest extends FormRequest
             'phone' => ['required', 'string', 'max:25', 'unique:users,phone'],
             'password' => ['required', 'confirmed', Password::defaults()],
             'timezone' => ['nullable', 'string', 'max:64'],
+            // ولاية الطالب القادم من الحملة — يقيس بها التسويق وصول كل حملة جغرافياً
+            'region_id' => ['nullable', 'exists:regions,id'],
             'accept_policy' => ['accepted'],
         ];
     }
@@ -32,6 +34,7 @@ class RegisterCampaignStudentRequest extends FormRequest
             'name' => 'الاسم',
             'email' => 'البريد الإلكتروني',
             'phone' => 'رقم الهاتف',
+            'region_id' => 'الولاية',
             'password' => 'كلمة المرور',
             'accept_policy' => 'الموافقة على سياسة الطالب',
         ];

@@ -22,6 +22,7 @@ class CreateStudentAccountRequest extends FormRequest
             'password' => ['required', Password::defaults()],
             // يختارها الأدمن من القائمة — بلا قيمة تبقى الافتراضية (Asia/Riyadh)
             'timezone' => ['nullable', 'string', 'max:64', 'timezone:all_with_bc'],
+            'region_id' => ['nullable', 'exists:regions,id'],
         ];
     }
 }

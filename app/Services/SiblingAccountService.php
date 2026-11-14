@@ -50,6 +50,8 @@ class SiblingAccountService
                 'birth_date' => $data['birth_date'] ?? null,
                 'guardian_name' => $data['guardian_name'] ?? null,
                 'guardian_phone' => $data['guardian_phone'] ?? null,
+                // نفس الأسرة غالباً بنفس الولاية — تُورَث من الأساسي ما لم تُحدَّد
+                'region_id' => $data['region_id'] ?? $primary->student()->value('region_id'),
             ]);
 
             $sibling->setRelation('student', $student);

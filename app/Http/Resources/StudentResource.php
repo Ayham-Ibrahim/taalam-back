@@ -15,6 +15,8 @@ class StudentResource extends JsonResource
             'education_type' => $this->education_type,
             'stage_id' => $this->stage_id,
             'university_id' => $this->university_id,
+            // null = الطالب لم يحدد ولايته بعد — تطلبها الواجهة منه
+            'region_id' => $this->region_id,
         ];
     }
 }
