@@ -104,6 +104,12 @@ class Booking extends Model
         return $this->hasMany(ClassSession::class);
     }
 
+    /** صفوف حضور هذا الحجز في الجلسات (فردي وجماعي، مالكاً أو منضماً) — طريق جلسات الطالب الفعلية */
+    public function attendees()
+    {
+        return $this->hasMany(SessionAttendee::class);
+    }
+
     /**
      * كل الجلسات التي يحضرها صاحب هذه الحجزة فعلياً (عبر session_attendees) — الأصحّ
      * لعرضها للطالب، بصرف النظر عمّن "يملك" سجل class_sessions.
