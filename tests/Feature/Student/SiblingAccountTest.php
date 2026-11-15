@@ -11,6 +11,7 @@ use App\Services\PricingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Tests\TestCase;
 
 /**
@@ -28,6 +29,8 @@ class SiblingAccountTest extends TestCase
         $response = $this->as($token)->postJson('/api/me/siblings', [
             'name' => 'سارة',
             'gender' => 'female',
+            'password' => 'Sara1234',
+            'password_confirmation' => 'Sara1234',
             'education_type' => 'training',
             'course_field_id' => $this->courseFieldId(),
             'level' => 'beginner',
@@ -40,10 +43,121 @@ class SiblingAccountTest extends TestCase
             ->assertJsonPath('data.primary_user_id', $primary->id);
 
         $sibling = User::where('primary_user_id', $primary->id)->firstOrFail();
-        $this->assertNull($sibling->password);
+        $this->assertTrue(Hash::check('Sara1234', $sibling->password));
         $this->assertSame('student', $sibling->role);
         $this->assertSame($primary->fresh()->timezone, $sibling->timezone);
         $this->assertDatabaseHas('students', ['user_id' => $sibling->id, 'education_type' => 'training']);
+    }
+
+    public function test_adding_a_sibling_requires_a_password(): void
+    {
+        [, $token] = $this->createPrimaryStudent();
+
+        $this->as($token)->postJson('/api/me/siblings', [
+            'name' => 'سارة',
+            'education_type' => 'training',
+            'course_field_id' => $this->courseFieldId(),
+            'level' => 'beginner',
+        ])->assertStatus(422)->assertJsonValidationErrors('password');
+    }
+
+    public function test_sibling_password_must_differ_from_other_family_passwords(): void
+    {
+        [$primary, $token] = $this->createPrimaryStudent();
+        $this->createSibling($primary, 'Sibling123');
+
+        foreach (['Primary123', 'Sibling123'] as $taken) {
+            $this->as($token)->postJson('/api/me/siblings', [
+                'name' => 'سارة',
+                'password' => $taken,
+                'password_confirmation' => $taken,
+                'education_type' => 'training',
+                'course_field_id' => $this->courseFieldId(),
+                'level' => 'beginner',
+            ])->assertStatus(422)->assertJsonValidationErrors('password');
+        }
+
+        $this->assertSame(1, User::where('primary_user_id', $primary->id)->count());
+    }
+
+    public function test_sibling_logs_in_with_primary_email_and_own_password(): void
+    {
+        [$primary] = $this->createPrimaryStudent();
+        $sibling = $this->createSibling($primary, 'Sibling123');
+
+        $this->postJson('/api/auth/login', ['email' => $primary->email, 'password' => 'Sibling123'])
+            ->assertOk()
+            ->assertJsonPath('data.user.id', $sibling->id);
+
+        $this->postJson('/api/auth/login', ['email' => $primary->email, 'password' => 'Primary123'])
+            ->assertOk()
+            ->assertJsonPath('data.user.id', $primary->id);
+
+        $this->postJson('/api/auth/login', ['email' => $primary->email, 'password' => 'Wrong1234'])
+            ->assertStatus(422);
+    }
+
+    public function test_sibling_cannot_log_in_when_primary_account_is_deactivated(): void
+    {
+        [$primary] = $this->createPrimaryStudent();
+        $this->createSibling($primary, 'Sibling123');
+        $primary->update(['is_active' => false]);
+
+        $this->postJson('/api/auth/login', ['email' => $primary->email, 'password' => 'Sibling123'])
+            ->assertStatus(422);
+    }
+
+    public function test_primary_can_change_sibling_password_and_old_sessions_are_revoked(): void
+    {
+        [$primary, $token] = $this->createPrimaryStudent();
+        $sibling = $this->createSibling($primary, 'Sibling123');
+        $siblingToken = $sibling->createToken('t')->plainTextToken;
+
+        $this->as($token)->putJson("/api/me/siblings/{$sibling->id}/password", [
+            'password' => 'NewPass123',
+            'password_confirmation' => 'NewPass123',
+        ])->assertOk();
+
+        $this->assertTrue(Hash::check('NewPass123', $sibling->fresh()->password));
+        $this->assertSame(0, $sibling->tokens()->count());
+        $this->app['auth']->forgetGuards();
+        $this->as($siblingToken)->getJson('/api/auth/me')->assertStatus(401);
+    }
+
+    public function test_primary_cannot_set_sibling_password_to_the_primary_password(): void
+    {
+        [$primary, $token] = $this->createPrimaryStudent();
+        $sibling = $this->createSibling($primary, 'Sibling123');
+
+        $this->as($token)->putJson("/api/me/siblings/{$sibling->id}/password", [
+            'password' => 'Primary123',
+            'password_confirmation' => 'Primary123',
+        ])->assertStatus(422)->assertJsonValidationErrors('password');
+    }
+
+    public function test_only_the_primary_of_the_family_can_change_a_sibling_password(): void
+    {
+        [$primary] = $this->createPrimaryStudent();
+        $sibling = $this->createSibling($primary, 'Sibling123');
+        $otherSibling = $this->createSibling($primary, 'Other1234');
+        [, $outsiderToken] = $this->createPrimaryStudent();
+        $payload = ['password' => 'NewPass123', 'password_confirmation' => 'NewPass123'];
+
+        $this->as($outsiderToken)->putJson("/api/me/siblings/{$sibling->id}/password", $payload)->assertStatus(403);
+        $this->as($otherSibling->createToken('t')->plainTextToken)
+            ->putJson("/api/me/siblings/{$sibling->id}/password", $payload)->assertStatus(403);
+    }
+
+    public function test_primary_cannot_change_own_password_to_a_sibling_password(): void
+    {
+        [$primary, $token] = $this->createPrimaryStudent();
+        $this->createSibling($primary, 'Sibling123');
+
+        $this->as($token)->putJson('/api/me/password', [
+            'current_password' => 'Primary123',
+            'password' => 'Sibling123',
+            'password_confirmation' => 'Sibling123',
+        ])->assertStatus(422)->assertJsonValidationErrors('password');
     }
 
     public function test_sibling_account_cannot_add_siblings(): void
@@ -161,19 +275,20 @@ class SiblingAccountTest extends TestCase
      */
     private function createPrimaryStudent(): array
     {
-        $user = User::factory()->student()->create();
+        $user = User::factory()->student()->create(['password' => 'Primary123']);
         Student::create(['user_id' => $user->id, 'education_type' => 'school']);
 
         return [$user->load('student'), $user->createToken('t')->plainTextToken];
     }
 
-    private function createSibling(User $primary): User
+    private function createSibling(User $primary, ?string $password = null): User
     {
         $sibling = User::create([
             'name' => 'أخ',
             'email' => null,
             'role' => 'student',
             'primary_user_id' => $primary->id,
+            'password' => $password,
             'is_active' => true,
         ]);
         Student::create(['user_id' => $sibling->id, 'education_type' => 'school']);

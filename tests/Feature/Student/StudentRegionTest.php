@@ -159,8 +159,8 @@ class StudentRegionTest extends TestCase
 
         $payload = ['education_type' => 'training', 'course_field_id' => $this->courseFieldId(), 'level' => 'beginner'];
 
-        $this->as($token)->postJson('/api/me/siblings', ['name' => 'سارة', ...$payload])->assertStatus(201);
-        $this->as($token)->postJson('/api/me/siblings', ['name' => 'ليلى', 'country_id' => $this->country('SA'), ...$payload])->assertStatus(201);
+        $this->as($token)->postJson('/api/me/siblings', ['name' => 'سارة', 'password' => 'Sara1234', 'password_confirmation' => 'Sara1234', ...$payload])->assertStatus(201);
+        $this->as($token)->postJson('/api/me/siblings', ['name' => 'ليلى', 'password' => 'Laila1234', 'password_confirmation' => 'Laila1234', 'country_id' => $this->country('SA'), ...$payload])->assertStatus(201);
 
         $siblings = User::where('primary_user_id', $primary->id)->with('student')->orderBy('id')->get();
         $this->assertSame($ajman, $siblings[0]->student->region_id);
