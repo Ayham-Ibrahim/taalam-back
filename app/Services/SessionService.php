@@ -47,7 +47,7 @@ class SessionService
         $attendeePw = Str::random(16);
         $moderatorPw = Str::random(16);
 
-        $created = $this->bbb->createMeeting($meetingId, "TAALAM Session #{$session->id}", $attendeePw, $moderatorPw);
+        $created = $this->bbb->createMeeting($meetingId, "TAALAM Session #{$session->id}", $attendeePw, $moderatorPw, $this->bbbDurationMinutes($session));
 
         if (! $created) {
             Log::info("bbb.room_not_created_yet", ['session_id' => $session->id]);
@@ -120,11 +120,24 @@ class SessionService
             "TAALAM Session #{$session->id}",
             $session->bbb_attendee_pw,
             $session->bbb_moderator_pw,
+            $this->bbbDurationMinutes($session),
         )) {
             return ['joinable' => true, 'url' => $joinUrl];
         }
 
         return ['joinable' => false, 'message' => 'تعذّر الوصول إلى غرفة الجلسة حالياً، يرجى المحاولة خلال لحظات أو التواصل مع الدعم.'];
+    }
+
+    /**
+     * عدّاد duration في BBB يبدأ من لحظة create لا من موعد الجلسة، فنمرّر الوقت
+     * المتبقي حتى نهايتها المجدولة (scheduled_at + duration_min) — فتُغلق الغرفة
+     * عند نهاية الجلسة تماماً مهما كان وقت إنشائها (مسبقاً، أو عند أول انضمام مبكر).
+     */
+    private function bbbDurationMinutes(ClassSession $session): int
+    {
+        $endsAt = $session->scheduled_at->clone()->addMinutes($session->duration_min);
+
+        return max(1, (int) ceil(now()->diffInSeconds($endsAt, false) / 60));
     }
 
     public function markPresent(SessionAttendee $attendee): SessionAttendee

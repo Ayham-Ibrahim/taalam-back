@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Student;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Student\AddSiblingRequest;
+use App\Http\Requests\Student\UpdateSiblingPasswordRequest;
 use App\Http\Resources\UserResource;
 use App\Models\User;
 use App\Services\SiblingAccountService;
@@ -33,6 +34,14 @@ class SiblingController extends Controller
         $sibling = $this->siblings->add($request->user(), $request->validated());
 
         return $this->success(new UserResource($sibling), 'تمت إضافة الأخ بنجاح', 201);
+    }
+
+    /** الأساسي يغيّر كلمة مرور أحد إخوته — جلسات الأخ القائمة تُبطَل */
+    public function updatePassword(UpdateSiblingPasswordRequest $request, User $user)
+    {
+        $this->siblings->updatePassword($request->user(), $user, $request->validated('password'));
+
+        return $this->success(null, 'تم تحديث كلمة مرور '.$user->name);
     }
 
     /** الواجهة تستبدل التوكن المحفوظ بالتوكن المُعاد — التوكن السابق يُبطَل */

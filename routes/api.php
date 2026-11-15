@@ -83,6 +83,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('me/siblings', [SiblingController::class, 'index']);
     Route::post('me/siblings', [SiblingController::class, 'store']);
     Route::post('me/switch-account/{user}', [SiblingController::class, 'switch']);
+    Route::middleware('throttle:password-change')->put('me/siblings/{user}/password', [SiblingController::class, 'updatePassword']);
 });
 
 Route::post('teachers/accept-invitation', [TeacherController::class, 'acceptInvitation']);
