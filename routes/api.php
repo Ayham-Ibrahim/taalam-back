@@ -30,6 +30,7 @@ use App\Http\Controllers\Payment\PaymentWebhookController;
 use App\Http\Controllers\Payout\PayoutController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\Report\AcademicSupportFinanceReportController;
+use App\Http\Controllers\Report\PlatformNetProfitReportController;
 use App\Http\Controllers\Report\StudentsLocationReportController;
 use App\Http\Controllers\Report\StudentsReportController;
 use App\Http\Controllers\Report\TeacherSessionsReportController;
@@ -353,6 +354,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('reports/teacher-sessions', [TeacherSessionsReportController::class, 'index']);
     Route::get('reports/academic-support/export', [AcademicSupportFinanceReportController::class, 'export']);
     Route::get('reports/academic-support', [AcademicSupportFinanceReportController::class, 'index']);
+    // صافي أرباح المنصة: أرباح الحصص + أرباح الدعم الأكاديمي − رواتب الموظفين
+    Route::get('reports/platform-profit/export', [PlatformNetProfitReportController::class, 'export']);
+    Route::get('reports/platform-profit', [PlatformNetProfitReportController::class, 'index']);
     // تقرير التسويق: الطلاب حسب الموقع (دولة ← ولاية) × المنهج
     Route::get('reports/students-location/export', [StudentsLocationReportController::class, 'export']);
     Route::get('reports/students-location/students', [StudentsLocationReportController::class, 'students']);
