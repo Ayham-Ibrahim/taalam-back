@@ -15,7 +15,11 @@ use Throwable;
  */
 class BigBlueButtonService
 {
-    public function createMeeting(string $meetingId, string $meetingName, string $attendeePw, string $moderatorPw): bool
+    /**
+     * $durationMinutes: يُنهي BBB الاجتماع تلقائياً بعد هذه المدة من لحظة create
+     * (0 = بلا حد).
+     */
+    public function createMeeting(string $meetingId, string $meetingName, string $attendeePw, string $moderatorPw, int $durationMinutes = 0): bool
     {
         if ($this->fakeRooms()) {
             return true;
@@ -32,7 +36,7 @@ class BigBlueButtonService
                 'attendeePW' => $attendeePw,
                 'moderatorPW' => $moderatorPw,
                 'record' => 'true',
-                'duration' => '0',
+                'duration' => (string) max(0, $durationMinutes),
             ]));
 
             $xml = $response->ok() ? @simplexml_load_string($response->body()) : null;
