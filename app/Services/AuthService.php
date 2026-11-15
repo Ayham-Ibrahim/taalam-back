@@ -20,6 +20,8 @@ class AuthService
 {
     use LogsAuditEvents;
 
+    public function __construct(private readonly SiblingAccountService $siblings) {}
+
     /**
      * timezone (إن أُرسلت) = منطقة متصفح الطالب الفعلية وقت إنشاء الحساب —
      * تُلتقَط مرة واحدة هنا فقط، لا تُعاد مزامنتها تلقائياً بعد ذلك في أي جلسة
@@ -194,15 +196,17 @@ class AuthService
 
     public function login(string $email, string $password): array
     {
-        $user = User::where('email', $email)->first();
+        $account = User::where('email', $email)->first();
+        $user = $account ? $this->matchFamilyAccount($account, $password) : null;
 
-        if (! $user || ! $user->password || ! Hash::check($password, $user->password)) {
+        if (! $user) {
             throw ValidationException::withMessages([
                 'email' => ['بيانات الدخول غير صحيحة'],
             ]);
         }
 
-        if (! $user->is_active) {
+        // حساب أخ يُمنع إن عُطّل هو أو الحساب الأساسي (كـ SiblingAccountService::switchTo)
+        if (! $user->is_active || ($user->isSiblingAccount() && ! $account->is_active)) {
             throw ValidationException::withMessages([
                 'email' => ['هذا الحساب معطّل، يرجى التواصل مع الإدارة'],
             ]);
@@ -228,6 +232,22 @@ class AuthService
             'user' => $user,
             'token' => $user->createToken('api')->plainTextToken,
         ];
+    }
+
+    /**
+     * صاحب البريد أولاً، ثم (لطالب أساسي) إخوته بلا إيميل — كل أخ يدخل ببريد
+     * الأساسي وكلمة مروره الخاصة، وتفرّد كلمات مرور العائلة يضمن تطابقاً واحداً
+     * (SiblingAccountService::ensurePasswordFreeInFamily).
+     */
+    private function matchFamilyAccount(User $account, string $password): ?User
+    {
+        $candidates = collect([$account]);
+
+        if ($account->isStudent() && ! $account->isSiblingAccount()) {
+            $candidates = $candidates->merge($account->siblingAccounts()->where('role', 'student')->orderBy('id')->get());
+        }
+
+        return $candidates->first(fn (User $user) => $user->password && Hash::check($password, $user->password));
     }
 
     /** يحمّل علاقة teacher أو student أو academicSupporter فقط حسب دور المستخدم — لا داعي لتحميل الكل */
@@ -322,6 +342,10 @@ class AuthService
             ]);
         }
 
+        if ($user->isStudent()) {
+            $this->siblings->ensurePasswordFreeInFamily($user, $newPassword);
+        }
+
         $user->update(['password' => $newPassword]);
 
         // إبطال كل الجلسات الأخرى دفاعاً في العمق — الجلسة الحالية فقط تبقى صالحة
@@ -344,6 +368,10 @@ class AuthService
         $status = Password::reset(
             ['email' => $email, 'password' => $newPassword, 'token' => $token],
             function (User $user, string $password) {
+                if ($user->isStudent()) {
+                    $this->siblings->ensurePasswordFreeInFamily($user, $password);
+                }
+
                 // حساب ظل لزائر أثبت ملكية بريده بهذا الرابط — يصبح حساباً طبيعياً يدخل به
                 $user->update([
                     'password' => $password,
