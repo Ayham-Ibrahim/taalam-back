@@ -71,4 +71,44 @@ class AdminResetStudentPasswordTest extends TestCase
 
         $response->assertStatus(422);
     }
+
+    /** حساب أخ بلا إيميل: الرسالة لبريد الأساسي، موجَّهة لصاحبه، وتوضّح أنها كلمة مرور الأخ */
+    public function test_sibling_password_reset_email_goes_to_primary_and_names_the_sibling(): void
+    {
+        Notification::fake();
+
+        $admin = User::factory()->admin()->create();
+        $primary = User::factory()->student()->create(['name' => 'Ahmad', 'email' => 'family@example.com']);
+        $siblingUser = User::factory()->student()->create(['name' => 'Sara', 'email' => null, 'primary_user_id' => $primary->id]);
+        $sibling = Student::create(['user_id' => $siblingUser->id]);
+
+        $this->as($admin->createToken('t')->plainTextToken)
+            ->putJson("/api/students/{$sibling->id}/password", ['password' => 'SaraNew123!'])
+            ->assertOk();
+
+        Notification::assertSentTo($siblingUser, PasswordResetByAdmin::class, function (PasswordResetByAdmin $notification) use ($siblingUser) {
+            $mail = $notification->toMail($siblingUser);
+            $body = implode("\n", $mail->introLines);
+
+            return $mail->greeting === 'Hello Ahmad,'
+                && str_contains($mail->subject, 'Sara')
+                && str_contains($body, '**Email:** family@example.com')
+                && str_contains($body, 'SaraNew123!');
+        });
+
+        $this->postJson('/api/auth/login', ['email' => 'family@example.com', 'password' => 'SaraNew123!'])
+            ->assertOk()
+            ->assertJsonPath('data.user.id', $siblingUser->id);
+    }
+
+    public function test_regular_password_reset_email_is_unchanged(): void
+    {
+        $user = User::factory()->student()->create(['name' => 'Omar', 'email' => 'omar@example.com']);
+
+        $mail = (new PasswordResetByAdmin('Secret123!'))->toMail($user);
+
+        $this->assertSame('Your Taalam Password Has Been Reset', $mail->subject);
+        $this->assertSame('Hello Omar,', $mail->greeting);
+        $this->assertContains('**Email:** omar@example.com', $mail->introLines);
+    }
 }

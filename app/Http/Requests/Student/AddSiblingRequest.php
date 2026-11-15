@@ -5,10 +5,11 @@ namespace App\Http\Requests\Student;
 use App\Support\StudentLocationRules;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Rules\Password;
 
 /**
  * الطالب الأساسي يضيف أخاً — نفس الحقول الأكاديمية في RegisterStudentRequest
- * بلا إيميل/هاتف/كلمة مرور (حساب الأخ يُفتح بالتبديل من الحساب الأساسي فقط).
+ * بلا إيميل/هاتف، مع كلمة مرور خاصة بالأخ (يدخل بها ببريد الأساسي).
  * الإضافة مسموحة لحساب طالب أساسي فقط — حساب أخ لا يضيف إخوة (مستوى واحد).
  */
 class AddSiblingRequest extends FormRequest
@@ -24,6 +25,7 @@ class AddSiblingRequest extends FormRequest
     {
         return [
             'name' => ['required', 'string', 'max:150'],
+            'password' => ['required', 'confirmed', Password::defaults()],
             'gender' => ['nullable', Rule::in(['male', 'female'])],
             'education_type' => ['required', Rule::in(['school', 'university', 'training'])],
 
@@ -51,6 +53,7 @@ class AddSiblingRequest extends FormRequest
     {
         return [
             'name' => 'الاسم',
+            'password' => 'كلمة المرور',
             'education_type' => 'نوع التعليم',
             'curriculum_id' => 'المنهج',
             'country_id' => 'الدولة',

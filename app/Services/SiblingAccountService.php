@@ -7,13 +7,16 @@ use App\Models\User;
 use App\Traits\LogsAuditEvents;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 
 /**
  * حسابات الإخوة: الطالب الأساسي حساب طبيعي تماماً، وكل أخ يضيفه حساب user +
  * student مستقل (primary_user_id = الأساسي) — فيبقى كل منطق الحجز/التعارض/الدفع/
- * الجلسات كما هو لأن لكل أخ student_id خاصاً. حساب الأخ بلا إيميل ولا كلمة
- * مرور، فلا يدخل إلا بالتبديل (switchTo) من داخل حساب العائلة نفسها.
+ * الجلسات كما هو لأن لكل أخ student_id خاصاً. حساب الأخ بلا إيميل لكن بكلمة
+ * مرور خاصة: يدخل ببريد الأساسي + كلمة مروره (AuthService::login)، أو بالتبديل
+ * (switchTo) من داخل العائلة. لذا كلمات مرور العائلة يجب أن تختلف عن بعضها —
+ * كلمة المرور وحدها تحدد أي حساب يقصده الداخل.
  */
 class SiblingAccountService
 {
@@ -21,6 +24,8 @@ class SiblingAccountService
 
     public function add(User $primary, array $data): User
     {
+        $this->ensurePasswordFreeInFamily($primary, $data['password'], exceptSelf: false);
+
         return DB::transaction(function () use ($primary, $data) {
             // نفس الأسرة غالباً بنفس الموقع — يُورَث من الأساسي ما لم يُحدَّد للأخ
             $location = filled($data['country_id'] ?? null) || filled($data['region_id'] ?? null)
@@ -33,7 +38,7 @@ class SiblingAccountService
                 'gender' => $data['gender'] ?? null,
                 'role' => 'student',
                 'primary_user_id' => $primary->id,
-                'password' => null,
+                'password' => $data['password'],
                 'locale' => $primary->locale,
                 // نفس منطقة الأساسي — نفس الأسرة ونفس الجهاز غالباً، ومواعيد الجلسات تُحسب بها
                 'timezone' => $primary->timezone,
@@ -64,6 +69,39 @@ class SiblingAccountService
 
             return $sibling;
         });
+    }
+
+    /** الأساسي يضع كلمة مرور جديدة لأحد إخوته — بلا حاجة لمعرفة القديمة، وتُبطل جلسات الأخ القائمة */
+    public function updatePassword(User $primary, User $sibling, string $password): void
+    {
+        if ($sibling->primary_user_id !== $primary->id) {
+            abort(403, 'لا يمكنك تعديل كلمة مرور هذا الحساب');
+        }
+
+        $this->ensurePasswordFreeInFamily($sibling, $password);
+
+        $sibling->update(['password' => $password]);
+        $sibling->tokens()->delete();
+
+        $this->audit('student.sibling_password_changed', $sibling, [], [], null, $primary->id);
+    }
+
+    /**
+     * يرفض كلمة مرور يستخدمها حساب آخر من نفس العائلة (الدخول ببريد الأساسي
+     * يميّز الحساب بكلمة المرور وحدها). exceptSelf: يُستثنى $member نفسه عند
+     * تغيير كلمة مروره؛ عند إضافة أخ جديد يُفحص الأساسي أيضاً.
+     */
+    public function ensurePasswordFreeInFamily(User $member, string $password, bool $exceptSelf = true): void
+    {
+        $taken = $this->family($member)
+            ->reject(fn (User $other) => ($exceptSelf && $other->id === $member->id) || ! $other->password)
+            ->contains(fn (User $other) => Hash::check($password, $other->password));
+
+        if ($taken) {
+            throw ValidationException::withMessages([
+                'password' => ['كلمة المرور مستخدمة لحساب آخر في العائلة، اختر كلمة مرور مختلفة'],
+            ]);
+        }
     }
 
     /**

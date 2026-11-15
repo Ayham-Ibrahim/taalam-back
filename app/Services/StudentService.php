@@ -8,13 +8,15 @@ use App\Notifications\AccountCreatedByAdmin;
 use App\Notifications\PasswordResetByAdmin;
 use App\Traits\LogsAuditEvents;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\ValidationException;
 
 class StudentService
 {
     use LogsAuditEvents;
 
-    public function __construct(private readonly NotificationService $notifications) {}
+    public function __construct(
+        private readonly NotificationService $notifications,
+        private readonly SiblingAccountService $siblings,
+    ) {}
 
     /**
      * الأدمن يضع البريد/كلمة المرور مباشرة — الحساب نشط فوراً بلا education_type
@@ -73,12 +75,9 @@ class StudentService
         $student->loadMissing('user');
         $user = $student->user;
 
-        // حساب أخ بلا إيميل — لا يدخل بكلمة مرور أصلاً، بل بالتبديل من الحساب الأساسي
-        if ($user->isSiblingAccount()) {
-            throw ValidationException::withMessages([
-                'password' => ['هذا حساب أخ مرتبط بحساب أساسي ولا يملك كلمة مرور، يُفتح من داخل الحساب الأساسي'],
-            ]);
-        }
+        // الدخول ببريد العائلة يميّز الحساب بكلمة المرور — لا تكرار داخل العائلة.
+        // لحساب أخ يصل الإشعار لبريد الأساسي (contactEmail)
+        $this->siblings->ensurePasswordFreeInFamily($user, $newPassword);
 
         $user->update(['password' => $newPassword]);
         $user->tokens()->delete();
