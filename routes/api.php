@@ -39,6 +39,7 @@ use App\Http\Controllers\Review\ReviewController;
 use App\Http\Controllers\Session\ClassSessionController;
 use App\Http\Controllers\Session\SessionQualityRatingController;
 use App\Http\Controllers\Session\SessionAttendanceController;
+use App\Http\Controllers\Session\SessionAttachmentController;
 use App\Http\Controllers\Student\SiblingController;
 use App\Http\Controllers\Student\StudentController;
 use App\Http\Controllers\Student\StudentImportController;
@@ -103,6 +104,11 @@ Route::prefix('taxonomy')->group(function () {
 Route::get('verification-documents/{document}/download', [VerificationDocumentController::class, 'download'])
     ->middleware('signed')
     ->name('verification-documents.download');
+
+// فتح مرفق جلسة — نفس النمط: توقيع مؤقت فقط، يُولَّد لمن يحق له رؤية الملف
+Route::get('session-attachments/{attachment}/download', [SessionAttachmentController::class, 'download'])
+    ->middleware('signed')
+    ->name('session-attachments.download');
 
 // زر "انضم" في بريد التذكير — موقّع لكل مستلم كي يمرّ الانضمام عبر المنصة فيُسجَّل في
 // session_join_logs (بدل رابط BBB الخام). لا auth:sanctum: يُفتح من البريد مباشرة.
@@ -293,6 +299,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('class-sessions', [ClassSessionController::class, 'index']);
     Route::get('class-sessions/{session}', [ClassSessionController::class, 'show']);
     Route::get('class-sessions/{session}/join', [ClassSessionController::class, 'join']);
+    // مرفقات الجلسة: تبادل الملفات بين المعلم والطالب مباشرة (بلا موظف وسيط)
+    Route::get('class-sessions/{session}/attachments', [SessionAttachmentController::class, 'index']);
+    Route::middleware('throttle:uploads')->post('class-sessions/{session}/attachments', [SessionAttachmentController::class, 'store']);
+    Route::delete('session-attachments/{attachment}', [SessionAttachmentController::class, 'destroy']);
     // تقييم جودة الجلسة: الطالب يقيّم بعد انتهائها، والأدمن وحده يرى التقييمات
     Route::get('session-quality/{token}', [SessionQualityRatingController::class, 'show']);
     Route::post('session-quality/{token}', [SessionQualityRatingController::class, 'store']);
