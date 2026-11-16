@@ -8,6 +8,7 @@ use App\Models\Course;
 use App\Models\CourseField;
 use App\Models\Package;
 use App\Models\SessionAttendee;
+use App\Models\Setting;
 use App\Models\Student;
 use App\Models\Subject;
 use App\Models\Teacher;
@@ -480,9 +481,17 @@ class RescheduleFlowTest extends TestCase
         $response->assertStatus(201);
     }
 
+    /** المسار اليدوي (reschedule_requires_admin مفعّل) — المسار التلقائي في CounterpartyRescheduleTest */
     public function test_submitting_a_request_notifies_the_student_the_teacher_and_every_admin(): void
     {
         Notification::fake();
+        Setting::create([
+            'key' => 'reschedule_requires_admin',
+            'value' => '1',
+            'type' => 'boolean',
+            'group' => 'booking',
+            'label_ar' => 'كل الطلبات للأدمن',
+        ]);
 
         [$teacher, $teacherToken] = $this->createVerifiedTeacher();
         $session = $this->createSession($teacher, now()->addDays(5));

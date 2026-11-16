@@ -32,6 +32,10 @@ class RescheduleRequestSubmitted extends Notification implements ShouldQueue
         private readonly string $requesterRole,
         private readonly ?string $reason = null,
         private readonly bool $forReviewer = false,
+        // المسار التلقائي: الطلب بانتظار رد الطرف الآخر لا الإدارة (لصاحب الطلب فقط)
+        private readonly bool $awaitingCounterparty = false,
+        // 'reschedule' | 'makeup' — makeup: $currentScheduledAt موعد الجلسة الفائتة
+        private readonly string $kind = 'reschedule',
     ) {}
 
     public function via($notifiable): array
@@ -50,11 +54,30 @@ class RescheduleRequestSubmitted extends Notification implements ShouldQueue
 
         $mail = (new MailMessage)->greeting("Hello {$notifiable->name},");
 
+        if ($this->kind === 'makeup') {
+            $otherParty = $this->requesterRole === 'student' ? 'teacher' : 'student';
+            $mail->subject($this->forReviewer ? 'New Makeup Session Request Awaiting Your Review' : 'Your Makeup Session Request Was Sent')
+                ->line($this->forReviewer
+                    ? "The {$this->requesterRole} proposed a time for a makeup session (the teacher missed the original session)."
+                    : ($this->awaitingCounterparty
+                        ? "Your proposed makeup session time has been sent to the {$otherParty}. If they accept, the makeup session is created immediately."
+                        : 'Your proposed makeup session time has been sent to the administration for review.'))
+                ->line("Missed session: {$current->format('H:i')} on {$current->format('Y-m-d')} ({$current->format('e')} time).")
+                ->line("Proposed makeup time: {$proposed->format('H:i')} on {$proposed->format('Y-m-d')} ({$proposed->format('e')} time).");
+
+            return $this->reason ? $mail->line('Note: '.$this->reason) : $mail;
+        }
+
         if ($this->forReviewer) {
             $mail->subject($isAbsenceReport ? 'Session Absence Reported — Awaiting Your Review' : 'New Reschedule Request Awaiting Your Review')
                 ->line($isAbsenceReport
                     ? "The {$this->requesterRole} has reported they cannot attend this session and requires admin coordination."
                     : "A session reschedule request has been submitted by the {$this->requesterRole} and requires admin approval.");
+        } elseif ($this->awaitingCounterparty) {
+            $otherParty = $this->requesterRole === 'student' ? 'teacher' : 'student';
+            $mail->subject('Your Reschedule Request Was Sent')
+                ->line("Your request to reschedule the session has been sent to the {$otherParty} for approval.")
+                ->line('If they accept, the new time is applied immediately. Otherwise the administration will review it.');
         } else {
             $mail->subject($isAbsenceReport ? 'Your Absence Was Reported' : 'Your Reschedule Request Was Submitted')
                 ->line($isAbsenceReport
@@ -82,6 +105,8 @@ class RescheduleRequestSubmitted extends Notification implements ShouldQueue
     {
         return [
             'forReviewer' => $this->forReviewer,
+            'awaitingCounterparty' => $this->awaitingCounterparty,
+            'kind' => $this->kind,
             'requesterRole' => $this->requesterRole,
             'currentScheduledAt' => $this->currentScheduledAt->toIso8601String(),
             'proposedScheduledAt' => $this->proposedScheduledAt?->toIso8601String(),

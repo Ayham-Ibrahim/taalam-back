@@ -24,7 +24,8 @@ class SettingsServiceTest extends TestCase
         $this->assertSame(6, $settings->get('advance_notice_hours'));
         $this->assertIsInt($settings->get('advance_notice_hours'));
 
-        $this->assertTrue($settings->get('reschedule_requires_admin'));
+        // المسار التلقائي لتغيير المواعيد مفعّل افتراضياً (الطرف الآخر يوافق مباشرة)
+        $this->assertFalse($settings->get('reschedule_requires_admin'));
     }
 
     public function test_set_updates_value_invalidates_cache_and_logs_audit(): void
@@ -47,7 +48,7 @@ class SettingsServiceTest extends TestCase
 
         $this->expectException(RuntimeException::class);
 
-        $settings->set('reschedule_requires_admin', '0');
+        $settings->set('session_duration_minutes', '90');
     }
 
     public function test_set_stores_a_boolean_false_value_correctly_instead_of_an_empty_string(): void
