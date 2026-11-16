@@ -68,6 +68,16 @@ class FileStorage
                     $allowedExtensions = ['pdf', 'jpeg', 'jpg', 'png', 'pptx', 'ppt', 'xlsx', 'xls'];
                     break;
 
+                // مرفقات الجلسة (واجب/شرح/حل) بين المعلم والطالب — PDF وصور وWord فقط.
+                case 'attachment':
+                    $allowedMimeTypes = [
+                        'application/pdf', 'image/jpeg', 'image/png',
+                        'application/msword',
+                        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                    ];
+                    $allowedExtensions = ['pdf', 'jpeg', 'jpg', 'png', 'doc', 'docx'];
+                    break;
+
                 default:
                     self::throwValidationError('file', 'ان الملف الذي ارسلته غير امن');
             }

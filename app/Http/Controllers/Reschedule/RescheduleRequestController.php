@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Reschedule;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Reschedule\ApproveRescheduleRequestRequest;
+use App\Http\Requests\Reschedule\CreateMakeupRequestRequest;
 use App\Http\Requests\Reschedule\CreateRescheduleRequestRequest;
 use App\Http\Requests\Reschedule\RejectRescheduleRequestRequest;
 use App\Models\ClassSession;
@@ -33,6 +34,12 @@ class RescheduleRequestController extends Controller
             ])
             ->when(! $user->isAdmin(), fn ($q) => $q->where('requested_by', $user->id))
             ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))
+            // needs_admin: ما يحتاج قرار الأدمن فعلاً (المسار اليدوي أو المصعَّد) —
+            // awaiting_counterparty: بانتظار رد الطرف الآخر، للمتابعة فقط
+            ->when($request->string('stage')->value() === 'needs_admin', fn ($q) => $q->where('status', 'pending')
+                ->where(fn ($q) => $q->whereNull('counterparty_response')->orWhere('counterparty_response', '!=', 'pending')))
+            ->when($request->string('stage')->value() === 'awaiting_counterparty', fn ($q) => $q->where('status', 'pending')
+                ->where('counterparty_response', 'pending'))
             ->latest()
             ->paginate($request->integer('per_page', 20));
 
@@ -104,7 +111,53 @@ class RescheduleRequestController extends Controller
             $request->validated('reason'),
         );
 
-        return $this->success($rescheduleRequest, 'تم إرسال الطلب بانتظار مراجعة الأدمن', 201);
+        $message = $rescheduleRequest->counterparty_response === 'pending'
+            ? 'تم إرسال الطلب للطرف الآخر — يُطبَّق الموعد الجديد فور موافقته'
+            : 'تم إرسال الطلب بانتظار مراجعة الأدمن';
+
+        return $this->success($rescheduleRequest, $message, 201);
+    }
+
+    /** اقتراح موعد جلسة تعويضية لجلسة فائتة غاب عنها المعلم — للطرف الآخر أولاً */
+    public function storeMakeup(CreateMakeupRequestRequest $request, ClassSession $session)
+    {
+        $user = $request->user();
+
+        $rescheduleRequest = $this->rescheduleService->requestMakeup(
+            $session,
+            $user,
+            $user->isStudent() ? 'student' : 'teacher',
+            Carbon::parse($request->validated('proposed_scheduled_at')),
+            $request->validated('reason'),
+        );
+
+        $message = $rescheduleRequest->counterparty_response === 'pending'
+            ? 'تم إرسال الموعد المقترح للطرف الآخر — تُنشأ الجلسة التعويضية فور موافقته'
+            : 'تم إرسال الموعد المقترح بانتظار مراجعة الأدمن';
+
+        return $this->success($rescheduleRequest, $message, 201);
+    }
+
+    /** الطرف الآخر يوافق على الموعد المقترح — يُطبَّق فوراً بلا أدمن */
+    public function accept(Request $request, RescheduleRequest $rescheduleRequest)
+    {
+        $this->authorize('respond', $rescheduleRequest);
+
+        $rescheduleRequest = $this->rescheduleService->respond($rescheduleRequest, $request->user(), true);
+
+        return $this->success($rescheduleRequest, $rescheduleRequest->isMakeup()
+            ? 'تمت الموافقة وأُنشئت الجلسة التعويضية'
+            : 'تمت الموافقة وتغيّر موعد الجلسة');
+    }
+
+    /** الطرف الآخر يرفض الموعد المقترح — يُحال الطلب للأدمن */
+    public function decline(Request $request, RescheduleRequest $rescheduleRequest)
+    {
+        $this->authorize('respond', $rescheduleRequest);
+
+        $rescheduleRequest = $this->rescheduleService->respond($rescheduleRequest, $request->user(), false);
+
+        return $this->success($rescheduleRequest, 'تم رفض الموعد المقترح وأُحيل الطلب للإدارة');
     }
 
     public function approve(ApproveRescheduleRequestRequest $request, RescheduleRequest $rescheduleRequest)
@@ -148,6 +201,8 @@ class RescheduleRequestController extends Controller
             'studentTimezone' => $this->resolveStudentTimezone($rescheduleRequest),
             'requesterName' => $rescheduleRequest->requester?->name,
             'requesterRole' => $rescheduleRequest->requester_role,
+            // makeup: originalScheduledAt = الجلسة الفائتة، والموافقة تُنشئ تعويضية بالموعد المقترح
+            'type' => $rescheduleRequest->type,
             'status' => $rescheduleRequest->status,
             'reason' => $rescheduleRequest->reason,
             'rejectionReason' => $rescheduleRequest->rejection_reason,
@@ -157,6 +212,11 @@ class RescheduleRequestController extends Controller
             'alternativeScheduledAt' => $this->toIso($rescheduleRequest->admin_alternative_at),
             'reviewedAt' => $this->toIso($rescheduleRequest->reviewed_at),
             'slaDueAt' => $this->toIso($rescheduleRequest->sla_due_at),
+            // null = المسار اليدوي (للأدمن مباشرة) | pending | accepted | declined | timeout
+            'counterpartyResponse' => $rescheduleRequest->counterparty_response,
+            'counterpartyDeadline' => $this->toIso($rescheduleRequest->counterparty_deadline),
+            'counterpartyRespondedAt' => $this->toIso($rescheduleRequest->counterparty_responded_at),
+            'escalated' => (bool) $rescheduleRequest->escalated,
             'createdAt' => $this->toIso($rescheduleRequest->created_at),
         ];
     }

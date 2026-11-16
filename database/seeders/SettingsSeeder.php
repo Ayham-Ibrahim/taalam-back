@@ -63,11 +63,11 @@ class SettingsSeeder extends Seeder
             ],
             [
                 'key' => 'reschedule_requires_admin',
-                'value' => '1',
+                'value' => '0',
                 'type' => 'boolean',
                 'group' => 'booking',
-                'label_ar' => 'تغيير الموعد يتطلب موافقة الأدمن دائماً',
-                'is_editable' => false, // قرار سياسة — غير قابل للتعطيل
+                'label_ar' => 'كل طلبات تغيير الموعد تذهب للأدمن مباشرة',
+                'description' => 'معطّل: الطرف الآخر (المعلم أو الطالب) يوافق على الموعد المقترح فيُطبَّق فوراً، ولا يصل للأدمن إلا ما رُفض أو لم يُرَد عليه خلال المهلة. مفعّل: كل الطلبات تنتظر قرار الأدمن',
             ],
             [
                 'key' => 'reschedule_free_window_hours',

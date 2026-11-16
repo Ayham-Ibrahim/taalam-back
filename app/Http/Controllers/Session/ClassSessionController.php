@@ -58,8 +58,10 @@ class ClassSessionController extends Controller
             ->when($request->filled('to'), fn ($q) => $q->where('scheduled_at', '<=', $request->date('to')))
             ->with(self::eagerLoad())
             ->withStudentPaidAccess($request->user())
-            // has_makeup: زر "إنشاء جلسة تعويضية" لدى الأدمن يختفي بعد إنشائها (تعويضية واحدة لكل جلسة)
-            ->when($request->user()->isAdmin(), fn ($q) => $q->with([self::JOIN_LOGS_RELATION, ...self::STUDENT_TIMEZONE_RELATIONS])->withExists('makeupSessions as has_makeup'))
+            // has_makeup: زر "إنشاء جلسة تعويضية" لدى الأدمن، و"اقتراح موعد تعويضي" لطرفي الجلسة،
+            // يختفيان بعد إنشائها (تعويضية واحدة لكل جلسة) — ضمن نفس الاستعلام لا استعلام لكل جلسة
+            ->withExists('makeupSessions as has_makeup')
+            ->when($request->user()->isAdmin(), fn ($q) => $q->with([self::JOIN_LOGS_RELATION, ...self::STUDENT_TIMEZONE_RELATIONS]))
             // المعلم: هل دخل هو والطالب — يحدد ظهور زر "نسخ رابط التقييم" بالجدول. علَمان فقط (لا
             // سجل الانضمام نفسه، فهو لصفحة التفاصيل)، محسوبان ضمن نفس الاستعلام لا استعلام لكل جلسة
             ->when($request->user()->isTeacher(), fn ($q) => $q->withExists([
@@ -92,7 +94,7 @@ class ClassSessionController extends Controller
     {
         $this->authorize('view', $session);
 
-        $session->load(self::eagerLoad());
+        $session->load(self::eagerLoad())->loadExists('makeupSessions as has_makeup');
 
         // سجل الانضمام للأدمن ولصاحب الجلسة (يرى من انضمّ من طلابه في صفحة تفاصيلها) — لا للطلاب
         $user = request()->user();
@@ -230,7 +232,10 @@ class ClassSessionController extends Controller
             'attendees:id,class_session_id,student_id,attendance',
             'attendees.student:id,user_id',
             'attendees.student.user:id,name',
-            'rescheduleRequests' => fn ($q) => $q->select('id', 'class_session_id', 'requested_by', 'status', 'created_at')
+            'rescheduleRequests' => fn ($q) => $q->select(
+                'id', 'class_session_id', 'type', 'requested_by', 'requester_role', 'status', 'created_at',
+                'current_scheduled_at', 'proposed_scheduled_at', 'reason', 'counterparty_response', 'counterparty_deadline',
+            )
                 ->where('status', 'pending')
                 ->latest(),
             'booking:id,package_id,student_id,status,excluded_from_payouts',

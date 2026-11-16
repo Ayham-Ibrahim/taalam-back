@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Jobs\CreateBbbRoomJob;
 use App\Models\Booking;
 use App\Models\ClassSession;
+use App\Models\RescheduleRequest;
 use App\Models\SessionAttendee;
 use App\Models\SessionJoinLog;
 use App\Models\User;
@@ -239,7 +240,7 @@ class SessionService
      * لا تُعوَّض. تعويضية واحدة لكل جلسة؛ إن غاب عنها أحد أيضاً تُعوَّض هي بدورها بنفس
      * الشروط. الموعد يحدده الأدمن: مستقبلي، بلا تعارض للمعلم أو أي طالب مدفوع.
      */
-    public function scheduleMakeupByAdmin(ClassSession $original, User $admin, Carbon $scheduledAt, ?string $notes = null): ClassSession
+    public function scheduleMakeupByAdmin(ClassSession $original, User $admin, Carbon $scheduledAt, ?string $notes = null, ?int $approvedRequestId = null): ClassSession
     {
         $compensable = [ClassSession::OUTCOME_TEACHER_ABSENT, ClassSession::OUTCOME_STUDENT_NO_SHOW];
 
@@ -248,6 +249,41 @@ class SessionService
                 'session' => ['يمكن إنشاء جلسة تعويضية فقط لجلسة منتهية غاب عنها المعلم أو لم يحضرها أي طالب'],
             ]);
         }
+
+        return $this->scheduleMakeup($original, $admin, $scheduledAt, $notes, byAgreement: false, approvedRequestId: $approvedRequestId);
+    }
+
+    /**
+     * التعويضية باتفاق الطرفين (المسار التلقائي في RescheduleService::respond): الطرف الآخر وافق
+     * على الموعد المقترح. السياسة: التعويض المجاني لغياب المعلم وحده — غياب الطالب لا يُعوَّض إلا
+     * باستثناء من الأدمن (scheduleMakeupByAdmin).
+     */
+    public function scheduleMakeupByAgreement(ClassSession $original, User $acceptedBy, Carbon $scheduledAt, int $requestId): ClassSession
+    {
+        if (! self::isEligibleForMakeupRequest($original)) {
+            throw ValidationException::withMessages([
+                'session' => ['التعويض متاح فقط لجلسة منتهية غاب عنها المعلم ولم تُنشأ لها تعويضية'],
+            ]);
+        }
+
+        return $this->scheduleMakeup($original, $acceptedBy, $scheduledAt, null, byAgreement: true, approvedRequestId: $requestId);
+    }
+
+    /**
+     * شروط طلب التعويضية من الطالب/المعلم: جلسة فردية منتهية غاب عنها المعلم (teacher_absent)،
+     * بلا تعويضية سابقة. الجماعية والدورات وغياب الطالب تبقى للأدمن.
+     */
+    public static function isEligibleForMakeupRequest(ClassSession $session): bool
+    {
+        return $session->status === 'completed'
+            && $session->attendance_outcome === ClassSession::OUTCOME_TEACHER_ABSENT
+            && $session->course_id === null
+            && $session->loadMissing('booking.package')->booking?->package?->session_format !== 'group'
+            && ! $session->makeupSessions()->exists();
+    }
+
+    private function scheduleMakeup(ClassSession $original, User $actor, Carbon $scheduledAt, ?string $notes, bool $byAgreement, ?int $approvedRequestId): ClassSession
+    {
 
         if ($original->makeupSessions()->exists()) {
             throw ValidationException::withMessages([
@@ -275,14 +311,26 @@ class SessionService
             $this->conflicts->assertNoConflict($student, $original->teacher_id, [$scheduledAt], $original->duration_min);
         }
 
-        $makeup = DB::transaction(function () use ($original, $admin, $scheduledAt, $notes) {
+        $makeup = DB::transaction(function () use ($original, $actor, $scheduledAt, $notes, $byAgreement, $approvedRequestId) {
             $makeup = $this->createMakeupSession($original, $scheduledAt);
 
-            $this->audit('session.makeup_created', $makeup, [], [
+            $this->audit($byAgreement ? 'session.makeup_created_by_agreement' : 'session.makeup_created', $makeup, [], [
                 'makeup_for_session_id' => $original->id,
                 'attendance_outcome' => $original->attendance_outcome,
                 'scheduled_at' => $scheduledAt->toDateTimeString(),
-            ], $notes, $admin->id);
+            ], $notes, $actor->id);
+
+            // أي طلب موعد تعويضي آخر معلّق على هذه الجلسة لم يعد له معنى — التعويضية أُنشئت
+            RescheduleRequest::where('class_session_id', $original->id)
+                ->where('type', RescheduleRequest::TYPE_MAKEUP)
+                ->where('status', 'pending')
+                ->when($approvedRequestId, fn ($q) => $q->whereKeyNot($approvedRequestId))
+                ->update([
+                    'status' => 'rejected',
+                    'rejection_reason' => 'أُنشئت الجلسة التعويضية بالفعل',
+                    'reviewed_by' => $byAgreement ? null : $actor->id,
+                    'reviewed_at' => now(),
+                ]);
 
             return $makeup;
         });
@@ -295,7 +343,7 @@ class SessionService
             ->unique('id')
             ->each(fn (User $party) => $this->notifications->send(
                 $party,
-                new MakeupSessionScheduled($original->scheduled_at, $scheduledAt, $notes),
+                new MakeupSessionScheduled($original->scheduled_at, $scheduledAt, $notes, $byAgreement),
                 'session.makeup_created',
             ));
 

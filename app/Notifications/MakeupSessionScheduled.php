@@ -21,6 +21,8 @@ class MakeupSessionScheduled extends Notification implements ShouldQueue
         private readonly Carbon $missedScheduledAt,
         private readonly Carbon $makeupScheduledAt,
         private readonly ?string $notes = null,
+        // باتفاق الطرفين (المسار التلقائي) لا بقرار الإدارة
+        private readonly bool $byAgreement = false,
     ) {}
 
     public function via($notifiable): array
@@ -38,7 +40,9 @@ class MakeupSessionScheduled extends Notification implements ShouldQueue
         $mail = (new MailMessage)
             ->subject('Makeup Session Scheduled')
             ->greeting("Hello {$notifiable->name},")
-            ->line("The administration has scheduled a makeup session for the session of {$missed->format('Y-m-d')} at {$missed->format('H:i')}.")
+            ->line($this->byAgreement
+                ? "A makeup session has been agreed for the session of {$missed->format('Y-m-d')} at {$missed->format('H:i')}."
+                : "The administration has scheduled a makeup session for the session of {$missed->format('Y-m-d')} at {$missed->format('H:i')}.")
             ->line("Makeup session time: {$makeup->format('H:i')} on {$makeup->format('Y-m-d')} ({$makeup->format('e')} time).")
             ->line('You can join it from your sessions list once it starts.');
 
@@ -55,6 +59,7 @@ class MakeupSessionScheduled extends Notification implements ShouldQueue
             'missedScheduledAt' => $this->missedScheduledAt->toIso8601String(),
             'makeupScheduledAt' => $this->makeupScheduledAt->toIso8601String(),
             'notes' => $this->notes,
+            'byAgreement' => $this->byAgreement,
         ];
     }
 }

@@ -149,6 +149,11 @@ class ClassSession extends Model
         return $this->hasMany(RescheduleRequest::class, 'class_session_id');
     }
 
+    public function attachments()
+    {
+        return $this->hasMany(SessionAttachment::class, 'class_session_id');
+    }
+
     /**
      * لا عمود student_id مباشر على الجدول (جلسة المجموعة لها طلاب متعددون) —
      * رؤية الطالب تُحدَّد عبر session_attendees. الأدمن يرى الكل، المعلم بـ teacher_id.

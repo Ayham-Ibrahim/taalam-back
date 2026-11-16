@@ -5,28 +5,100 @@ namespace App\Services;
 use App\Models\ClassSession;
 use App\Models\RescheduleRequest;
 use App\Models\User;
+use App\Notifications\RescheduleRequestEscalated;
 use App\Notifications\RescheduleRequestReviewed;
 use App\Notifications\RescheduleRequestSubmitted;
+use App\Notifications\RescheduleResponseRequested;
 use App\Notifications\SessionRescheduledByAdmin;
 use App\Traits\LogsAuditEvents;
+use Illuminate\Notifications\Notification;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
- * قرار معماري محسوم: لا يوجد مسار تلقائي لتغيير المواعيد إطلاقاً — كل طلب يبدأ
- * pending ويحتاج قرار أدمن صريح (approve/reject)، بصرف النظر عن نافذة الـ 24 ساعة.
+ * مساران لطلب تغيير الموعد (الجلسات الفردية فقط):
+ *
+ *  - تلقائي (الافتراضي، reschedule_requires_admin = false): الطلب بموعد مقترح يذهب أولاً
+ *    للطرف الآخر (counterparty_response = pending). موافقته تطبّق الموعد فوراً بلا أدمن؛
+ *    رفضه أو انقضاء مهلته (EscalateRescheduleRequestsJob) يصعّد الطلب للأدمن (escalated).
+ *  - يدوي: تبليغ الغياب بلا موعد مقترح، أو طلب لم يبقَ قبل جلسته وقت يكفي لرد الطرف
+ *    الآخر، أو reschedule_requires_admin = true — يذهب للأدمن مباشرة كما كان سابقاً.
+ *
+ * الطلب يبقى status = pending طوال المرحلتين؛ الأدمن يستطيع حسمه في أي لحظة منهما.
  * الفرق بين ما قبل/بعد 24 ساعة هو فقط within_free_window (يحدد الأولوية) وإلزامية السبب.
  */
 class RescheduleService
 {
     use LogsAuditEvents;
 
+    /** مهلة رد الطرف الآخر تنتهي قبل الجلسة الأصلية بهذه المدة على الأقل — ليبقى للأدمن وقت يتصرف فيه */
+    public const COUNTERPARTY_CUTOFF_HOURS_BEFORE_SESSION = 2;
+
     public function __construct(
         private readonly SettingsService $settings,
         private readonly NotificationService $notifications,
         private readonly ScheduleConflictService $conflicts,
+        private readonly SessionService $sessions,
     ) {}
+
+    /**
+     * طلب موعد جلسة تعويضية لجلسة فائتة غاب عنها المعلم (السياسة: تعويض مجاني لغياب المعلم
+     * وحده). يمرّ بنفس مسار تغيير الموعد: الطرف الآخر يوافق فتُنشأ التعويضية فوراً، أو يرفض/لا
+     * يرد فيُحال للأدمن. غياب الطالب والجلسات الجماعية تبقى للأدمن (scheduleMakeupByAdmin).
+     */
+    public function requestMakeup(ClassSession $session, User $requester, string $requesterRole, Carbon $proposedAt, ?string $reason = null): RescheduleRequest
+    {
+        if (! SessionService::isEligibleForMakeupRequest($session)) {
+            throw ValidationException::withMessages([
+                'session' => ['طلب الجلسة التعويضية متاح فقط لجلسة فردية منتهية غاب عنها المعلم ولم تُنشأ لها تعويضية'],
+            ]);
+        }
+
+        if ($proposedAt->lte(now())) {
+            throw ValidationException::withMessages([
+                'proposed_scheduled_at' => ['يجب أن يكون موعد الجلسة التعويضية في المستقبل'],
+            ]);
+        }
+
+        $this->assertSessionIsPaid($session, $requester, $requesterRole);
+
+        if (RescheduleRequest::where('class_session_id', $session->id)->where('status', 'pending')->exists()) {
+            throw ValidationException::withMessages([
+                'session' => ['يوجد طلب موعد تعويضي قيد المراجعة بالفعل لهذه الجلسة'],
+            ]);
+        }
+
+        // الجلسة نفسها فائتة — الفحص للمعلم والطالب في الموعد المقترح دون استثناء أي جلسة
+        $student = $session->loadMissing('booking.student')->booking?->student;
+        $this->conflicts->assertNoConflict($student, $session->teacher_id, [$proposedAt], $session->duration_min);
+
+        $counterpartyDeadline = $this->counterpartyDeadlineFor($proposedAt);
+
+        $rescheduleRequest = RescheduleRequest::create([
+            'class_session_id' => $session->id,
+            'booking_id' => $session->booking_id,
+            'type' => RescheduleRequest::TYPE_MAKEUP,
+            'requested_by' => $requester->id,
+            'requester_role' => $requesterRole,
+            'current_scheduled_at' => $session->scheduled_at,
+            'proposed_scheduled_at' => $proposedAt,
+            'within_free_window' => true,
+            'reason' => $reason,
+            'status' => 'pending',
+            'counterparty_response' => $counterpartyDeadline ? 'pending' : null,
+            'counterparty_deadline' => $counterpartyDeadline,
+            'sla_due_at' => $counterpartyDeadline ? null : $this->adminSlaDueAt(),
+        ]);
+
+        if ($counterpartyDeadline) {
+            $this->notifyCounterpartyRequested($session, $rescheduleRequest, $requester);
+        } else {
+            $this->notifyRequestSubmitted($session, $rescheduleRequest, $requesterRole);
+        }
+
+        return $rescheduleRequest;
+    }
 
     /**
      * لم يكن أي تغيير موعد (طلب أو موافقة) يتحقق من تعارض الموعد الجديد إطلاقاً
@@ -117,9 +189,12 @@ class RescheduleService
             ]);
         }
 
+        $counterpartyDeadline = $proposedAt ? $this->counterpartyDeadlineFor($session->scheduled_at) : null;
+
         $rescheduleRequest = RescheduleRequest::create([
             'class_session_id' => $session->id,
             'booking_id' => $session->booking_id,
+            'type' => RescheduleRequest::TYPE_RESCHEDULE,
             'requested_by' => $requester->id,
             'requester_role' => $requesterRole,
             'current_scheduled_at' => $session->scheduled_at,
@@ -128,12 +203,275 @@ class RescheduleService
             'hours_before_session' => $hoursBeforeSession,
             'reason' => $reason,
             'status' => 'pending',
-            'sla_due_at' => now()->addHours((int) $this->settings->get('sla_reschedule_hours', 12)),
+            'counterparty_response' => $counterpartyDeadline ? 'pending' : null,
+            'counterparty_deadline' => $counterpartyDeadline,
+            // SLA الأدمن يبدأ حين يصله الطلب فعلاً — فوراً في المسار اليدوي، أو عند التصعيد
+            'sla_due_at' => $counterpartyDeadline ? null : $this->adminSlaDueAt(),
         ]);
 
-        $this->notifyRequestSubmitted($session, $rescheduleRequest, $requesterRole);
+        if ($counterpartyDeadline) {
+            $this->notifyCounterpartyRequested($session, $rescheduleRequest, $requester);
+        } else {
+            $this->notifyRequestSubmitted($session, $rescheduleRequest, $requesterRole);
+        }
 
         return $rescheduleRequest;
+    }
+
+    /**
+     * null = لا مسار تلقائي لهذا الطلب: معطَّل من الإعدادات، أو لم يبقَ قبل $anchor وقت يكفي
+     * لرد الطرف الآخر ثم تصرّف الأدمن إن رفض. $anchor = موعد الجلسة التي سيُنقل موعدها،
+     * أو الموعد المقترح للتعويضية (الجلسة الأصلية فائتة أصلاً).
+     */
+    private function counterpartyDeadlineFor(Carbon $anchor): ?Carbon
+    {
+        if ($this->settings->get('reschedule_requires_admin', false)) {
+            return null;
+        }
+
+        $responseHours = (int) $this->settings->get('counterparty_response_hours', 12);
+        $deadline = now()->addHours($responseHours)
+            ->min($anchor->copy()->subHours(self::COUNTERPARTY_CUTOFF_HOURS_BEFORE_SESSION));
+
+        // أقل من ساعة للرد لا تكفي فعلياً — الأدمن أسرع وأضمن
+        return $deadline->gt(now()->addHour()) ? $deadline : null;
+    }
+
+    private function adminSlaDueAt(): Carbon
+    {
+        return now()->addHours((int) $this->settings->get('sla_reschedule_hours', 12));
+    }
+
+    /**
+     * الطرف الآخر في جلسة فردية: المعلم إن طلب الطالب، وطالب الحجز إن طلب المعلم.
+     */
+    public function counterpartyUser(RescheduleRequest $rescheduleRequest): ?User
+    {
+        $session = $rescheduleRequest->loadMissing(['session.teacher.user', 'session.booking.student.user'])->session;
+
+        return $rescheduleRequest->requester_role === 'student'
+            ? $session?->teacher?->user
+            : $session?->booking?->student?->user;
+    }
+
+    public function isAwaitingCounterparty(RescheduleRequest $rescheduleRequest): bool
+    {
+        return $rescheduleRequest->status === 'pending'
+            && $rescheduleRequest->counterparty_response === 'pending'
+            && $rescheduleRequest->counterparty_deadline?->isFuture();
+    }
+
+    /**
+     * رد الطرف الآخر على الاقتراح. القبول يطبّق الموعد فوراً (بعد إعادة فحص التعارض —
+     * قد يكون حُجز شيء آخر في هذا الموعد منذ الطلب)، والرفض يصعّد الطلب للأدمن.
+     * القفل يمنع ردّين متزامنين (أو رداً متزامناً مع قرار أدمن) من تطبيق الطلب مرتين.
+     */
+    public function respond(RescheduleRequest $rescheduleRequest, User $user, bool $accept): RescheduleRequest
+    {
+        $newTime = DB::transaction(function () use ($rescheduleRequest, $user, $accept) {
+            $locked = RescheduleRequest::whereKey($rescheduleRequest->id)->lockForUpdate()->firstOrFail();
+
+            if (! $this->isAwaitingCounterparty($locked)) {
+                throw ValidationException::withMessages([
+                    'status' => ['هذا الطلب لم يعد بانتظار ردك'],
+                ]);
+            }
+
+            if (! $accept) {
+                $locked->update([
+                    'counterparty_response' => 'declined',
+                    'counterparty_responded_at' => now(),
+                    'escalated' => true,
+                    'sla_due_at' => $this->adminSlaDueAt(),
+                ]);
+
+                $this->audit('reschedule.declined_by_counterparty', $locked, [], ['escalated' => true], null, $user->id);
+
+                return null;
+            }
+
+            $session = $locked->session;
+            $newTime = $locked->proposed_scheduled_at;
+
+            if ($locked->isMakeup()) {
+                if ($newTime->lte(now())) {
+                    throw ValidationException::withMessages([
+                        'status' => ['لم يعد ممكناً اعتماد هذا الموعد — الموعد المقترح مضى'],
+                    ]);
+                }
+
+                // تُنشئ التعويضية وتُبلّغ الطرفين (MakeupSessionScheduled) — بفحص التعارض والأهلية من جديد
+                $this->sessions->scheduleMakeupByAgreement($session, $user, $newTime, $locked->id);
+            } elseif ($session->status !== 'scheduled' || now()->gte($session->scheduled_at) || $newTime->lte(now())) {
+                throw ValidationException::withMessages([
+                    'status' => ['لم يعد ممكناً تطبيق هذا الموعد — الجلسة بدأت أو الموعد المقترح مضى'],
+                ]);
+            } else {
+                $this->assertNewTimeHasNoConflict($session, $newTime);
+                $this->applyNewTime($session, $newTime);
+            }
+
+            $locked->update([
+                'status' => 'approved',
+                'counterparty_response' => 'accepted',
+                'counterparty_responded_at' => now(),
+                'reviewed_at' => now(),
+            ]);
+
+            $this->audit('reschedule.accepted_by_counterparty', $locked, [], [
+                'session_id' => $session->id,
+                'new_scheduled_at' => $newTime->toDateTimeString(),
+            ], null, $user->id);
+
+            return $newTime;
+        });
+
+        $rescheduleRequest->refresh();
+
+        // التعويضية: الطرفان بُلِّغا بـ MakeupSessionScheduled عند إنشائها
+        if ($accept && ! $rescheduleRequest->isMakeup()) {
+            $this->notifyBothParties(
+                $rescheduleRequest,
+                new RescheduleRequestReviewed('approved', $newTime, byCounterparty: true),
+                'reschedule.accepted_by_counterparty',
+            );
+        } elseif (! $accept) {
+            $this->notifyEscalated($rescheduleRequest, 'declined');
+        }
+
+        return $rescheduleRequest;
+    }
+
+    /**
+     * مهلة رد الطرف الآخر انقضت بلا رد — يُصعَّد الطلب للأدمن. يستدعيه
+     * EscalateRescheduleRequestsJob كل دقيقة؛ الشرط داخل update نفسه يمنع
+     * تصعيد طلب ردّ عليه الطرف الآخر في اللحظة ذاتها.
+     */
+    public function escalateTimedOut(): int
+    {
+        $escalated = 0;
+
+        RescheduleRequest::query()
+            ->where('status', 'pending')
+            ->where('counterparty_response', 'pending')
+            ->where('counterparty_deadline', '<=', now())
+            ->get()
+            ->each(function (RescheduleRequest $rescheduleRequest) use (&$escalated) {
+                $updated = RescheduleRequest::whereKey($rescheduleRequest->id)
+                    ->where('status', 'pending')
+                    ->where('counterparty_response', 'pending')
+                    ->update([
+                        'counterparty_response' => 'timeout',
+                        'escalated' => true,
+                        'sla_due_at' => $this->adminSlaDueAt(),
+                        'updated_at' => now(),
+                    ]);
+
+                if (! $updated) {
+                    return;
+                }
+
+                $escalated++;
+                $rescheduleRequest->refresh();
+                $this->audit('reschedule.counterparty_timeout', $rescheduleRequest, [], ['escalated' => true]);
+                $this->notifyEscalated($rescheduleRequest, 'timeout');
+            });
+
+        return $escalated;
+    }
+
+    private function notifyCounterpartyRequested(ClassSession $session, RescheduleRequest $rescheduleRequest, User $requester): void
+    {
+        $counterparty = $this->counterpartyUser($rescheduleRequest);
+
+        $this->notifications->send(
+            $requester,
+            new RescheduleRequestSubmitted(
+                $rescheduleRequest->current_scheduled_at,
+                $rescheduleRequest->proposed_scheduled_at,
+                $rescheduleRequest->requester_role,
+                $rescheduleRequest->reason,
+                awaitingCounterparty: true,
+                kind: $rescheduleRequest->type,
+            ),
+            'reschedule.submitted',
+        );
+
+        if ($counterparty) {
+            $this->notifications->send(
+                $counterparty,
+                new RescheduleResponseRequested(
+                    $session->id,
+                    $rescheduleRequest->id,
+                    $requester->name,
+                    $rescheduleRequest->requester_role,
+                    $rescheduleRequest->current_scheduled_at,
+                    $rescheduleRequest->proposed_scheduled_at,
+                    $rescheduleRequest->counterparty_deadline,
+                    $rescheduleRequest->reason,
+                    $rescheduleRequest->type,
+                ),
+                'reschedule.response_requested',
+            );
+        }
+    }
+
+    /**
+     * الأدمن: قراره مطلوب الآن. صاحب الطلب: الطرف الآخر رفض/لم يرد وأُحيل طلبه للإدارة.
+     * الطرف الآخر عند انقضاء المهلة: فاته الرد والقرار صار للإدارة.
+     */
+    private function notifyEscalated(RescheduleRequest $rescheduleRequest, string $cause): void
+    {
+        $notification = fn (bool $forReviewer) => new RescheduleRequestEscalated(
+            $cause,
+            $rescheduleRequest->current_scheduled_at,
+            $rescheduleRequest->proposed_scheduled_at,
+            $rescheduleRequest->requester_role,
+            $forReviewer,
+            $rescheduleRequest->type,
+        );
+
+        collect([
+            $rescheduleRequest->loadMissing('requester')->requester,
+            $cause === 'timeout' ? $this->counterpartyUser($rescheduleRequest) : null,
+        ])
+            ->filter()
+            ->unique('id')
+            ->each(fn (User $party) => $this->notifications->send($party, $notification(false), 'reschedule.escalated'));
+
+        User::query()
+            ->where('role', 'admin')
+            ->where('is_active', true)
+            ->get()
+            ->each(fn (User $admin) => $this->notifications->send($admin, $notification(true), 'reschedule.escalated'));
+    }
+
+    private function notifyBothParties(RescheduleRequest $rescheduleRequest, Notification $notification, string $event): void
+    {
+        $rescheduleRequest->loadMissing(['session.teacher.user', 'session.booking.student.user']);
+
+        collect([
+            $rescheduleRequest->session?->teacher?->user,
+            $rescheduleRequest->session?->booking?->student?->user,
+        ])
+            ->filter()
+            ->unique('id')
+            ->each(fn (User $party) => $this->notifications->send($party, $notification, $event));
+    }
+
+    /**
+     * تطبيق موعد جديد على الجلسة — مشترك بين موافقة الأدمن وقبول الطرف الآخر.
+     */
+    private function applyNewTime(ClassSession $session, Carbon $newTime): void
+    {
+        $session->update([
+            'original_scheduled_at' => $session->original_scheduled_at ?? $session->scheduled_at,
+            'scheduled_at' => $newTime,
+            'status' => 'scheduled',
+            // التذكير السابق (إن أُرسل) يحمل الموعد القديم، وبقاء reminder_sent_at
+            // مضبوطاً يمنع SendSessionRemindersJob من إرسال تذكير بالموعد الجديد.
+            'reminder_sent_at' => null,
+        ]);
     }
 
     /**
@@ -159,6 +497,7 @@ class RescheduleService
                     $rescheduleRequest->proposed_scheduled_at,
                     $requesterRole,
                     $rescheduleRequest->reason,
+                    kind: $rescheduleRequest->type,
                 ),
                 'reschedule.submitted',
             );
@@ -176,6 +515,7 @@ class RescheduleService
                     $requesterRole,
                     $rescheduleRequest->reason,
                     forReviewer: true,
+                    kind: $rescheduleRequest->type,
                 ),
                 'reschedule.submitted',
             ));
@@ -258,18 +598,16 @@ class RescheduleService
         $rescheduleRequest->loadMissing('session');
         $session = $rescheduleRequest->session;
 
-        // فحص ملزم مستقل عن فحص request() — الوقت بينهما قد يشهد حجوزاً آخر
-        // يتعارض مع نفس هذا الموعد المقترح (نفس مبدأ إعادة الفحص عند approveIndividualRequest).
-        $this->assertNewTimeHasNoConflict($session, $newTime);
+        if ($rescheduleRequest->isMakeup()) {
+            // تُنشئ التعويضية بالموعد المعتمد وتُبلّغ الطرفين (MakeupSessionScheduled) بشروط الأدمن
+            $this->sessions->scheduleMakeupByAdmin($session, $admin, $newTime, $notes, $rescheduleRequest->id);
+        } else {
+            // فحص ملزم مستقل عن فحص request() — الوقت بينهما قد يشهد حجوزاً آخر
+            // يتعارض مع نفس هذا الموعد المقترح (نفس مبدأ إعادة الفحص عند approveIndividualRequest).
+            $this->assertNewTimeHasNoConflict($session, $newTime);
 
-        $session->update([
-            'original_scheduled_at' => $session->original_scheduled_at ?? $session->scheduled_at,
-            'scheduled_at' => $newTime,
-            'status' => 'scheduled',
-            // التذكير السابق (إن أُرسل) يحمل الموعد القديم، وبقاء reminder_sent_at
-            // مضبوطاً يمنع SendSessionRemindersJob من إرسال تذكير بالموعد الجديد.
-            'reminder_sent_at' => null,
-        ]);
+            $this->applyNewTime($session, $newTime);
+        }
 
         $rescheduleRequest->update([
             'status' => $alternativeAt ? 'approved_with_alternative' : 'approved',
@@ -287,20 +625,14 @@ class RescheduleService
         // يُبلَّغ الطرفان معاً — الطالب والمعلم — لا صاحب الطلب وحده: نفس سبب
         // reject() بالضبط (الموعد الجديد يخص جدول الطرفين كليهما، لا صاحب الطلب
         // فقط). قبل هذا الإصلاح كان الطرف الآخر (الذي لم يُرسل الطلب) لا يُبلَّغ
-        // إطلاقاً رغم أن جلسته هو أيضاً تغيّر موعدها فعلياً.
-        $rescheduleRequest->loadMissing(['session.teacher.user', 'session.booking.student.user']);
-
-        collect([
-            $rescheduleRequest->session?->teacher?->user,
-            $rescheduleRequest->session?->booking?->student?->user,
-        ])
-            ->filter()
-            ->unique('id')
-            ->each(fn (User $party) => $this->notifications->send(
-                $party,
+        // إطلاقاً رغم أن جلسته هو أيضاً تغيّر موعدها فعلياً. (التعويضية بُلِّغت عند إنشائها.)
+        if (! $rescheduleRequest->isMakeup()) {
+            $this->notifyBothParties(
+                $rescheduleRequest,
                 new RescheduleRequestReviewed($rescheduleRequest->status, $newTime, adminNotes: $notes),
                 'reschedule.approved',
-            ));
+            );
+        }
 
         return $rescheduleRequest->fresh();
     }
@@ -456,7 +788,7 @@ class RescheduleService
             ->unique('id')
             ->each(fn (User $party) => $this->notifications->send(
                 $party,
-                new RescheduleRequestReviewed('rejected', reason: $reason),
+                new RescheduleRequestReviewed('rejected', reason: $reason, kind: $rescheduleRequest->type),
                 'reschedule.rejected',
             ));
 

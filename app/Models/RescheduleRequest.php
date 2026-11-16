@@ -6,9 +6,16 @@ use Illuminate\Database\Eloquent\Model;
 
 class RescheduleRequest extends Model
 {
+    /** نقل موعد جلسة قادمة */
+    public const TYPE_RESCHEDULE = 'reschedule';
+
+    /** موعد جلسة تعويضية لجلسة فائتة غاب عنها المعلم — الموافقة تُنشئ التعويضية */
+    public const TYPE_MAKEUP = 'makeup';
+
     protected $fillable = [
         'class_session_id',
         'booking_id',
+        'type',
         'requested_by',
         'requester_role',
         'current_scheduled_at',
@@ -42,6 +49,11 @@ class RescheduleRequest extends Model
             'sla_due_at' => 'datetime',
             'escalated' => 'boolean',
         ];
+    }
+
+    public function isMakeup(): bool
+    {
+        return $this->type === self::TYPE_MAKEUP;
     }
 
     public function session()

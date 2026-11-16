@@ -2,6 +2,8 @@
 
 namespace App\Http\Resources\Session;
 
+use App\Models\ClassSession;
+use App\Models\RescheduleRequest;
 use App\Models\SessionJoinLog;
 use App\Models\User;
 use Illuminate\Http\Request;
@@ -67,6 +69,24 @@ class ClassSessionResource extends JsonResource
             'has_pending_reschedule_request' => (bool) $pendingRescheduleRequest,
             'pending_reschedule_request_status' => $pendingRescheduleRequest?->status,
             'pending_reschedule_request_created_at' => $pendingRescheduleRequest?->created_at,
+            // تفاصيل الطلب المعلّق لطرفي الجلسة — awaiting_my_response يُظهر زر "الرد على الطلب"
+            // للطرف الآخر وحده، طوال مهلة رده (المسار التلقائي في RescheduleService)
+            'pending_reschedule_request' => $pendingRescheduleRequest ? [
+                'id' => $pendingRescheduleRequest->id,
+                // makeup: current_scheduled_at = الجلسة الفائتة، والموافقة تُنشئ تعويضية بالموعد المقترح
+                'type' => $pendingRescheduleRequest->type,
+                'requester_role' => $pendingRescheduleRequest->requester_role,
+                'requested_by_me' => $user?->id === $pendingRescheduleRequest->requested_by,
+                'current_scheduled_at' => $pendingRescheduleRequest->current_scheduled_at,
+                'proposed_scheduled_at' => $pendingRescheduleRequest->proposed_scheduled_at,
+                'reason' => $pendingRescheduleRequest->reason,
+                'counterparty_response' => $pendingRescheduleRequest->counterparty_response,
+                'counterparty_deadline' => $pendingRescheduleRequest->counterparty_deadline,
+                'awaiting_my_response' => $this->awaitingResponseFrom($user, $pendingRescheduleRequest, $isAdmin),
+            ] : null,
+            // زر "اقتراح موعد تعويضي" لطرفي جلسة فردية فائتة غاب عنها المعلم (السياسة: تعويض
+            // مجاني لغياب المعلم وحده) — RescheduleService::requestMakeup يفرض نفس الشروط
+            'can_request_makeup' => $this->canRequestMakeup($user, $isAdmin, $pendingRescheduleRequest),
             // مسار صفحة تقييم الجودة (/rate-session/{token}) لزر "نسخ رابط التقييم" — لصاحب
             // الجلسة والأدمن فقط، بعد بدئها ودخول المعلم والطالب إليها (الرمز يُنشأ عند أول طلب له)
             'quality_rating_path' => $this->when(
@@ -92,6 +112,59 @@ class ClassSessionResource extends JsonResource
                 fn () => ($since = SessionJoinLog::trackingStartedAt()) !== null && $this->scheduled_at?->gte($since),
             ),
         ];
+    }
+
+    /**
+     * الطرف الآخر = من لم يرسل الطلب من طرفي الجلسة: المعلم إن طلب الطالب، وطالب الجلسة
+     * إن طلب المعلم (الطلبات للجلسات الفردية فقط). بلا استعلام إضافي — من بيانات الجلسة المحمّلة.
+     */
+    private function awaitingResponseFrom(?User $user, RescheduleRequest $request, bool $isAdmin): bool
+    {
+        if (! $user || $isAdmin || $user->id === $request->requested_by
+            || $request->counterparty_response !== 'pending' || ! $request->counterparty_deadline?->isFuture()) {
+            return false;
+        }
+
+        if ($request->requester_role === 'student') {
+            return $user->loadMissing('teacher')->teacher?->id === $this->teacher_id;
+        }
+
+        $studentId = $user->loadMissing('student')->student?->id;
+
+        return $studentId !== null && $this->booking?->student_id === $studentId;
+    }
+
+    /**
+     * من بيانات الجلسة المحمّلة (has_makeup ضمن استعلام القائمة/التفاصيل) — نفس شروط
+     * SessionService::isEligibleForMakeupRequest، مع اشتراك مدفوع للطالب صاحب الحجز.
+     */
+    private function canRequestMakeup(?User $user, bool $isAdmin, ?RescheduleRequest $pendingRequest): bool
+    {
+        if (! $user || $isAdmin || $pendingRequest
+            || $this->status !== 'completed'
+            || $this->resource->attendance_outcome !== ClassSession::OUTCOME_TEACHER_ABSENT
+            || $this->course_id !== null
+            || $this->booking?->package?->session_format === 'group') {
+            return false;
+        }
+
+        $hasMakeup = array_key_exists('has_makeup', $this->resource->getAttributes())
+            ? (bool) $this->resource->has_makeup
+            : $this->resource->makeupSessions()->exists();
+
+        if ($hasMakeup) {
+            return false;
+        }
+
+        if ($user->loadMissing('teacher')->teacher?->id === $this->teacher_id) {
+            return true;
+        }
+
+        $studentId = $user->loadMissing('student')->student?->id;
+
+        return $studentId !== null
+            && $this->booking?->student_id === $studentId
+            && in_array($this->booking?->status, ClassSession::PAID_BOOKING_STATUSES, true);
     }
 
     private function joinRedirectUrl(?User $user, bool $isTeacher, bool $isStudent): ?string

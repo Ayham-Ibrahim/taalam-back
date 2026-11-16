@@ -30,6 +30,10 @@ class RescheduleRequestReviewed extends Notification implements ShouldQueue
         private readonly ?Carbon $newScheduledAt = null,
         private readonly ?string $reason = null,
         private readonly ?string $adminNotes = null,
+        // المسار التلقائي: الطرف الآخر وافق مباشرة، لا الإدارة
+        private readonly bool $byCounterparty = false,
+        // 'reschedule' | 'makeup' — طلب موعد جلسة تعويضية يُرفض بنفس الإشعار
+        private readonly string $kind = 'reschedule',
     ) {}
 
     public function via($notifiable): array
@@ -40,6 +44,12 @@ class RescheduleRequestReviewed extends Notification implements ShouldQueue
     public function toMail($notifiable): MailMessage
     {
         $mail = (new MailMessage)->greeting("Hello {$notifiable->name},");
+
+        if ($this->status === 'rejected' && $this->kind === 'makeup') {
+            return $mail->subject('Makeup Session Request Declined')
+                ->line('The proposed time for the makeup session has been declined by the administration.')
+                ->line('Reason: '.$this->reason);
+        }
 
         if ($this->status === 'rejected') {
             // يصل الآن لطرفَي الجلسة معاً (طالب ومعلم)، لا لصاحب الطلب وحده —
@@ -55,7 +65,9 @@ class RescheduleRequestReviewed extends Notification implements ShouldQueue
         $localTime = $this->newScheduledAt?->clone()->setTimezone($notifiable->timezone ?? config('app.timezone'));
 
         $mail->subject('Session Reschedule Confirmed')
-            ->line('The session reschedule has been reviewed and confirmed by the administration.');
+            ->line($this->byCounterparty
+                ? 'The session reschedule has been accepted by the other party and is now confirmed.'
+                : 'The session reschedule has been reviewed and confirmed by the administration.');
 
         if ($localTime) {
             $mail->line("New session time: {$localTime->format('H:i')} on {$localTime->format('Y-m-d')} ({$localTime->format('e')} time).");
@@ -75,6 +87,8 @@ class RescheduleRequestReviewed extends Notification implements ShouldQueue
             'newScheduledAt' => $this->newScheduledAt?->toIso8601String(),
             'reason' => $this->reason,
             'adminNotes' => $this->adminNotes,
+            'byCounterparty' => $this->byCounterparty,
+            'kind' => $this->kind,
         ];
     }
 }

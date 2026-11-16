@@ -5,6 +5,7 @@ namespace App\Policies;
 use App\Models\ClassSession;
 use App\Models\RescheduleRequest;
 use App\Models\User;
+use App\Services\RescheduleService;
 
 class RescheduleRequestPolicy
 {
@@ -15,7 +16,20 @@ class RescheduleRequestPolicy
 
     public function view(User $user, RescheduleRequest $rescheduleRequest): bool
     {
-        return $user->isAdmin() || $user->id === $rescheduleRequest->requested_by;
+        return $user->isAdmin()
+            || $user->id === $rescheduleRequest->requested_by
+            || $this->isCounterparty($user, $rescheduleRequest);
+    }
+
+    /** قبول/رفض الاقتراح — للطرف الآخر في الجلسة وحده (لا صاحب الطلب ولا الأدمن، فللأدمن approve/reject) */
+    public function respond(User $user, RescheduleRequest $rescheduleRequest): bool
+    {
+        return $this->isCounterparty($user, $rescheduleRequest);
+    }
+
+    private function isCounterparty(User $user, RescheduleRequest $rescheduleRequest): bool
+    {
+        return app(RescheduleService::class)->counterpartyUser($rescheduleRequest)?->id === $user->id;
     }
 
     /** فقط طرفا الجلسة الفعليان (المعلم صاحبها أو طالب حاضر فيها) يطلبان تغيير موعدها */

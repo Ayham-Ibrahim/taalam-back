@@ -2,6 +2,7 @@
 
 use App\Jobs\CompleteEndedSessionsJob;
 use App\Jobs\CreateMissingBbbRoomsJob;
+use App\Jobs\EscalateRescheduleRequestsJob;
 use App\Jobs\ExpireStaleBookingsJob;
 use App\Jobs\FetchSessionRecordingsJob;
 use App\Jobs\SendSessionQualityRatingRequestsJob;
@@ -60,6 +61,9 @@ Schedule::job(new ExpireStaleBookingsJob)->everyMinute();
 // الحالة الوحيدة التي تجعل جلسة "منتهية" فعلياً لبقية النظام (مستحقات مالية،
 // تقييمات، منع تغيير موعد) — بلا هذا الـ job تبقى كل الجلسات scheduled للأبد.
 Schedule::job(new CompleteEndedSessionsJob)->everyMinute();
+
+// طلب تغيير موعد لم يرد عليه الطرف الآخر قبل مهلته — يُصعَّد للأدمن.
+Schedule::job(new EscalateRescheduleRequestsJob)->everyMinute();
 
 // إرسال رابط الجلسة تلقائياً للطالب والمعلم قبل موعدها (session_reminder_minutes_before).
 Schedule::job(new SendSessionRemindersJob)->everyMinute();
