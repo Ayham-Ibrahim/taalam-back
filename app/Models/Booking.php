@@ -148,6 +148,32 @@ class Booking extends Model
     }
 
     /**
+     * "قائم لم ينتهِ" — مصدر واحد لمنع الحجز المكرر (BookingService::assertNoOpenBookingForPackage)
+     * ولما تعرضه صفحة المعلم للطالب (my_booking)، كي لا يختلف المعروض عن الممنوع.
+     *
+     * pending_payment انقضت مهلتها ليست قائمة ولو لم يحوّلها المجدول إلى expired بعد.
+     * معيار الانتهاء للمدفوع هو الوقت: انقضاء آخر جلسة (بدايتها + مدتها) بصرف النظر عن الحضور.
+     */
+    public function scopeOpen(Builder $query): Builder
+    {
+        $now = now();
+
+        return $query
+            ->whereIn('status', ['pending_teacher_confirmation', 'pending_payment', 'confirmed', 'active'])
+            ->where(fn ($q) => $q->where('status', '!=', 'pending_payment')
+                ->orWhereNull('hold_expires_at')
+                ->orWhere('hold_expires_at', '>', $now))
+            ->where(fn ($q) => $q
+                // لا جلسات بعد (فردي بانتظار موافقة المعلم على الموعد) — ما زال مفتوحاً بلا شك
+                ->whereDoesntHave('sessions')
+                // أو له جلسة واحدة على الأقل لم تنتهِ بعد
+                ->orWhereHas('sessions', fn ($s) => $s->whereRaw(
+                    'DATE_ADD(scheduled_at, INTERVAL duration_min MINUTE) >= ?',
+                    [$now]
+                )));
+    }
+
+    /**
      * يحصر الاستعلام بما يحق للمستخدم رؤيته حسب دوره — الأدمن يرى الكل، المعلم
      * حجوزات طلابه، الطالب حجوزاته فقط. مركزي كي لا يتكرر منطق الأدوار في كل Controller.
      */

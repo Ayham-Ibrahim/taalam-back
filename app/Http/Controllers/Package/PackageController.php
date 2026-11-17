@@ -14,16 +14,19 @@ use App\Models\ClassSession;
 use App\Models\Package;
 use App\Models\Teacher;
 use App\Models\User;
+use App\Services\BookingService;
 use App\Services\PackageApprovalService;
 use App\Services\PackageService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 
 class PackageController extends Controller
 {
     public function __construct(
         private readonly PackageService $packageService,
         private readonly PackageApprovalService $approvalService,
+        private readonly BookingService $bookingService,
     ) {}
 
     public function index(Request $request)
@@ -86,7 +89,43 @@ class PackageController extends Controller
             ->latest()
             ->paginate(20);
 
-        return $this->paginate($packages->through(fn (Package $package) => new StudentPackageResource($package)));
+        $viewer = $this->viewerContext($request, $teacher, $packages->getCollection());
+
+        return $this->paginate($packages->through(fn (Package $package) => (new StudentPackageResource($package))
+            ->forViewer($viewer ? $viewer($package) : null)));
+    }
+
+    /**
+     * وضع الطالب الحالي مع كل باقة (طلب قائم/اشتراك/حق مستهلك) — كي تعرض البطاقة
+     * حالته بدل زر حجز ينتهي بخطأ "اشتراك قائم". null للزائر ولغير الطالب.
+     *
+     * @return (callable(Package): array)|null
+     */
+    private function viewerContext(Request $request, Teacher $teacher, Collection $packages): ?callable
+    {
+        $student = $request->user('sanctum')?->loadMissing('student')->student;
+
+        if (! $student || $packages->isEmpty()) {
+            return null;
+        }
+
+        $bookings = $this->bookingService->openBookingsForPackages($student, $packages->pluck('id')->all());
+        $trialUsed = $packages->contains('is_trial', true) && $this->bookingService->trialUsedByStudent($student, $teacher->id);
+        $campaignRightUsed = $packages->contains(fn (Package $p) => $p->isCampaign()) && $this->bookingService->campaignRightUsed($student);
+
+        return function (Package $package) use ($bookings, $trialUsed, $campaignRightUsed) {
+            $booking = $bookings->get($package->id);
+
+            return [
+                'booking' => $booking,
+                // أقرب موعد طلبه الطالب — بعده يبطل الطلب إن لم يرد المعلم
+                'requested_at' => $booking?->status === 'pending_teacher_confirmation'
+                    ? $this->bookingService->requestedSlotAt($booking)
+                    : null,
+                'trial_used' => $package->is_trial && $trialUsed,
+                'campaign_right_used' => $package->isCampaign() && $campaignRightUsed,
+            ];
+        };
     }
 
     public function show(Request $request, Package $package)
