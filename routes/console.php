@@ -11,6 +11,7 @@ use App\Jobs\SendSessionRemindersJob;
 use App\Models\Student;
 use App\Services\RankingService;
 use App\Support\RegionMatcher;
+use Database\Seeders\TrialPackagesSeeder;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -83,3 +84,8 @@ Schedule::job(new FetchSessionRecordingsJob)->everyFifteenMinutes();
 // إعادة حساب ranking_score لكل معلم موثّق — موزّعة على طابور واحد لكل معلم
 // كي لا تُحسَب مباشرة عند القراءة (متطلب أداء صريح).
 Schedule::call(fn () => app(RankingService::class)->recalculateAllVerified())->hourly();
+
+// جلسة تعريفية مجانية لكل معلم مدرسي موثّق جديد + مطابقة أيام باقات التجربة مع أيام توفّر معلميها.
+Schedule::command('db:seed', ['--class' => TrialPackagesSeeder::class, '--force' => true])
+    ->everySixHours()
+    ->withoutOverlapping();

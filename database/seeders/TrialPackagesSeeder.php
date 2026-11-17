@@ -4,19 +4,29 @@ namespace Database\Seeders;
 
 use App\Models\Package;
 use App\Models\Teacher;
+use App\Services\AvailabilityService;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 
 /**
  * جلسة تعريفية مجانية (is_trial) لكل معلم مدرسي موثّق — نشطة مباشرة بلا مراجعة أدمن.
- * يُشغَّل يدوياً فقط (php artisan db:seed --class=TrialPackagesSeeder)، وآمن التكرار:
- * المعلم الذي لديه باقة تجربة (بأي حالة) لا تُنشأ له أخرى. المعلم بلا أيام توفّر يُتخطّى —
- * الباقة الفردية لا تُحجز إلا ضمن أيامها — ويُضاف بإعادة التشغيل بعد أن يحدد أيامه.
+ * مجدول كل 6 ساعات (routes/console.php) ويمكن تشغيله يدوياً
+ * (php artisan db:seed --class=TrialPackagesSeeder)، وآمن التكرار: المعلم الذي لديه باقة
+ * تجربة (بأي حالة) لا تُنشأ له أخرى. المعلم بلا أيام توفّر يُتخطّى — الباقة الفردية لا
+ * تُحجز إلا ضمن أيامها — ويُضاف بإعادة التشغيل بعد أن يحدد أيامه.
+ *
+ * كذلك يعيد مطابقة أيام باقات التجربة الموجودة مع أيام توفّر معلميها الحالية — شبكة أمان
+ * فوق المزامنة الفورية في AvailabilityService.
  */
 class TrialPackagesSeeder extends Seeder
 {
-    public function run(): void
+    public function run(AvailabilityService $availability): void
     {
+        Teacher::query()
+            ->whereHas('packages', fn ($q) => $q->where('is_trial', true))
+            ->orderBy('id')
+            ->each(fn (Teacher $teacher) => $availability->syncTrialPackageDays($teacher));
+
         $created = 0;
         $skippedNoDays = [];
 
