@@ -83,6 +83,31 @@ class PendingActionsTest extends TestCase
         $this->assertNotNull($otherSession);
     }
 
+    public function test_an_unpaid_booking_is_listed_for_its_student_until_its_hold_lapses(): void
+    {
+        [$teacherUser, $studentUser, $session] = $this->createSession(now()->addDays(3));
+        $booking = $session->booking;
+        $booking->update(['status' => 'pending_payment', 'hold_expires_at' => now()->addHours(5)]);
+
+        $this->as($this->token($studentUser))->getJson('/api/my-pending-actions')
+            ->assertOk()
+            ->assertJsonPath('data.count', 1)
+            ->assertJsonPath('data.awaiting_payment.0.kind', 'booking')
+            ->assertJsonPath('data.awaiting_payment.0.id', $booking->id)
+            ->assertJsonPath('data.awaiting_payment.0.teacher_name', $teacherUser->name);
+
+        // المعلم لا يدفع — لا شيء عنده
+        $this->as($this->token($teacherUser))->getJson('/api/my-pending-actions')
+            ->assertJsonPath('data.count', 0);
+
+        // انقضت المهلة: يُحوَّل الحجز expired ويختفي
+        $booking->update(['hold_expires_at' => now()->subMinute()]);
+        $this->as($this->token($studentUser))->getJson('/api/my-pending-actions')
+            ->assertJsonPath('data.count', 0)
+            ->assertJsonCount(0, 'data.awaiting_payment');
+        $this->assertSame('expired', $booking->fresh()->status);
+    }
+
     private function token(User $user): string
     {
         return $user->createToken('t')->plainTextToken;
