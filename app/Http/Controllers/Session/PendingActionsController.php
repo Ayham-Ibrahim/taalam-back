@@ -22,6 +22,8 @@ use Illuminate\Support\Carbon;
  *  - makeup_eligible: جلسات فائتة غاب عنها المعلم يحق اقتراح موعد تعويضي لها (نفس شروط
  *    SessionService::isEligibleForMakeupRequest)، بلا طلب معلّق.
  *  - awaiting_payment (للطالب فقط): باقات/دورات بانتظار الدفع لم تنقضِ مهلتها — تضيع بانتهائها.
+ *  - awaiting_confirmation (للمعلم فقط): طلبات حجز بانتظار موافقته، مهلتها أقرب موعد مطلوب —
+ *    يبطل الطلب كله بمروره (BookingService::expireStalePendingTeacherConfirmations).
  */
 class PendingActionsController extends Controller
 {
@@ -34,10 +36,11 @@ class PendingActionsController extends Controller
         $studentId = $user->isStudent() ? $user->loadMissing('student')->student?->id : null;
 
         if (! $teacherId && ! $studentId) {
-            return $this->success(['count' => 0, 'awaiting_response' => [], 'makeup_eligible' => [], 'awaiting_payment' => []]);
+            return $this->success(['count' => 0, 'awaiting_response' => [], 'makeup_eligible' => [], 'awaiting_payment' => [], 'awaiting_confirmation' => []]);
         }
 
         $awaitingPayment = $studentId ? $this->awaitingPayment($studentId) : collect();
+        $awaitingConfirmation = $teacherId ? $this->awaitingConfirmation($teacherId) : collect();
 
         $awaiting = RescheduleRequest::query()
             ->where('status', 'pending')
@@ -71,7 +74,7 @@ class PendingActionsController extends Controller
             ->get();
 
         return $this->success([
-            'count' => $awaiting->count() + $makeupEligible->count() + $awaitingPayment->count(),
+            'count' => $awaiting->count() + $makeupEligible->count() + $awaitingPayment->count() + $awaitingConfirmation->count(),
             'awaiting_response' => $awaiting->map(fn (RescheduleRequest $r) => [
                 'id' => $r->id,
                 'type' => $r->type,
@@ -85,7 +88,35 @@ class PendingActionsController extends Controller
             ])->values(),
             'makeup_eligible' => $makeupEligible->map(fn (ClassSession $s) => $this->sessionSummary($s, $user->isTeacher()))->values(),
             'awaiting_payment' => $awaitingPayment,
+            'awaiting_confirmation' => $awaitingConfirmation,
         ]);
+    }
+
+    /**
+     * طلبات حجز باقات المعلم الفردية بانتظار موافقته، الأقرب مهلةً أولاً. ما فات أقرب موعد فيه
+     * يُستبعد هنا (باطل فعلاً) — تحويله expired شأن المجدول الدوري، لا هذه القراءة.
+     */
+    private function awaitingConfirmation(int $teacherId): \Illuminate\Support\Collection
+    {
+        return Booking::query()
+            ->where('teacher_id', $teacherId)
+            ->where('status', 'pending_teacher_confirmation')
+            ->with(['student.user:id,name,avatar_path', 'package:id,title,subject_id', 'package.subject:id,name_ar'])
+            ->get()
+            ->map(fn (Booking $b) => ['booking' => $b, 'deadline' => $this->bookingService->requestedSlotAt($b)])
+            ->filter(fn (array $row) => $row['deadline']->isFuture())
+            ->sortBy(fn (array $row) => $row['deadline']->getTimestamp())
+            ->map(fn (array $row) => [
+                'id' => $row['booking']->id,
+                'student_name' => $row['booking']->student?->user?->name,
+                'student_avatar' => $row['booking']->student?->user?->avatar_path,
+                'title' => $row['booking']->package?->title,
+                'subject' => $row['booking']->package?->subject?->name_ar,
+                'requested_slots' => $this->bookingService->requestedSlots($row['booking']),
+                'created_at' => $this->iso($row['booking']->created_at),
+                'deadline' => $this->iso($row['deadline']),
+            ])
+            ->values();
     }
 
     /**

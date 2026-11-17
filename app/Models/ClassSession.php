@@ -233,7 +233,22 @@ class ClassSession extends Model
             : 'missed';
     }
 
-    /** نظير displayStatus على مستوى الاستعلام — فلتر "جلساتي" لدى الطالب يطابق شارة كل صف حرفياً */
+    /**
+     * سبب عدم انعقاد جلسة missed — شارة "لم تُعقد" لدى المعلم (يحدد مستحقه): teacher_absent،
+     * student_no_show، no_paid_attendee، أو cancelled. السبب وحده، لا نسبة المستحق ولا مبلغه.
+     */
+    public function missedReason(): ?string
+    {
+        return match (true) {
+            $this->status === 'no_show_teacher' => self::OUTCOME_TEACHER_ABSENT,
+            $this->status === 'no_show_student' => self::OUTCOME_STUDENT_NO_SHOW,
+            $this->status === 'cancelled' => 'cancelled',
+            $this->displayStatus(false) === 'missed' => $this->attendance_outcome,
+            default => null,
+        };
+    }
+
+    /** نظير displayStatus على مستوى الاستعلام — فلتر "الجلسات" لدى الطالب والمعلم يطابق شارة كل صف حرفياً */
     public function scopeWhereDisplayStatus(Builder $query, string $displayStatus): Builder
     {
         $pendingRequest = fn ($r) => $r->where('status', 'pending');

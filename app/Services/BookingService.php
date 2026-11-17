@@ -406,8 +406,11 @@ class BookingService
         return true;
     }
 
-    /** أقرب جلسة مطلوبة زمنياً — إن انقضى وقتها دون موافقة المعلم يصبح الطلب كله باطلاً بصرف النظر عن باقي الجلسات. */
-    private function requestedSlotAt(Booking $booking): Carbon
+    /**
+     * أقرب جلسة مطلوبة زمنياً — إن انقضى وقتها دون موافقة المعلم يصبح الطلب كله باطلاً بصرف النظر
+     * عن باقي الجلسات. عامة: هي مهلة رد المعلم المعروضة في "مطلوب منك" (PendingActionsController).
+     */
+    public function requestedSlotAt(Booking $booking): Carbon
     {
         return $this->slotsToAnchors($this->requestedSlots($booking), $booking->requested_timezone ?? 'UTC')->min();
     }
@@ -419,7 +422,7 @@ class BookingService
      *
      * @return array<int, array{date: string, start_time: string}>
      */
-    private function requestedSlots(Booking $booking): array
+    public function requestedSlots(Booking $booking): array
     {
         if (! empty($booking->requested_slots)) {
             return $booking->requested_slots;
