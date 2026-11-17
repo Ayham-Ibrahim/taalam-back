@@ -738,20 +738,9 @@ class BookingService
      */
     private function assertNoOpenBookingForPackage(Student $student, Package $package): void
     {
-        $now = now();
-
         $hasOpenBooking = Booking::where('student_id', $student->id)
             ->where('package_id', $package->id)
-            ->whereIn('status', ['pending_teacher_confirmation', 'pending_payment', 'confirmed', 'active'])
-            ->where(function ($query) use ($now) {
-                // لا جلسات بعد (فردي بانتظار موافقة المعلم على الموعد) — ما زال مفتوحاً بلا شك
-                $query->whereDoesntHave('sessions')
-                    // أو له جلسة واحدة على الأقل لم تنتهِ بعد (بدايتها + مدتها لم تمضِ)
-                    ->orWhereHas('sessions', fn ($q) => $q->whereRaw(
-                        'DATE_ADD(scheduled_at, INTERVAL duration_min MINUTE) >= ?',
-                        [$now]
-                    ));
-            })
+            ->open()
             ->exists();
 
         if ($hasOpenBooking) {
@@ -847,6 +836,42 @@ class BookingService
             ->exists();
     }
 
+    /** نفس فحص assertOneTimeRightsAvailable للباقة المجانية بلا قفل — للعرض في ملف المعلم */
+    public function trialUsedByStudent(Student $student, int $teacherId): bool
+    {
+        $email = EmailNormalizer::normalize($student->loadMissing('user.primaryAccount')->user?->contactEmail());
+
+        return $email !== null && $this->trialUsedWithTeacher($email, $teacherId);
+    }
+
+    /**
+     * حجوزات الطالب القائمة (Booking::open) على هذه الباقات، أحدثها لكل باقة — لعرض
+     * حالته على بطاقات ملف المعلم. الطلب الفردي الذي مضى موعده دون رد يُبطَل كسْلاً
+     * أولاً (حجوزات هذا الطالب فقط)، وإلا يظهر "بانتظار موافقة المعلم" على طلب باطل.
+     *
+     * @param  array<int>  $packageIds
+     * @return Collection<int, Booking> مفهرسة بـ package_id
+     */
+    public function openBookingsForPackages(Student $student, array $packageIds): Collection
+    {
+        if ($packageIds === []) {
+            return collect();
+        }
+
+        $query = fn () => Booking::where('student_id', $student->id)
+            ->whereIn('package_id', $packageIds)
+            ->open();
+
+        $query()->where('status', 'pending_teacher_confirmation')->get()
+            ->each(fn (Booking $booking) => $this->expirePendingTeacherConfirmationIfNeeded($booking));
+
+        return $query()
+            ->orderByDesc('id')
+            ->get(['id', 'package_id', 'status', 'hold_expires_at', 'requested_date', 'requested_start_time', 'requested_slots', 'requested_timezone', 'sessions_remaining'])
+            ->unique('package_id')
+            ->keyBy('package_id');
+    }
+
     private function studentTimezone(Student $student): string
     {
         return $student->loadMissing('user')->user->timezone ?? 'UTC';
@@ -921,14 +946,17 @@ class BookingService
         ];
     }
 
+    /**
+     * updateOrCreate لا create: الحجز الملغى/المنتهي (مهلة دفع انقضت) لا يحذف صف حضوره،
+     * فكانت إعادة الانضمام لنفس المجموعة تصطدم بقيد (class_session_id, student_id) الفريد
+     * بخطأ 500. assertNoOpenBookingForPackage يضمن مسبقاً أن الحجز القديم غير قائم.
+     */
     private function registerAttendee(ClassSession $session, Student $student, Booking $booking): SessionAttendee
     {
-        return SessionAttendee::create([
-            'class_session_id' => $session->id,
-            'student_id' => $student->id,
-            'booking_id' => $booking->id,
-            'attendance' => 'registered',
-        ]);
+        return SessionAttendee::updateOrCreate(
+            ['class_session_id' => $session->id, 'student_id' => $student->id],
+            ['booking_id' => $booking->id, 'attendance' => 'registered'],
+        );
     }
 
     private function createPendingPayment(Booking $booking): Payment

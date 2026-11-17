@@ -10,8 +10,20 @@ use Illuminate\Http\Resources\Json\JsonResource;
  */
 class StudentPackageResource extends JsonResource
 {
+    /** وضع الطالب المشاهد مع الباقة (PackageController::viewerContext) — null = لا يُرسَل شيء */
+    private ?array $viewer = null;
+
+    public function forViewer(?array $viewer): static
+    {
+        $this->viewer = $viewer;
+
+        return $this;
+    }
+
     public function toArray(Request $request): array
     {
+        $booking = $this->viewer['booking'] ?? null;
+
         return [
             'id' => $this->id,
             'title' => $this->title,
@@ -39,6 +51,16 @@ class StudentPackageResource extends JsonResource
                 // اللحظة الفعلية (UTC) — date/start_time بمنطقة المعلم، لا منطقة من يعرضها
                 'starts_at' => $s->startsAt($this->schedule_timezone)?->toIso8601String(),
             ])),
+            // حجز الطالب القائم على هذه الباقة (Booking::open) — null إن لا حجز قائم
+            'my_booking' => $this->when($this->viewer !== null, fn () => $booking ? [
+                'id' => $booking->id,
+                'status' => $booking->status,
+                'hold_expires_at' => $booking->hold_expires_at?->toIso8601String(),
+                'requested_at' => $this->viewer['requested_at']?->toIso8601String(),
+                'sessions_remaining' => $booking->sessions_remaining,
+            ] : null),
+            'trial_used' => $this->when($this->viewer !== null, fn () => $this->viewer['trial_used']),
+            'campaign_right_used' => $this->when($this->viewer !== null, fn () => $this->viewer['campaign_right_used']),
         ];
     }
 }
