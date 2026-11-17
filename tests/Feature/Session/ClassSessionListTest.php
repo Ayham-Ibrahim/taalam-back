@@ -223,9 +223,11 @@ class ClassSessionListTest extends TestCase
      * فيرجع صفر نتائج دائماً بصمت — هذا الاختبار يثبت أن كل حالة مجمَّعة تُترجم
      * الآن لمجموعة القيم الخام الصحيحة المطابقة لها.
      */
+    /** الترجمة القديمة للمفاتيح المبسّطة — تبقى للأدمن؛ الطالب والمعلم لهما فلاتر حالة العرض (اختبارات أدناه) */
     public function test_status_filter_translates_the_frontends_grouped_status_values_to_the_matching_raw_statuses(): void
     {
-        [$teacher, $token] = $this->createVerifiedTeacher();
+        [$teacher] = $this->createVerifiedTeacher();
+        $token = User::factory()->admin()->create()->createToken('t')->plainTextToken;
 
         [, $scheduled] = $this->createBookingWithSession($teacher, now()->addDay());
         [, $active] = $this->createBookingWithSession($teacher, now()->addDays(2));
@@ -414,6 +416,31 @@ class ClassSessionListTest extends TestCase
         $ids = collect($response->json('data'))->pluck('id');
         $this->assertEquals([$sessionWithRequest->id], $ids->all());
         $this->assertFalse($ids->contains($plainSession->id));
+    }
+
+    /** المعلم: نفس فلاتر حالة العرض، مع سبب عدم الانعقاد (missed_reason) وبحث بعنوان الباقة */
+    public function test_teacher_display_status_filters_expose_the_missed_reason_and_search_by_title(): void
+    {
+        [$teacher, $token] = $this->createVerifiedTeacher();
+        [$booking, $upcoming] = $this->createBookingWithSession($teacher, now()->addDays(2));
+        $booking->package->update(['title' => 'مراجعة الفيزياء']);
+        [, $teacherAbsent] = $this->createBookingWithSession($teacher, now()->subDays(1));
+        $teacherAbsent->update(['status' => 'completed', 'attendance_outcome' => ClassSession::OUTCOME_TEACHER_ABSENT]);
+        [, $studentNoShow] = $this->createBookingWithSession($teacher, now()->subDays(2));
+        $studentNoShow->update(['status' => 'completed', 'attendance_outcome' => ClassSession::OUTCOME_STUDENT_NO_SHOW]);
+        [, $held] = $this->createBookingWithSession($teacher, now()->subDays(3));
+        $held->update(['status' => 'completed', 'attendance_outcome' => ClassSession::OUTCOME_ATTENDED]);
+
+        $ids = fn (string $query) => collect($this->as($token)->getJson("/api/class-sessions?{$query}&per_page=50")->assertOk()->json('data'))
+            ->pluck('missed_reason', 'id');
+
+        $this->assertEquals([$upcoming->id], $ids('status=upcoming')->keys()->all());
+        $this->assertEquals([$held->id], $ids('status=attended')->keys()->all());
+        $this->assertEquals([
+            $teacherAbsent->id => ClassSession::OUTCOME_TEACHER_ABSENT,
+            $studentNoShow->id => ClassSession::OUTCOME_STUDENT_NO_SHOW,
+        ], $ids('status=missed')->all());
+        $this->assertEquals([$upcoming->id], $ids('search='.urlencode('الفيزياء'))->keys()->all());
     }
 
     /** فلاتر "جلساتي" لدى الطالب متنافية: كل جلسة في فلتر واحد فقط، يطابق display_status شارتها */

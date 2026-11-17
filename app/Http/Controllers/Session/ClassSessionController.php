@@ -48,6 +48,13 @@ class ClassSessionController extends Controller
                 fn ($q) => $q->whereHas('booking', fn ($b) => $b->where('package_id', $request->integer('package_id')))
             )
             ->when($request->filled('course_id'), fn ($q) => $q->where('course_id', $request->integer('course_id')))
+            // بحث جدول المعلم بعنوان الباقة أو الدورة — على السيرفر كي يشمل كل الصفحات لا الحالية فقط
+            ->when($request->filled('search'), function ($q) use ($request) {
+                $term = '%'.$request->string('search')->trim()->value().'%';
+                $q->where(fn ($t) => $t
+                    ->whereHas('booking.package', fn ($p) => $p->where('title', 'like', $term))
+                    ->orWhereHas('course', fn ($c) => $c->where('title', 'like', $term)));
+            })
             // تبويب "الجلسات" في ملف المعلم لدى الأدمن — للمعلم نفسه لا أثر له (visibleTo يقيّده بجلساته أصلاً).
             ->when($request->filled('teacher_id'), fn ($q) => $q->where('teacher_id', $request->integer('teacher_id')))
             ->when(
@@ -128,7 +135,7 @@ class ClassSessionController extends Controller
      * فـ"المكتملة" كانت تخلط المنعقدة فعلاً بغياب المعلم/الطلاب والجلسات غير المدفوعة.
      * المفاتيح أعلاه تبقى كما هي لكل الأطراف؛ مفاتيح الأدمن لغيره تُطابَق حرفياً (لا نتائج).
      *
-     * للطالب: فلاتر "جلساتي" بحالة العرض (ClassSession::DISPLAY_STATUSES) — متنافية لا تتداخل،
+     * للطالب والمعلم: فلاتر "الجلسات" بحالة العرض (ClassSession::DISPLAY_STATUSES) — متنافية لا تتداخل،
      * ومطابقة لشارة كل صف (display_status). كانت upcoming تشمل الجلسة المجدولة التي عليها
      * طلب تغيير موعد فتظهر في "قادمة" و"طلب تغيير الموعد" معاً، و"ملغاة" فارغة عملياً.
      */
@@ -138,7 +145,7 @@ class ClassSessionController extends Controller
             return $outcomeFilter($query);
         }
 
-        if ($user->isStudent() && in_array($status, ClassSession::DISPLAY_STATUSES, true)) {
+        if (($user->isStudent() || $user->isTeacher()) && in_array($status, ClassSession::DISPLAY_STATUSES, true)) {
             return $query->whereDisplayStatus($status);
         }
 

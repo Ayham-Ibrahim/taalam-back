@@ -108,6 +108,40 @@ class PendingActionsTest extends TestCase
         $this->assertSame('expired', $booking->fresh()->status);
     }
 
+    public function test_a_booking_request_is_listed_for_its_teacher_until_its_earliest_slot_passes(): void
+    {
+        [$teacherUser, $studentUser, $session] = $this->createSession(now()->addDays(3));
+        $booking = $session->booking;
+        $slot = now()->addDays(2)->setTime(15, 0);
+        $booking->update([
+            'status' => 'pending_teacher_confirmation',
+            'requested_date' => $slot->toDateString(),
+            'requested_start_time' => '15:00:00',
+            'requested_slots' => [['date' => $slot->toDateString(), 'start_time' => '15:00:00']],
+            'requested_timezone' => 'UTC',
+        ]);
+
+        $this->as($this->token($teacherUser))->getJson('/api/my-pending-actions')
+            ->assertOk()
+            ->assertJsonPath('data.count', 1)
+            ->assertJsonPath('data.awaiting_confirmation.0.id', $booking->id)
+            ->assertJsonPath('data.awaiting_confirmation.0.student_name', $studentUser->name)
+            ->assertJsonPath('data.awaiting_confirmation.0.deadline', $slot->toIso8601String());
+
+        // الطالب لا يوافق على حجزه — لا شيء عنده
+        $this->as($this->token($studentUser))->getJson('/api/my-pending-actions')
+            ->assertJsonCount(0, 'data.awaiting_confirmation');
+
+        // فات أقرب موعد مطلوب: الطلب باطل فلا يُعرض
+        $past = now()->subDay();
+        $booking->update([
+            'requested_date' => $past->toDateString(),
+            'requested_slots' => [['date' => $past->toDateString(), 'start_time' => '15:00:00']],
+        ]);
+        $this->as($this->token($teacherUser))->getJson('/api/my-pending-actions')
+            ->assertJsonPath('data.count', 0);
+    }
+
     private function token(User $user): string
     {
         return $user->createToken('t')->plainTextToken;

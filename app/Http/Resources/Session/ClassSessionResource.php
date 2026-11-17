@@ -43,8 +43,10 @@ class ClassSessionResource extends JsonResource
             // للأدمن فقط: يعرض مواعيد الجلسة ويُدخلها بها، لا بتوقيت متصفحه (ClassSession::studentTimezone)
             'student_timezone' => $this->when($isAdmin, fn () => $this->resource->studentTimezone()),
             'status' => $this->status,
-            // شارة "جلساتي" لدى الطالب — نفس اشتقاق فلتره (ClassSession::scopeWhereDisplayStatus)
+            // شارة "الجلسات" لدى الطالب والمعلم — نفس اشتقاق فلترها (ClassSession::scopeWhereDisplayStatus)
             'display_status' => $this->resource->displayStatus((bool) $pendingRescheduleRequest),
+            // لصاحب الجلسة والأدمن: لماذا لم تُعقد (غياب الطالب/غيابه هو/اشتراك غير مدفوع) — بلا المستحق
+            'missed_reason' => $this->when($isTeacher, fn () => $this->resource->missedReason()),
             // داخلي للأدمن فقط (ClassSession::$hidden) — لا أثر ظاهر للطالب/المعلم
             'attendance_outcome' => $this->when($isAdmin, fn () => $this->attendance_outcome),
             'teacher_payout_percent' => $this->when($isAdmin, fn () => $this->teacher_payout_percent),
@@ -89,6 +91,8 @@ class ClassSessionResource extends JsonResource
             // زر "اقتراح موعد تعويضي" لطرفي جلسة فردية فائتة غاب عنها المعلم (السياسة: تعويض
             // مجاني لغياب المعلم وحده) — RescheduleService::requestMakeup يفرض نفس الشروط
             'can_request_makeup' => $this->canRequestMakeup($user, $isAdmin, $pendingRescheduleRequest),
+            // لصاحب الجلسة: لماذا لا يظهر زر التعويض لجلسة غاب عنها (يُعرض مكان الزر)
+            'makeup_note' => $this->when($isTeacher && ! $isAdmin, fn () => $this->makeupNote($user, $pendingRescheduleRequest)),
             // مسار صفحة تقييم الجودة (/rate-session/{token}) لزر "نسخ رابط التقييم" — لصاحب
             // الجلسة والأدمن فقط، بعد بدئها ودخول المعلم والطالب إليها (الرمز يُنشأ عند أول طلب له)
             'quality_rating_path' => $this->when(
@@ -134,6 +138,40 @@ class ClassSessionResource extends JsonResource
         $studentId = $user->loadMissing('student')->student?->id;
 
         return $studentId !== null && $this->booking?->student_id === $studentId;
+    }
+
+    /**
+     * سبب غياب زر "اقتراح موعد تعويضي" عن جلسة غاب عنها المعلم — null حين يظهر الزر أو لا علاقة
+     * للجلسة بالتعويض. awaiting_other: طلب معلّق ينتظر رد الطرف الآخر؛ awaiting_admin: ينتظر
+     * قرار الإدارة (المسار اليدوي أو بعد رفض/انقضاء مهلة الرد)؛ made: أُنشئت تعويضيتها؛
+     * admin_decides: جماعية/دورة — تعويضها تحدده الإدارة. طلب ينتظر ردي أنا له زره الخاص.
+     */
+    private function makeupNote(?User $user, ?RescheduleRequest $pendingRequest): ?string
+    {
+        if ($this->status !== 'completed' || $this->resource->attendance_outcome !== ClassSession::OUTCOME_TEACHER_ABSENT
+            || $this->canRequestMakeup($user, false, $pendingRequest)) {
+            return null;
+        }
+
+        if ($pendingRequest) {
+            if ($this->awaitingResponseFrom($user, $pendingRequest, false)) {
+                return null;
+            }
+
+            return $pendingRequest->counterparty_response === 'pending' && $pendingRequest->counterparty_deadline?->isFuture()
+                ? 'awaiting_other'
+                : 'awaiting_admin';
+        }
+
+        $hasMakeup = array_key_exists('has_makeup', $this->resource->getAttributes())
+            ? (bool) $this->resource->has_makeup
+            : $this->resource->makeupSessions()->exists();
+
+        if ($hasMakeup) {
+            return 'made';
+        }
+
+        return $this->course_id !== null || $this->booking?->package?->session_format === 'group' ? 'admin_decides' : null;
     }
 
     /**
