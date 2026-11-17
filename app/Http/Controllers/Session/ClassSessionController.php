@@ -41,7 +41,7 @@ class ClassSessionController extends Controller
         $sessions = ClassSession::query()
             ->visibleTo($request->user())
             ->when($request->user()->isAdmin(), fn ($q) => $this->onlyPaidSessions($q))
-            ->when($request->filled('status'), fn ($q) => $this->applyStatusFilter($q, $request->string('status')->value(), $request->user()->isAdmin()))
+            ->when($request->filled('status'), fn ($q) => $this->applyStatusFilter($q, $request->string('status')->value(), $request->user()))
             ->when($request->filled('category'), fn ($q) => $this->applyCategoryFilter($q, $request->string('category')->value()))
             ->when(
                 $request->filled('package_id'),
@@ -127,11 +127,19 @@ class ClassSessionController extends Controller
      * غيره) بدل status وحدها — كل جلسة منتهية status='completed' أياً كان ما حدث فيها،
      * فـ"المكتملة" كانت تخلط المنعقدة فعلاً بغياب المعلم/الطلاب والجلسات غير المدفوعة.
      * المفاتيح أعلاه تبقى كما هي لكل الأطراف؛ مفاتيح الأدمن لغيره تُطابَق حرفياً (لا نتائج).
+     *
+     * للطالب: فلاتر "جلساتي" بحالة العرض (ClassSession::DISPLAY_STATUSES) — متنافية لا تتداخل،
+     * ومطابقة لشارة كل صف (display_status). كانت upcoming تشمل الجلسة المجدولة التي عليها
+     * طلب تغيير موعد فتظهر في "قادمة" و"طلب تغيير الموعد" معاً، و"ملغاة" فارغة عملياً.
      */
-    private function applyStatusFilter($query, string $status, bool $isAdmin = false)
+    private function applyStatusFilter($query, string $status, User $user)
     {
-        if ($isAdmin && ($outcomeFilter = $this->outcomeFilter($status))) {
+        if ($user->isAdmin() && ($outcomeFilter = $this->outcomeFilter($status))) {
             return $outcomeFilter($query);
+        }
+
+        if ($user->isStudent() && in_array($status, ClassSession::DISPLAY_STATUSES, true)) {
+            return $query->whereDisplayStatus($status);
         }
 
         if ($status === 'reschedule_pending') {
@@ -238,7 +246,8 @@ class ClassSessionController extends Controller
             )
                 ->where('status', 'pending')
                 ->latest(),
-            'booking:id,package_id,student_id,status,excluded_from_payouts',
+            // hold_expires_at: مهلة دفع حجز pending_payment — تُعرض للطالب تحت شارة "بانتظار الدفع"
+            'booking:id,package_id,student_id,status,hold_expires_at,excluded_from_payouts',
             'booking.package:id,title,session_format,subject_id',
             'booking.package.subject:id,name_ar',
             'course:id,title,subject_id,course_field_id',

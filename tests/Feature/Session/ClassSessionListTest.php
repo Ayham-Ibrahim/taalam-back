@@ -416,6 +416,70 @@ class ClassSessionListTest extends TestCase
         $this->assertFalse($ids->contains($plainSession->id));
     }
 
+    /** فلاتر "جلساتي" لدى الطالب متنافية: كل جلسة في فلتر واحد فقط، يطابق display_status شارتها */
+    public function test_student_display_status_filters_put_each_session_in_exactly_one_bucket(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher();
+        [$booking, $upcoming] = $this->createBookingWithSession($teacher, now()->addDays(3));
+        $token = User::find($booking->student->user_id)->createToken('t')->plainTextToken;
+
+        $session = function (Carbon $at, string $status = 'scheduled', ?string $outcome = null) use ($booking, $teacher) {
+            $session = $booking->sessions()->create([
+                'teacher_id' => $teacher->id,
+                'scheduled_at' => $at,
+                'duration_min' => 60,
+                'status' => $status,
+                'attendance_outcome' => $outcome,
+            ]);
+            $this->attendeeFor($session, $booking);
+
+            return $session;
+        };
+        $this->attendeeFor($upcoming, $booking);
+
+        $pending = $session(now()->addDays(2));
+        RescheduleRequest::create([
+            'class_session_id' => $pending->id,
+            'booking_id' => $booking->id,
+            'requested_by' => $teacher->user_id,
+            'requester_role' => 'teacher',
+            'current_scheduled_at' => $pending->scheduled_at,
+            'proposed_scheduled_at' => now()->addDays(4),
+            'within_free_window' => false,
+            'hours_before_session' => 48,
+            'reason' => 'ظرف طارئ',
+            'status' => 'pending',
+            'sla_due_at' => now()->addHours(12),
+        ]);
+        $inProgress = $session(now()->subMinutes(10));
+        $endedNotYetClosed = $session(now()->subHours(2));
+        $held = $session(now()->subDays(1), 'completed', ClassSession::OUTCOME_ATTENDED);
+        $legacyHeld = $session(now()->subDays(2), 'completed');
+        $teacherAbsent = $session(now()->subDays(3), 'completed', ClassSession::OUTCOME_TEACHER_ABSENT);
+        $studentNoShow = $session(now()->subDays(4), 'completed', ClassSession::OUTCOME_STUDENT_NO_SHOW);
+        $manualNoShow = $session(now()->subDays(5), 'no_show_teacher');
+
+        $expected = [
+            'upcoming' => [$upcoming->id, $inProgress->id],
+            'reschedule_pending' => [$pending->id],
+            'attended' => [$endedNotYetClosed->id, $held->id, $legacyHeld->id],
+            'missed' => [$teacherAbsent->id, $studentNoShow->id, $manualNoShow->id],
+        ];
+
+        foreach ($expected as $status => $ids) {
+            $response = $this->as($token)->getJson("/api/class-sessions?status={$status}&per_page=50")->assertOk();
+            $this->assertEqualsCanonicalizing($ids, collect($response->json('data'))->pluck('id')->all(), $status);
+        }
+
+        $displayStatuses = collect($this->as($token)->getJson('/api/class-sessions?per_page=50')->json('data'))
+            ->pluck('display_status', 'id');
+        foreach ($expected as $status => $ids) {
+            foreach ($ids as $id) {
+                $this->assertSame($status, $displayStatuses[$id], "session {$id}");
+            }
+        }
+    }
+
     /**
      * الفرونت إند يعرض تبويب فئة مبسّط (all/individual/group/training) يطابق
      * sessionCategory() في dashboard services/index.js — لا يوجد عمود category

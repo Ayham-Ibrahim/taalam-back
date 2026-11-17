@@ -198,6 +198,64 @@ class ClassSession extends Model
         return $query->whereRaw('1 = 0');
     }
 
+    /** حالات العرض لدى الطالب — كل جلسة تقع في واحدة فقط (scopeWhereDisplayStatus ↔ displayStatus) */
+    public const DISPLAY_STATUSES = ['upcoming', 'reschedule_pending', 'attended', 'missed'];
+
+    /** نتائج حضور جلسة منعقدة فعلاً — null لبيانات ما قبل تتبع الحضور */
+    private const HELD_OUTCOMES = [self::OUTCOME_ATTENDED, self::OUTCOME_UNTRACKED];
+
+    /** حالات خام لجلسة لم تُعقد (تسجيل يدوي قديم/إلغاء) — إلى جانب نتائج الغياب على completed */
+    private const MISSED_STATUSES = ['cancelled', 'no_show_student', 'no_show_teacher'];
+
+    /**
+     * حالة العرض لدى الطالب، مشتقة من status + attendance_outcome + طلب تغيير موعد معلّق:
+     * reschedule_pending: مجدولة وعليها طلب تغيير موعد بانتظار البت (يسبق الوقت).
+     * upcoming: مجدولة ولم تنتهِ بعد. attended: انعقدت فعلاً — أو انتهى وقتها قبل أن يحسمها
+     * CompleteEndedSessionsJob (دقيقة على الأكثر). missed: غاب المعلم/الطلاب، بلا اشتراك مدفوع، أو ملغاة.
+     * طلب تعويض معلّق على جلسة فائتة لا يغيّر حالتها — تبقى missed.
+     */
+    public function displayStatus(bool $hasPendingRescheduleRequest): string
+    {
+        if ($this->status === 'scheduled') {
+            if ($hasPendingRescheduleRequest) {
+                return 'reschedule_pending';
+            }
+
+            return $this->scheduled_at?->clone()->addMinutes($this->duration_min)->isFuture() ? 'upcoming' : 'attended';
+        }
+
+        if (in_array($this->status, self::MISSED_STATUSES, true)) {
+            return 'missed';
+        }
+
+        return $this->attendance_outcome === null || in_array($this->attendance_outcome, self::HELD_OUTCOMES, true)
+            ? 'attended'
+            : 'missed';
+    }
+
+    /** نظير displayStatus على مستوى الاستعلام — فلتر "جلساتي" لدى الطالب يطابق شارة كل صف حرفياً */
+    public function scopeWhereDisplayStatus(Builder $query, string $displayStatus): Builder
+    {
+        $pendingRequest = fn ($r) => $r->where('status', 'pending');
+        $endsAfterNow = fn ($q) => $q->whereRaw('DATE_ADD(scheduled_at, INTERVAL duration_min MINUTE) > ?', [now()]);
+        $held = fn ($q) => $q->whereNull('attendance_outcome')->orWhereIn('attendance_outcome', self::HELD_OUTCOMES);
+
+        return match ($displayStatus) {
+            'reschedule_pending' => $query->where('status', 'scheduled')->whereHas('rescheduleRequests', $pendingRequest),
+            'upcoming' => $query->where('status', 'scheduled')->whereDoesntHave('rescheduleRequests', $pendingRequest)->where($endsAfterNow),
+            'attended' => $query->where(fn ($q) => $q
+                ->where(fn ($c) => $c->where('status', 'completed')->where($held))
+                ->orWhere(fn ($s) => $s
+                    ->where('status', 'scheduled')
+                    ->whereDoesntHave('rescheduleRequests', $pendingRequest)
+                    ->whereRaw('DATE_ADD(scheduled_at, INTERVAL duration_min MINUTE) <= ?', [now()]))),
+            'missed' => $query->where(fn ($q) => $q
+                ->whereIn('status', self::MISSED_STATUSES)
+                ->orWhere(fn ($c) => $c->where('status', 'completed')->whereNotNull('attendance_outcome')->whereNotIn('attendance_outcome', self::HELD_OUTCOMES))),
+            default => $query->whereRaw('1 = 0'),
+        };
+    }
+
     /**
      * يقيّد استعلام session_attendees بالسطور التي ما زالت تمثّل اشتراكاً قائماً:
      * الحجز ليس expired/cancelled، والتسجيل ليس cancelled/withdrawn (وأي طرف غير

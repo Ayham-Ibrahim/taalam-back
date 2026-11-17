@@ -43,6 +43,8 @@ class ClassSessionResource extends JsonResource
             // للأدمن فقط: يعرض مواعيد الجلسة ويُدخلها بها، لا بتوقيت متصفحه (ClassSession::studentTimezone)
             'student_timezone' => $this->when($isAdmin, fn () => $this->resource->studentTimezone()),
             'status' => $this->status,
+            // شارة "جلساتي" لدى الطالب — نفس اشتقاق فلتره (ClassSession::scopeWhereDisplayStatus)
+            'display_status' => $this->resource->displayStatus((bool) $pendingRescheduleRequest),
             // داخلي للأدمن فقط (ClassSession::$hidden) — لا أثر ظاهر للطالب/المعلم
             'attendance_outcome' => $this->when($isAdmin, fn () => $this->attendance_outcome),
             'teacher_payout_percent' => $this->when($isAdmin, fn () => $this->teacher_payout_percent),
