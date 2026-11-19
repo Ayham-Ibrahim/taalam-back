@@ -93,8 +93,14 @@ class TeacherSessionsReportService
         $fixedCompensations = $this->payouts->compensations($completed);
         // قيمة الجلسة الفائتة بلا تعويضية تبقى للمنصة — تنتقل للمعلم إن أُنشئت تعويضية
         $forfeited = $this->forfeitedSessionAmounts($completed);
+        // غياب المعلم عن جلسة باقة يُعد فقط بحجز دُفع يوماً — جلسات حجز لم يُدفع وأُغلقت teacher_absent
+        // قبل فحص الدفع في completeEndedSessions (بيانات قديمة) ليست غياباً عن طالب فعلي. الدورة
+        // تُحسب من تسجيلاتها لا أسطر حضورها (كمستحقاتها) فتبقى كما هي
+        $absences = $completed->where('attendance_outcome', ClassSession::OUTCOME_TEACHER_ABSENT);
+        $paidAbsences = $absences->whereNotNull('course_id')->pluck('id')->flip()
+            ->union($this->paidSessionIds($absences->whereNull('course_id')));
 
-        $rows = $completed->groupBy('teacher_id')->map(function (Collection $group, int $tId) use ($teacherAmounts, $pendingSettlements, $settlementItems, $platformAmounts, $compensation, $fixedCompensations, $forfeited, $teachers, $campaignBookings) {
+        $rows = $completed->groupBy('teacher_id')->map(function (Collection $group, int $tId) use ($teacherAmounts, $pendingSettlements, $settlementItems, $platformAmounts, $compensation, $fixedCompensations, $forfeited, $teachers, $campaignBookings, $paidAbsences) {
             $row = [
                 'teacherId' => $tId,
                 'teacherName' => $teachers->get($tId)?->user?->name,
@@ -128,7 +134,7 @@ class TeacherSessionsReportService
                 $amount = $teacherAmounts[$session->id] ?? ['amount' => 0.0, 'paid' => false];
                 $pending = $pendingSettlements[$session->id] ?? 0.0;
 
-                if ($session->attendance_outcome === ClassSession::OUTCOME_TEACHER_ABSENT) {
+                if ($paidAbsences->has($session->id)) {
                     $row['teacherAbsentCount']++;
                 }
 
@@ -403,6 +409,33 @@ class TeacherSessionsReportService
                 ? $bySession->get($session->id)
                 : collect([$session->booking_id])->filter(),
         ]);
+    }
+
+    /**
+     * جلسات الباقات التي فيها حاضر بحجز دُفع يوماً — مدفوع الآن، أو أُكِّد ثم أُلغي (confirmed_at):
+     * غياب المعلم وقتها غياب فعلي ولو أُلغي الحجز بعده (نقل الطالب لمعلم آخر مثلاً). أسطر الحضور
+     * إن وُجدت، وإلا حجزها المالك (بيانات قديمة بلا أسطر حضور).
+     *
+     * @return Collection<int, int> [class_session_id => index] للفحص بـ has()
+     */
+    private function paidSessionIds(Collection $sessions): Collection
+    {
+        if ($sessions->isEmpty()) {
+            return collect();
+        }
+
+        $everPaid = fn ($b) => $b->where(fn ($w) => $w
+            ->whereIn('status', ClassSession::PAID_BOOKING_STATUSES)
+            ->orWhereNotNull('confirmed_at'));
+
+        return ClassSession::whereIn('id', $sessions->pluck('id'))
+            ->where(fn ($q) => $q
+                ->whereHas('attendees', fn ($a) => $a->whereHas('booking', $everPaid))
+                ->orWhere(fn ($legacy) => $legacy
+                    ->whereDoesntHave('attendees')
+                    ->whereHas('booking', $everPaid)))
+            ->pluck('id')
+            ->flip();
     }
 
     private function paidBookings(Collection $bookingIdsBySession): Collection
