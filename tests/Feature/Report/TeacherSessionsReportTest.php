@@ -335,6 +335,36 @@ class TeacherSessionsReportTest extends TestCase
     }
 
     /**
+     * جلسات حجز لم يُدفع (انتهت مهلته) أُغلقت teacher_absent قبل فحص الدفع — بيانات قديمة لا
+     * غياب عن طالب فعلي، فلا تُعد في غياب المعلم. غياب عن حجز مدفوع يُعد كالمعتاد.
+     */
+    public function test_teacher_absence_on_an_unpaid_booking_is_not_counted(): void
+    {
+        [$teacher, $paid] = $this->createIndividualBooking();
+        $this->completedSession($paid, 1, now()->subDays(3), ClassSession::OUTCOME_TEACHER_ABSENT, 0);
+
+        $unpaid = $paid->replicate(['reference'])->fill(['reference' => 'BK-'.strtoupper(uniqid()), 'status' => 'expired']);
+        $unpaid->save();
+        $this->completedSession($unpaid, 1, now()->subDays(2), ClassSession::OUTCOME_TEACHER_ABSENT, 0);
+        $this->completedSession($unpaid, 2, now()->subDay(), ClassSession::OUTCOME_TEACHER_ABSENT, 0);
+
+        // دُفع ثم أُلغي بعد الغياب (نقل الطالب لمعلم آخر) — الغياب وقع فعلاً فيبقى معدوداً
+        $cancelledAfterPaying = $paid->replicate(['reference'])->fill([
+            'reference' => 'BK-'.strtoupper(uniqid()),
+            'status' => 'cancelled',
+            'confirmed_at' => now()->subDays(5),
+        ]);
+        $cancelledAfterPaying->save();
+        $this->completedSession($cancelledAfterPaying, 1, now()->subDays(4), ClassSession::OUTCOME_TEACHER_ABSENT, 0);
+
+        $report = app(TeacherSessionsReportService::class)->getReport(null, null, $teacher->id)['totals'];
+
+        $this->assertSame(2, $report['teacherAbsentCount']);
+        $this->assertSame(0, $report['sessionsCount']);
+        $this->assertEquals(0.0, $report['teacherRevenue']);
+    }
+
+    /**
      * مجموعة بحجزين (50 للمعلم و30 للمنصة لكل حجز في الجلسة، جلستان لكل حجز): الحجز الأول
      * حضر ثلاث جلسات (الثالثة زائدة — بيانات قديمة) فتسقط حصته منها من مستحق المعلم ومن
      * عائد المنصة معاً، وتُصرف حصة الحجز الثاني. عائد المنصة من كل حجز = ما دُفع لها (60)،

@@ -8,6 +8,7 @@ use App\Models\Package;
 use App\Models\Student;
 use App\Models\Teacher;
 use App\Models\User;
+use App\Notifications\BookingRequestReceived;
 use App\Notifications\GuestTrialBookingStatus;
 use App\Notifications\GuestVerificationCode;
 use App\Services\AuthService;
@@ -50,6 +51,7 @@ class GuestTrialBookingTest extends TestCase
         $this->assertNotNull(GuestEmailVerification::sole()->used_at);
 
         Notification::assertSentTo($guest, GuestTrialBookingStatus::class);
+        Notification::assertSentTo(User::find($teacher->user_id), BookingRequestReceived::class);
 
         // الرمز يُستهلك مرة واحدة
         $this->postJson("/api/packages/{$package->id}/guest-trial/bookings", $this->bookingPayload('Visitor@Example.com', $code, $day))

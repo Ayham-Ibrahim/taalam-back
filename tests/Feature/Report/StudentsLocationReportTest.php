@@ -57,14 +57,14 @@ class StudentsLocationReportTest extends TestCase
         $dubaiAmerican = $this->student('DXB', $this->american);
         $this->booking($dubaiAmerican, 'cancelled', 160); // ملغى لا يُحسب
         $sharjah = $this->student('SHJ', $this->british);
-        $this->booking($sharjah, 'confirmed', 0); // مجاني: باقة جارية لكنه لم يدفع
+        $this->booking($sharjah, 'confirmed', 0); // مجاني: باقة جارية لكنه لم يدفع — لا يُعد دافعاً ولا يدرس حالياً
         Student::create(['user_id' => User::factory()->student()->create()->id, 'education_type' => 'school']); // بلا موقع
 
         $response = $this->as($this->adminToken())->getJson('/api/reports/students-location')->assertStatus(200);
 
         $response->assertJsonPath('data.totals.students', 5)
             ->assertJsonPath('data.totals.paying', 1)
-            ->assertJsonPath('data.totals.running', 2)
+            ->assertJsonPath('data.totals.running', 1)
             ->assertJsonPath('data.totals.withoutLocation', 1)
             ->assertJsonPath('data.totals.conversionRate', 20);
         $this->assertEquals(360, $response->json('data.totals.revenue'));
@@ -112,6 +112,78 @@ class StudentsLocationReportTest extends TestCase
             ->assertJsonPath('data.0.curriculum', 'بريطاني');
     }
 
+    /**
+     * الصف من ملف الطالب، والمواد من باقاته المدفوعة فقط — الطالب يُعد في كل مادة له، والإيراد
+     * لكل مادة إيراد باقاتها وحدها. الفلتران يضيّقان التقرير وقائمة الطلاب.
+     */
+    public function test_report_groups_by_grade_and_subject_and_filters_by_them(): void
+    {
+        $physics = $this->package->replicate()->fill(['subject_id' => Subject::create(['code' => 'phy-'.uniqid(), 'name_ar' => 'فيزياء'])->id]);
+        $physics->save();
+
+        $both = $this->student('DXB', $this->british, grade: 8);
+        $this->booking($both, 'confirmed', 160);
+        $this->booking($both, 'confirmed', 200, $physics);
+        $physicsOnly = $this->student('SHJ', $this->british, grade: 8);
+        $this->booking($physicsOnly, 'confirmed', 100, $physics);
+        $physicsUnpaid = $this->student('SHJ', $this->british, grade: 9);
+        $this->booking($physicsUnpaid, 'expired', 100, $physics); // لم يدفع — ليست مادته
+        $this->student('DXB', $this->american); // بلا صف
+
+        $token = $this->adminToken();
+        $response = $this->as($token)->getJson('/api/reports/students-location')->assertStatus(200);
+
+        $grades = collect($response->json('data.byGrade'));
+        $this->assertSame([8, 9, null], $grades->pluck('grade')->all());
+        $this->assertSame('missing', $grades->last()['gradeBucket']); // مدرسي لم يحدد صفه
+        $this->assertSame(2, $grades->firstWhere('grade', 8)['students']);
+        $this->assertSame(2, $grades->firstWhere('grade', 8)['paying']);
+
+        $subjects = collect($response->json('data.bySubject'));
+        $this->assertCount(2, $subjects);
+        $physicsRow = $subjects->firstWhere('subject', 'فيزياء');
+        $this->assertSame(2, $physicsRow['students']);
+        $this->assertEquals(300, $physicsRow['revenue']);
+        $this->assertSame(1, $subjects->firstWhere('subject', 'مادة')['students']);
+
+        // المصفوفتان: الشارقة فيها طالبان (صف 8 وصف 9)، ومن يدرس الفيزياء منهما واحد فقط (الآخر لم يدفع)
+        $gradeMatrix = $response->json('data.gradeMatrix');
+        $sharjahGrades = collect($gradeMatrix['rows'])->firstWhere('region', 'الشارقة');
+        $this->assertSame([1, 1, 0], $sharjahGrades['counts']); // أعمدة: 8، 9، بدون صف
+        $this->assertSame(2, $sharjahGrades['total']);
+
+        $subjectMatrix = $response->json('data.subjectMatrix');
+        $physicsCol = collect($subjectMatrix['columns'])->search(fn ($c) => $c['subject'] === 'فيزياء');
+        $this->assertSame(1, collect($subjectMatrix['rows'])->firstWhere('region', 'الشارقة')['counts'][$physicsCol]);
+        $this->assertSame(1, collect($subjectMatrix['rows'])->firstWhere('region', 'دبي')['counts'][$physicsCol]);
+
+        // من بلا صف يُصنَّف: جامعي وتدريب منفصلين وملف غير مكتمل بعد المدرسي بلا صف، ويُفلتر بتصنيفه
+        $university = $this->student('DXB', $this->american);
+        $university->update(['education_type' => 'university']);
+        $this->student('DXB', $this->american)->update(['education_type' => 'training']);
+        Student::create(['user_id' => User::factory()->student()->create()->id, 'education_type' => null]);
+
+        $buckets = collect($this->as($token)->getJson('/api/reports/students-location')->json('data.byGrade'))->pluck('gradeBucket', 'gradeKey');
+        $this->assertSame(
+            ['8' => null, '9' => null, 'missing' => 'missing', 'university' => 'university', 'training' => 'training', 'incomplete' => 'incomplete'],
+            $buckets->all(),
+        );
+
+        $this->as($token)->getJson('/api/reports/students-location/students?grade=university')
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.studentId', $university->id);
+
+        $query = http_build_query(['subject_id' => $physics->subject_id, 'grade' => 8]);
+        $this->as($token)->getJson("/api/reports/students-location?{$query}")
+            ->assertJsonPath('data.totals.students', 2);
+
+        $list = $this->as($token)->getJson("/api/reports/students-location/students?{$query}")
+            ->assertJsonCount(2, 'data')
+            ->json('data');
+        $this->assertSame(['فيزياء', 'مادة'], collect($list)->firstWhere('studentId', $both->id)['subjects']);
+        $this->assertSame(8, collect($list)->firstWhere('studentId', $physicsOnly->id)['grade']);
+    }
+
     public function test_export_downloads_an_excel_file(): void
     {
         $this->student('DXB', $this->british);
@@ -129,23 +201,26 @@ class StudentsLocationReportTest extends TestCase
         $this->as($token)->getJson('/api/reports/students-location')->assertStatus(403);
     }
 
-    private function student(string $regionCode, Curriculum $curriculum): Student
+    private function student(string $regionCode, Curriculum $curriculum, ?int $grade = null): Student
     {
         return Student::create([
             'user_id' => User::factory()->student()->create()->id,
             'education_type' => 'school',
             'curriculum_id' => $curriculum->id,
             'region_id' => $this->region($regionCode),
+            'grade' => $grade,
         ]);
     }
 
-    private function booking(Student $student, string $status, float $amount): void
+    private function booking(Student $student, string $status, float $amount, ?Package $package = null): void
     {
+        $package ??= $this->package;
+
         Booking::create([
             'reference' => 'BK-'.strtoupper(uniqid()),
             'student_id' => $student->id,
-            'teacher_id' => $this->package->teacher_id,
-            'package_id' => $this->package->id,
+            'teacher_id' => $package->teacher_id,
+            'package_id' => $package->id,
             'amount_paid' => $amount,
             // chk_bookings_amounts: المدفوع = مستحق المعلم + عائد المنصة
             'teacher_amount' => $amount,

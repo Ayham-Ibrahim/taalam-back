@@ -3,9 +3,11 @@
 namespace App\Services;
 
 use App\Models\AvailabilitySlot;
+use App\Models\Package;
 use App\Models\Teacher;
 use App\Models\TeacherAvailabilityTime;
 use App\Models\TeacherBlackout;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class AvailabilityService
@@ -19,12 +21,45 @@ class AvailabilityService
             ]);
         }
 
-        return AvailabilitySlot::create(array_merge($data, ['teacher_id' => $teacher->id]));
+        return DB::transaction(function () use ($teacher, $data) {
+            $slot = AvailabilitySlot::create(array_merge($data, ['teacher_id' => $teacher->id]));
+            $this->syncTrialPackageDays($teacher);
+
+            return $slot;
+        });
     }
 
     public function removeSlot(AvailabilitySlot $slot): void
     {
-        $slot->delete();
+        DB::transaction(function () use ($slot) {
+            $slot->delete();
+            $this->syncTrialPackageDays($slot->teacher);
+        });
+    }
+
+    /**
+     * أيام الجلسة التعريفية (is_trial) تتبع أيام توفّر المعلم دائماً — بخلاف باقاته العادية
+     * التي يختار أيامها بنفسه. تُستدعى عند كل تغيير لأيام التوفّر، ومن TrialPackagesSeeder
+     * كشبكة أمان. لا تلمس الباقة إن كانت أيامها مطابقة أصلاً.
+     */
+    public function syncTrialPackageDays(Teacher $teacher): void
+    {
+        $days = $teacher->availabilitySlots()->pluck('day_of_week')->map(fn ($day) => (int) $day)->unique()->sort()->values()->all();
+
+        $teacher->packages()->where('is_trial', true)->with('schedules:id,package_id,day_of_week')->get()
+            ->each(function (Package $package) use ($days) {
+                $current = $package->schedules->pluck('day_of_week')->map(fn ($day) => (int) $day)->unique()->sort()->values()->all();
+
+                if ($current === $days) {
+                    return;
+                }
+
+                $package->schedules()->delete();
+
+                foreach ($days as $day) {
+                    $package->schedules()->create(['day_of_week' => $day]);
+                }
+            });
     }
 
     /**

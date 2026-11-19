@@ -7,10 +7,12 @@ use App\Jobs\ExpireStaleBookingsJob;
 use App\Jobs\FetchSessionRecordingsJob;
 use App\Jobs\SendSessionQualityRatingRequestsJob;
 use App\Jobs\SendSubscriptionEndedEmailsJob;
+use App\Jobs\SendSubscriptionEndingSoonNotificationsJob;
 use App\Jobs\SendSessionRemindersJob;
 use App\Models\Student;
 use App\Services\RankingService;
 use App\Support\RegionMatcher;
+use Database\Seeders\TrialPackagesSeeder;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -74,6 +76,9 @@ Schedule::job(new SendSessionQualityRatingRequestsJob)->everyMinute();
 // انتهت كل جلسات اشتراك الطالب بباقة: بريد لحسابه يدعوه للتجديد مع رابط بروفايل المعلم.
 Schedule::job(new SendSubscriptionEndedEmailsJob)->everyFiveMinutes();
 
+// بقيت جلسة واحدة في اشتراك الطالب: إشعار لكل الأدمنز (جرس + بريد) للتواصل معه للتجديد.
+Schedule::job(new SendSubscriptionEndingSoonNotificationsJob)->everyFiveMinutes();
+
 // شبكة أمان: إنشاء غرفة BBB لأي جلسة مدفوعة قادمة بقيت بلا رابط انضمام لأي سبب.
 Schedule::job(new CreateMissingBbbRoomsJob)->everyFiveMinutes();
 
@@ -83,3 +88,8 @@ Schedule::job(new FetchSessionRecordingsJob)->everyFifteenMinutes();
 // إعادة حساب ranking_score لكل معلم موثّق — موزّعة على طابور واحد لكل معلم
 // كي لا تُحسَب مباشرة عند القراءة (متطلب أداء صريح).
 Schedule::call(fn () => app(RankingService::class)->recalculateAllVerified())->hourly();
+
+// جلسة تعريفية مجانية لكل معلم مدرسي موثّق جديد + مطابقة أيام باقات التجربة مع أيام توفّر معلميها.
+Schedule::command('db:seed', ['--class' => TrialPackagesSeeder::class, '--force' => true])
+    ->everySixHours()
+    ->withoutOverlapping();

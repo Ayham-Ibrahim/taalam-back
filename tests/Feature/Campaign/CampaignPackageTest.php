@@ -10,6 +10,7 @@ use App\Models\Package;
 use App\Models\Student;
 use App\Models\Teacher;
 use App\Models\User;
+use App\Notifications\BookingRequestReceived;
 use App\Notifications\CampaignPackageAssigned;
 use App\Services\BookingService;
 use App\Services\CouponService;
@@ -196,6 +197,7 @@ class CampaignPackageTest extends TestCase
 
     public function test_campaign_booking_skips_teacher_approval_and_respects_windows_and_conflicts(): void
     {
+        Notification::fake();
         $teacher = $this->teacher();
         $package = $this->campaignPackage($teacher, sessions: 1);
         $package->schedules()->delete();
@@ -220,6 +222,8 @@ class CampaignPackageTest extends TestCase
         $this->assertNotNull($booking->hold_expires_at);
         $this->assertCount(1, $booking->sessions);
         $this->assertSame('pending', $booking->payments()->sole()->status);
+        // لا موافقة مطلوبة — فلا طلب يُبلَّغ به المعلم
+        Notification::assertNothingSentTo(User::find($teacher->user_id), BookingRequestReceived::class);
 
         // نفس موعد المعلم لطالب آخر — تعارض
         try {

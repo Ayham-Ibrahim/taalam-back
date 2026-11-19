@@ -150,6 +150,27 @@ class MakeupRequestTest extends TestCase
             ->assertJsonPath('data.pending_reschedule_request.awaiting_my_response', true);
     }
 
+    public function test_an_expired_booking_offers_no_makeup_to_either_party(): void
+    {
+        $this->session->booking->update(['status' => 'expired']);
+
+        // الطالب لا يرى جلسة حجز منتهٍ أصلاً (ClassSessionPolicy) — المعلم يراها بلا زر التعويض
+        $this->as($this->token($this->teacherUser))
+            ->getJson("/api/class-sessions/{$this->session->id}")
+            ->assertOk()
+            ->assertJsonPath('data.can_request_makeup', false);
+
+        foreach ([$this->studentUser, $this->teacherUser] as $user) {
+            $this->as($this->token($user))
+                ->getJson('/api/my-pending-actions')
+                ->assertOk()
+                ->assertJsonCount(0, 'data.makeup_eligible');
+        }
+
+        $this->propose($this->teacherUser, now()->addDays(2))->assertStatus(422);
+        $this->assertFalse(RescheduleRequest::exists());
+    }
+
     public function test_group_sessions_stay_with_the_admin(): void
     {
         [, $studentUser, $session] = $this->createMissedSession(ClassSession::OUTCOME_TEACHER_ABSENT, 'group');

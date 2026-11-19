@@ -10,12 +10,14 @@ use App\Models\Student;
 use App\Models\Subject;
 use App\Models\Teacher;
 use App\Models\User;
+use App\Notifications\BookingRequestReceived;
 use App\Services\BookingService;
 use App\Services\PricingService;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
@@ -32,6 +34,7 @@ class BookingFlowTest extends TestCase
 
     public function test_individual_booking_request_and_approval_creates_sessions_and_payment(): void
     {
+        Notification::fake();
         [$teacher] = $this->createVerifiedTeacher();
         $teacherUser = User::find($teacher->user_id);
         $package = $this->createActiveIndividualPackage($teacher, teacherPrice: 100, margin: 60, sessionsCount: 4);
@@ -48,6 +51,15 @@ class BookingFlowTest extends TestCase
         $this->assertSame('pending_teacher_confirmation', $requested->status);
         $this->assertSame(0, DB::table('class_sessions')->where('booking_id', $requested->id)->count());
         $this->assertSame(0, DB::table('payments')->where('booking_id', $requested->id)->count());
+
+        // المعلم يُبلَّغ بالطلب فوراً — يبطل بحلول أول موعد مطلوب إن لم يوافق قبله
+        Notification::assertSentTo($teacherUser, BookingRequestReceived::class, function (BookingRequestReceived $n) use ($teacherUser, $requested, $nextWednesday) {
+            $data = $n->toArray($teacherUser);
+
+            return $data['bookingId'] === $requested->id
+                && $data['sessionsCount'] === 4
+                && Carbon::parse($data['deadline'])->isSameDay($nextWednesday);
+        });
 
         $booking = app(BookingService::class)->approveIndividualRequest($requested, $teacherUser);
 

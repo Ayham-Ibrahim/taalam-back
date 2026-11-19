@@ -12,6 +12,7 @@ use App\Models\SessionAttendee;
 use App\Models\Student;
 use App\Models\Teacher;
 use App\Models\User;
+use App\Notifications\BookingRequestReceived;
 use App\Notifications\GuestTrialBookingStatus;
 use App\Support\EmailNormalizer;
 use App\Traits\LogsAuditEvents;
@@ -87,7 +88,7 @@ class BookingService
 
         // معاملة لازمة الآن حتى بلا دفع بعد: حجز الكوبون (lockForUpdate + increment)
         // يجب أن يُلغى تلقائياً (rollback) لو فشل أي فحص لاحق قبل إنشاء الحجز نفسه.
-        return DB::transaction(function () use ($student, $package, $slots, $timezone, $couponCode, $anchors) {
+        $booking = DB::transaction(function () use ($student, $package, $slots, $timezone, $couponCode, $anchors) {
             $this->assertOneTimeRightsAvailable($student, $package);
 
             $booking = $this->createBookingRecord($student, $package, array_merge([
@@ -118,6 +119,33 @@ class BookingService
 
             return $booking->fresh(['sessions']);
         });
+
+        if ($booking->status === 'pending_teacher_confirmation') {
+            $this->notifyTeacherOfRequest($booking, $package, $anchors->first());
+        }
+
+        return $booking;
+    }
+
+    /**
+     * المعلم لا يعلم بطلب الحجز إلا من لوحته — والطلب يبطل بحلول أول موعد مطلوب دون موافقة
+     * (expirePendingTeacherConfirmationIfNeeded)، فيُبلَّغ فور تقديمه.
+     */
+    private function notifyTeacherOfRequest(Booking $booking, Package $package, Carbon $firstSlotAt): void
+    {
+        $teacherUser = $package->loadMissing('teacher.user')->teacher?->user;
+
+        if (! $teacherUser) {
+            return;
+        }
+
+        $this->notifications->send($teacherUser, new BookingRequestReceived(
+            $booking->id,
+            $booking->loadMissing('student.user')->student?->user?->name ?? '',
+            $package->title,
+            $package->sessions_count,
+            $firstSlotAt,
+        ), 'booking.request_received');
     }
 
     /**
