@@ -16,8 +16,8 @@ use Illuminate\Support\Facades\DB;
 /**
  * تقرير التسويق: توزيع الطلاب حسب الموقع (دولة ← ولاية) × المنهج، وحسب الصف والمادة — لتوجيه
  * الحملات. لكل مجموعة: عدد الطلاب، من دفع فعلاً (حجز مدفوع بمبلغ > 0 — المجانية لا تُحسب)،
- * من يدرس حالياً (حجز جارٍ confirmed/active مدفوع بمبلغ > 0 — فلا يتجاوز عدد من دفع)، والإيراد
- * (amount_paid للحجوزات المدفوعة).
+ * من يدرس حالياً (حجز confirmed/active مدفوع بمبلغ > 0 لم ينتهِ — runningCondition — فلا يتجاوز عدد
+ * من دفع)، والإيراد (amount_paid للحجوزات المدفوعة).
  *
  * مواد الطالب: مواد باقاته المحجوزة بحالة مدفوعة (PAID_STATUSES) — ما يدرسه فعلاً. الطالب الواحد
  * قد يُعد في أكثر من مادة، فمجموع "حسب المادة" لا يساوي عدد الطلاب، وإيراد المادة إيراد باقاتها فقط.
@@ -30,6 +30,9 @@ class StudentsLocationReportService
     private const PAID_STATUSES = ['confirmed', 'active', 'completed'];
 
     private const RUNNING_STATUSES = ['confirmed', 'active'];
+
+    /** قيمة فلتر country_id/region_id لمن لم يحدد دولته/ولايته */
+    public const NO_LOCATION = 'none';
 
     /**
      * تصنيف من لا صف له (grade فارغ) — بترتيب العرض بعد الصفوف:
@@ -141,7 +144,7 @@ class StudentsLocationReportService
      */
     private function bySubject(array $filters): array
     {
-        $running = "'".implode("','", self::RUNNING_STATUSES)."'";
+        [$running, $runningBindings] = $this->runningCondition('sb');
         $names = Subject::query()->pluck('name_ar', 'id');
 
         return $this->filtered($filters)
@@ -149,11 +152,12 @@ class StudentsLocationReportService
             ->join('bookings as sb', 'sb.student_id', '=', 'students.id')
             ->join('packages as sp', 'sp.id', '=', 'sb.package_id')
             ->whereIn('sb.status', self::PAID_STATUSES)
+            ->whereNotNull('sp.subject_id') // باقة بلا مادة (تعريفية/حملة) — كما في subjectsByStudent
             ->when($filters['subject_id'] ?? null, fn ($q, $id) => $q->where('sp.subject_id', $id))
             ->select('sp.subject_id')
             ->selectRaw('COUNT(DISTINCT students.id) as students')
             ->selectRaw('COUNT(DISTINCT CASE WHEN sb.amount_paid > 0 THEN students.id END) as paying')
-            ->selectRaw("COUNT(DISTINCT CASE WHEN sb.status IN ({$running}) AND sb.amount_paid > 0 THEN students.id END) as running")
+            ->selectRaw("COUNT(DISTINCT CASE WHEN {$running} THEN students.id END) as running", $runningBindings)
             ->selectRaw('SUM(sb.amount_paid) as revenue')
             ->groupBy('sp.subject_id')
             ->get()
@@ -255,14 +259,35 @@ class StudentsLocationReportService
     private function bookingStats()
     {
         $paid = "'".implode("','", self::PAID_STATUSES)."'";
-        $running = "'".implode("','", self::RUNNING_STATUSES)."'";
+        [$running, $runningBindings] = $this->runningCondition('bookings');
 
         return DB::table('bookings')
             ->select('student_id')
             ->selectRaw("MAX(CASE WHEN status IN ({$paid}) AND amount_paid > 0 THEN 1 ELSE 0 END) as paying")
-            ->selectRaw("MAX(CASE WHEN status IN ({$running}) AND amount_paid > 0 THEN 1 ELSE 0 END) as running")
+            ->selectRaw("MAX(CASE WHEN {$running} THEN 1 ELSE 0 END) as running", $runningBindings)
             ->selectRaw("SUM(CASE WHEN status IN ({$paid}) THEN amount_paid ELSE 0 END) as revenue")
             ->groupBy('student_id');
+    }
+
+    /**
+     * حجز جارٍ فعلاً: confirmed/active مدفوع بمبلغ > 0 ولم ينتهِ — الحالة وحدها لا تكفي، فالحجز يبقى
+     * confirmed بعد آخر جلسة ما لم يُستهلك رصيده كاملاً. منتهٍ إن تجاوز expires_at أو انقضت كل جلساته
+     * غير الملغاة؛ المؤكد بلا جلسات بعد (ينتظر الجدولة) جارٍ — نفس تعريف StudentsReportService.
+     *
+     * @return array{0: string, 1: array} [شرط SQL على جدول الحجوزات $alias، قيمه]
+     */
+    private function runningCondition(string $alias): array
+    {
+        $statuses = "'".implode("','", self::RUNNING_STATUSES)."'";
+        $sessions = "SELECT 1 FROM session_attendees ra JOIN class_sessions rs ON rs.id = ra.class_session_id
+            WHERE ra.booking_id = {$alias}.id AND rs.status <> 'cancelled'";
+
+        return [
+            "({$alias}.status IN ({$statuses}) AND {$alias}.amount_paid > 0
+                AND ({$alias}.expires_at IS NULL OR {$alias}.expires_at >= ?)
+                AND (NOT EXISTS ({$sessions}) OR EXISTS ({$sessions} AND DATE_ADD(rs.scheduled_at, INTERVAL rs.duration_min MINUTE) > ?)))",
+            [now()->setTimezone(StudentsReportService::REPORT_TIMEZONE)->toDateString(), now()],
+        ];
     }
 
     private function filtered(array $filters): Builder
@@ -270,8 +295,12 @@ class StudentsLocationReportService
         $dayStart = fn (string $date) => Carbon::parse($date, StudentsReportService::REPORT_TIMEZONE)->startOfDay()->setTimezone(config('app.timezone'));
 
         return Student::query()
-            ->when($filters['country_id'] ?? null, fn ($q, $id) => $q->where('students.country_id', $id))
-            ->when($filters['region_id'] ?? null, fn ($q, $id) => $q->where('students.region_id', $id))
+            ->when($filters['country_id'] ?? null, fn ($q, $id) => $id === self::NO_LOCATION
+                ? $q->whereNull('students.country_id')
+                : $q->where('students.country_id', $id))
+            ->when($filters['region_id'] ?? null, fn ($q, $id) => $id === self::NO_LOCATION
+                ? $q->whereNull('students.region_id')
+                : $q->where('students.region_id', $id))
             ->when($filters['curriculum_id'] ?? null, fn ($q, $id) => $q->where('students.curriculum_id', $id))
             ->when($filters['education_type'] ?? null, fn ($q, $type) => $q->where('students.education_type', $type))
             // رقم صف، أو تصنيف من لا صف له (GRADE_BUCKETS — نفس gradeKey)
@@ -332,6 +361,7 @@ class StudentsLocationReportService
             ->join('bookings as mb', 'mb.student_id', '=', 'students.id')
             ->join('packages as mp', 'mp.id', '=', 'mb.package_id')
             ->whereIn('mb.status', self::PAID_STATUSES)
+            ->whereNotNull('mp.subject_id')
             ->when($filters['subject_id'] ?? null, fn ($q, $id) => $q->where('mp.subject_id', $id))
             ->select('students.country_id', 'students.region_id', 'mp.subject_id')
             ->selectRaw('COUNT(DISTINCT students.id) as students')

@@ -42,9 +42,15 @@ class StudentsLocationReportController extends Controller
 
     private function filters(Request $request): array
     {
+        $id = fn (string $field, string $table) => ['nullable', Rule::when(
+            $request->input($field) !== StudentsLocationReportService::NO_LOCATION,
+            ['integer', "exists:{$table},id"],
+        )];
+
         return $request->validate([
-            'country_id' => ['nullable', 'integer', 'exists:countries,id'],
-            'region_id' => ['nullable', 'integer', 'exists:regions,id'],
+            // رقم، أو none: بلا دولة / بلا ولاية — صفّا "موقع غير محدد" و"الدولة بلا ولاية" في التقرير
+            'country_id' => $id('country_id', 'countries'),
+            'region_id' => $id('region_id', 'regions'),
             'curriculum_id' => ['nullable', 'integer', 'exists:curricula,id'],
             'education_type' => ['nullable', Rule::in(['school', 'university', 'training'])],
             // رقم صف (1–12) أو تصنيف من لا صف له
