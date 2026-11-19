@@ -7,6 +7,7 @@ use App\Jobs\ExpireStaleBookingsJob;
 use App\Jobs\FetchSessionRecordingsJob;
 use App\Jobs\SendSessionQualityRatingRequestsJob;
 use App\Jobs\SendSubscriptionEndedEmailsJob;
+use App\Jobs\SendSubscriptionEndingSoonNotificationsJob;
 use App\Jobs\SendSessionRemindersJob;
 use App\Models\Student;
 use App\Services\RankingService;
@@ -74,6 +75,9 @@ Schedule::job(new SendSessionQualityRatingRequestsJob)->everyMinute();
 
 // انتهت كل جلسات اشتراك الطالب بباقة: بريد لحسابه يدعوه للتجديد مع رابط بروفايل المعلم.
 Schedule::job(new SendSubscriptionEndedEmailsJob)->everyFiveMinutes();
+
+// بقيت جلسة واحدة في اشتراك الطالب: إشعار لكل الأدمنز (جرس + بريد) للتواصل معه للتجديد.
+Schedule::job(new SendSubscriptionEndingSoonNotificationsJob)->everyFiveMinutes();
 
 // شبكة أمان: إنشاء غرفة BBB لأي جلسة مدفوعة قادمة بقيت بلا رابط انضمام لأي سبب.
 Schedule::job(new CreateMissingBbbRoomsJob)->everyFiveMinutes();
