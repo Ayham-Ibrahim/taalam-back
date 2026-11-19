@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Student;
 use App\Exports\StudentsExport;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Student\AdminResetStudentPasswordRequest;
+use App\Http\Requests\Student\AdminUpdateStudentAccountRequest;
 use App\Http\Requests\Student\CreateStudentAccountRequest;
 use App\Http\Requests\Student\UpdateStudentProfileRequest;
 use App\Http\Requests\Student\UploadStudentAvatarRequest;
@@ -114,6 +115,14 @@ class StudentController extends Controller
         $student->load(['user:id,name,email,phone,avatar_path,whatsapp,gender', 'curriculum:id,name_ar', 'locationCountry:id,name_ar', 'region:id,name_ar', 'stage:id,name_ar', 'university:id,name_ar', 'major:id,name_ar', 'courseField:id,name_ar']);
 
         return $this->success(new StudentProfileResource($student));
+    }
+
+    /** الأدمن يعدّل اسم/بريد/هاتف الطالب — منفصل عن update الذي يخص الملف الأكاديمي */
+    public function updateAccount(AdminUpdateStudentAccountRequest $request, Student $student)
+    {
+        $student = $this->studentService->updateAccountByAdmin($student, $request->validated(), $request->user());
+
+        return $this->success(new StudentProfileResource($student), 'تم تحديث بيانات الطالب بنجاح');
     }
 
     /** الأدمن يعيد تعيين كلمة مرور طالب مباشرة — بلا حاجة لمعرفة القديمة، ترسَل الجديدة بالبريد */

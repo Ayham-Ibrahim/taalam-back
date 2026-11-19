@@ -31,6 +31,12 @@ class StudentPolicy
         return $user->isAdmin() || $user->id === $student->user_id;
     }
 
+    /** الأدمن فقط يعدّل اسم/بريد/هاتف حساب طالب */
+    public function updateAccount(User $user, Student $student): bool
+    {
+        return $user->isAdmin();
+    }
+
     /** الأدمن فقط يعيد تعيين كلمة مرور طالب مباشرة (بلا حاجة لكلمة المرور الحالية) */
     public function resetPassword(User $user, Student $student): bool
     {
