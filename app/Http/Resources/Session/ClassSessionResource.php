@@ -184,7 +184,8 @@ class ClassSessionResource extends JsonResource
             || $this->status !== 'completed'
             || $this->resource->attendance_outcome !== ClassSession::OUTCOME_TEACHER_ABSENT
             || $this->course_id !== null
-            || $this->booking?->package?->session_format === 'group') {
+            || $this->booking?->package?->session_format === 'group'
+            || ! in_array($this->booking?->status, ClassSession::PAID_BOOKING_STATUSES, true)) {
             return false;
         }
 
@@ -203,8 +204,7 @@ class ClassSessionResource extends JsonResource
         $studentId = $user->loadMissing('student')->student?->id;
 
         return $studentId !== null
-            && $this->booking?->student_id === $studentId
-            && in_array($this->booking?->status, ClassSession::PAID_BOOKING_STATUSES, true);
+            && $this->booking?->student_id === $studentId;
     }
 
     private function joinRedirectUrl(?User $user, bool $isTeacher, bool $isStudent): ?string

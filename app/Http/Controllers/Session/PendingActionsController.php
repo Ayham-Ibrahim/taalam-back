@@ -62,9 +62,10 @@ class PendingActionsController extends Controller
             ->whereDoesntHave('makeupSessions')
             ->whereDoesntHave('rescheduleRequests', fn ($q) => $q->where('status', 'pending'))
             ->whereHas('booking', function (Builder $b) use ($studentId) {
-                $b->whereHas('package', fn ($p) => $p->where('session_format', '!=', 'group'));
+                $b->whereHas('package', fn ($p) => $p->where('session_format', '!=', 'group'))
+                    ->whereIn('status', ClassSession::PAID_BOOKING_STATUSES);
                 if ($studentId) {
-                    $b->where('student_id', $studentId)->whereIn('status', ClassSession::PAID_BOOKING_STATUSES);
+                    $b->where('student_id', $studentId);
                 }
             })
             ->when($teacherId, fn ($q) => $q->where('teacher_id', $teacherId))

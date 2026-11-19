@@ -271,14 +271,18 @@ class SessionService
 
     /**
      * شروط طلب التعويضية من الطالب/المعلم: جلسة فردية منتهية غاب عنها المعلم (teacher_absent)،
-     * بلا تعويضية سابقة. الجماعية والدورات وغياب الطالب تبقى للأدمن.
+     * حجزها ما زال مدفوعاً، بلا تعويضية سابقة. الجماعية والدورات وغياب الطالب تبقى للأدمن.
+     * الحجز المنتهي/الملغى لا يُعوَّض تلقائياً — scheduleMakeup يرفضه أصلاً (لا طالب مدفوع).
      */
     public static function isEligibleForMakeupRequest(ClassSession $session): bool
     {
+        $booking = $session->loadMissing('booking.package')->booking;
+
         return $session->status === 'completed'
             && $session->attendance_outcome === ClassSession::OUTCOME_TEACHER_ABSENT
             && $session->course_id === null
-            && $session->loadMissing('booking.package')->booking?->package?->session_format !== 'group'
+            && $booking?->package?->session_format !== 'group'
+            && in_array($booking?->status, ClassSession::PAID_BOOKING_STATUSES, true)
             && ! $session->makeupSessions()->exists();
     }
 
