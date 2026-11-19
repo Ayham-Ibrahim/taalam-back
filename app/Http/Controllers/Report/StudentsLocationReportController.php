@@ -47,7 +47,8 @@ class StudentsLocationReportController extends Controller
             'region_id' => ['nullable', 'integer', 'exists:regions,id'],
             'curriculum_id' => ['nullable', 'integer', 'exists:curricula,id'],
             'education_type' => ['nullable', Rule::in(['school', 'university', 'training'])],
-            'grade' => ['nullable', 'integer', 'min:1', 'max:12'],
+            // رقم صف (1–12) أو تصنيف من لا صف له
+            'grade' => ['nullable', Rule::in([...range(1, 12), ...StudentsLocationReportService::GRADE_BUCKETS])],
             'subject_id' => ['nullable', 'integer', 'exists:subjects,id'],
             'from' => ['nullable', 'date'],
             'to' => ['nullable', 'date', 'after_or_equal:from'],

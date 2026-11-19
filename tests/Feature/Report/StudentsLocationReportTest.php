@@ -135,6 +135,7 @@ class StudentsLocationReportTest extends TestCase
 
         $grades = collect($response->json('data.byGrade'));
         $this->assertSame([8, 9, null], $grades->pluck('grade')->all());
+        $this->assertSame('missing', $grades->last()['gradeBucket']); // مدرسي لم يحدد صفه
         $this->assertSame(2, $grades->firstWhere('grade', 8)['students']);
         $this->assertSame(2, $grades->firstWhere('grade', 8)['paying']);
 
@@ -155,6 +156,22 @@ class StudentsLocationReportTest extends TestCase
         $physicsCol = collect($subjectMatrix['columns'])->search(fn ($c) => $c['subject'] === 'فيزياء');
         $this->assertSame(1, collect($subjectMatrix['rows'])->firstWhere('region', 'الشارقة')['counts'][$physicsCol]);
         $this->assertSame(1, collect($subjectMatrix['rows'])->firstWhere('region', 'دبي')['counts'][$physicsCol]);
+
+        // من بلا صف يُصنَّف: جامعي وتدريب منفصلين وملف غير مكتمل بعد المدرسي بلا صف، ويُفلتر بتصنيفه
+        $university = $this->student('DXB', $this->american);
+        $university->update(['education_type' => 'university']);
+        $this->student('DXB', $this->american)->update(['education_type' => 'training']);
+        Student::create(['user_id' => User::factory()->student()->create()->id, 'education_type' => null]);
+
+        $buckets = collect($this->as($token)->getJson('/api/reports/students-location')->json('data.byGrade'))->pluck('gradeBucket', 'gradeKey');
+        $this->assertSame(
+            ['8' => null, '9' => null, 'missing' => 'missing', 'university' => 'university', 'training' => 'training', 'incomplete' => 'incomplete'],
+            $buckets->all(),
+        );
+
+        $this->as($token)->getJson('/api/reports/students-location/students?grade=university')
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.studentId', $university->id);
 
         $query = http_build_query(['subject_id' => $physics->subject_id, 'grade' => 8]);
         $this->as($token)->getJson("/api/reports/students-location?{$query}")

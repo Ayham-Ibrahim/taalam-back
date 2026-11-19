@@ -14,6 +14,14 @@ class StudentsLocationReportExport implements WithMultipleSheets
 {
     private const EDUCATION_TYPE_LABELS = ['school' => 'مدرسي', 'university' => 'جامعي', 'training' => 'تدريب'];
 
+    /** تصنيفات من لا صف له — StudentsLocationReportService::GRADE_BUCKETS */
+    private const GRADE_BUCKET_LABELS = [
+        'missing' => 'مدرسي بدون صف',
+        'university' => 'جامعي',
+        'training' => 'تدريب',
+        'incomplete' => 'ملف غير مكتمل',
+    ];
+
     private const METRIC_HEADINGS = ['عدد الطلاب', 'عدد من دفع', 'نسبة من دفع منهم %', 'يدرسون حالياً', 'إجمالي ما دفعوه (AED)'];
 
     public function __construct(
@@ -31,7 +39,7 @@ class StudentsLocationReportExport implements WithMultipleSheets
             $this->gradeSheet($report),
             $this->subjectSheet($report),
             $this->matrixSheet('الموقع × المنهج', $report['matrix'], fn (array $c) => $c['curriculum'] ?? 'بدون منهج'),
-            $this->matrixSheet('الموقع × الصف', $report['gradeMatrix'], fn (array $c) => $c['grade'] ? 'الصف '.$c['grade'] : 'بدون صف'),
+            $this->matrixSheet('الموقع × الصف', $report['gradeMatrix'], fn (array $c) => $this->gradeLabel($c)),
             $this->matrixSheet('الموقع × المادة', $report['subjectMatrix'], fn (array $c) => $c['subject'] ?? '—'),
             $this->studentsSheet($this->reportService->allStudents($this->filters)),
         ];
@@ -57,9 +65,14 @@ class StudentsLocationReportExport implements WithMultipleSheets
     private function gradeSheet(array $report): ReportSheet
     {
         return new ReportSheet('حسب الصف', ['الصف', ...self::METRIC_HEADINGS], array_map(fn (array $row) => [
-            $row['grade'] ? 'الصف '.$row['grade'] : 'بدون صف',
+            $this->gradeLabel($row),
             ...$this->metrics($row),
         ], $report['byGrade']), ['الإجمالي', ...$this->metrics($report['totals'])]);
+    }
+
+    private function gradeLabel(array $row): string
+    {
+        return $row['grade'] ? 'الصف '.$row['grade'] : self::GRADE_BUCKET_LABELS[$row['gradeBucket']] ?? 'بدون صف';
     }
 
     /** الطالب يُعد في كل مادة يدرسها — فلا صف إجمالي (مجموعه لا يساوي عدد الطلاب) */

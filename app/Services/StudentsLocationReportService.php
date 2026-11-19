@@ -31,6 +31,32 @@ class StudentsLocationReportService
 
     private const RUNNING_STATUSES = ['confirmed', 'active'];
 
+    /**
+     * تصنيف من لا صف له (grade فارغ) — بترتيب العرض بعد الصفوف:
+     * missing: طالب مدرسي لم يحدد صفه بعد. university/training: جامعي أو تدريب — الصف (1–12) للمدرسي
+     * وحده. incomplete: لم يحدد نوع تعليمه أصلاً (ملف دراسي غير مكتمل).
+     */
+    public const GRADE_BUCKETS = ['missing', 'university', 'training', 'incomplete'];
+
+    /** مفتاح الصف لصف من groupedRows أو طالب: رقم الصف نصاً، أو تصنيفه من GRADE_BUCKETS */
+    private static function gradeKey(object $row): string
+    {
+        return match (true) {
+            $row->grade !== null => (string) (int) $row->grade,
+            $row->education_type === null => 'incomplete',
+            $row->education_type === 'school' => 'missing',
+            default => $row->education_type, // university | training
+        };
+    }
+
+    /** @return array{grade: ?int, gradeBucket: ?string, gradeKey: string} */
+    private static function gradeLabel(string $key): array
+    {
+        $isBucket = in_array($key, self::GRADE_BUCKETS, true);
+
+        return ['grade' => $isBucket ? null : (int) $key, 'gradeBucket' => $isBucket ? $key : null, 'gradeKey' => $key];
+    }
+
     public function getReport(array $filters): array
     {
         $groups = $this->groupedRows($filters);
@@ -49,17 +75,18 @@ class StudentsLocationReportService
             ->sortByDesc('students')
             ->values();
 
-        // بالترتيب الدراسي، ومن لم يحدد صفه أخيراً
-        $byGrade = $this->sumBy($groups, fn ($g) => (string) $g->grade)
-            ->map(fn (array $sum, string $key) => ['grade' => $key === '' ? null : (int) $key] + $sum)
-            ->sortBy(fn (array $row) => $row['grade'] ?? PHP_INT_MAX)
+        // بالترتيب الدراسي، ثم من بلا صف بتصنيفه (GRADE_BUCKETS)
+        $byGrade = $this->sumBy($groups, fn ($g) => self::gradeKey($g))
+            ->map(fn (array $sum, string $key) => self::gradeLabel($key) + $sum)
+            ->sortBy(fn (array $row) => $row['grade'] ?? 100 + array_search($row['gradeBucket'], self::GRADE_BUCKETS, true))
             ->values();
 
         $bySubject = collect($this->bySubject($filters));
         $cells = $this->cellsByLocation($groups);
-        $cellCount = fn (string $column) => fn (array $location, array $col) => (int) $cells
+        // $keyOf: قيمة العمود لكل صف من groupedRows، تُقارن بـ value عمود المصفوفة
+        $cellCount = fn (callable $keyOf) => fn (array $location, array $col) => (int) $cells
             ->get(self::locationKey($location), collect())
-            ->filter(fn ($g) => $g->{$column} === null ? $col['value'] === null : (int) $g->{$column} === $col['value'])
+            ->filter(fn ($g) => $keyOf($g) === $col['value'])
             ->sum('students');
 
         return [
@@ -73,12 +100,12 @@ class StudentsLocationReportService
             'matrix' => $this->matrix(
                 $byLocation,
                 $byCurriculum->map(fn (array $c) => ['curriculumId' => $c['curriculumId'], 'curriculum' => $c['curriculum'], 'value' => $c['curriculumId']]),
-                $cellCount('curriculum_id'),
+                $cellCount(fn ($g) => $g->curriculum_id === null ? null : (int) $g->curriculum_id),
             ),
             'gradeMatrix' => $this->matrix(
                 $byLocation,
-                $byGrade->map(fn (array $g) => ['grade' => $g['grade'], 'value' => $g['grade']]),
-                $cellCount('grade'),
+                $byGrade->map(fn (array $g) => ['grade' => $g['grade'], 'gradeBucket' => $g['gradeBucket'], 'value' => $g['gradeKey']]),
+                $cellCount(fn ($g) => self::gradeKey($g)),
             ),
             'subjectMatrix' => $this->subjectMatrix($filters, $byLocation, $bySubject),
         ];
@@ -215,12 +242,13 @@ class StudentsLocationReportService
                 'students.region_id',
                 'students.curriculum_id',
                 'students.grade',
+                'students.education_type',
                 DB::raw('COUNT(*) as students'),
                 DB::raw('COALESCE(SUM(bs.paying), 0) as paying'),
                 DB::raw('COALESCE(SUM(bs.running), 0) as running'),
                 DB::raw('COALESCE(SUM(bs.revenue), 0) as revenue'),
             ])
-            ->groupBy('students.country_id', 'students.region_id', 'students.curriculum_id', 'students.grade')
+            ->groupBy('students.country_id', 'students.region_id', 'students.curriculum_id', 'students.grade', 'students.education_type')
             ->get();
     }
 
@@ -246,7 +274,13 @@ class StudentsLocationReportService
             ->when($filters['region_id'] ?? null, fn ($q, $id) => $q->where('students.region_id', $id))
             ->when($filters['curriculum_id'] ?? null, fn ($q, $id) => $q->where('students.curriculum_id', $id))
             ->when($filters['education_type'] ?? null, fn ($q, $type) => $q->where('students.education_type', $type))
-            ->when($filters['grade'] ?? null, fn ($q, $grade) => $q->where('students.grade', $grade))
+            // رقم صف، أو تصنيف من لا صف له (GRADE_BUCKETS — نفس gradeKey)
+            ->when($filters['grade'] ?? null, fn ($q, $grade) => match ($grade) {
+                'missing' => $q->whereNull('students.grade')->where('students.education_type', 'school'),
+                'university', 'training' => $q->whereNull('students.grade')->where('students.education_type', $grade),
+                'incomplete' => $q->whereNull('students.grade')->whereNull('students.education_type'),
+                default => $q->where('students.grade', (int) $grade),
+            })
             // من يدرس المادة: له باقة مدفوعة منها — نفس تعريف مواد الطالب في bySubject/subjectsByStudent
             ->when($filters['subject_id'] ?? null, fn ($q, $id) => $q->whereExists(fn ($e) => $e
                 ->from('bookings')
