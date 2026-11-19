@@ -346,8 +346,8 @@ class ClassSessionController extends Controller
     }
 
     /**
-     * تسجيل الأدمن حضور المعلم أو أحد الطلاب يدوياً أثناء الجلسة (نافذة روابطها) — يُحتسب كحضور
-     * طبيعي في الوقت. الشروط في SessionJoinLogService::recordByAdmin.
+     * تسجيل الأدمن حضور المعلم أو أحد الطلاب يدوياً من نافذة روابطها، أثناء الجلسة أو بعد انتهائها —
+     * يُحتسب كحضور طبيعي في الوقت. الشروط في SessionJoinLogService::recordByAdmin.
      */
     public function markAttendance(MarkSessionAttendanceRequest $request, ClassSession $session)
     {

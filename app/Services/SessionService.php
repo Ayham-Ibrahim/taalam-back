@@ -482,9 +482,54 @@ class SessionService
         $lateMinutes = (int) $this->settings->get('student_no_show_after_minutes', 20);
         $completed = 0;
 
-        ClassSession::query()
+        $this->withOutcomeContext(ClassSession::query())
             ->where('status', 'scheduled')
             ->whereRaw('DATE_ADD(scheduled_at, INTERVAL duration_min MINUTE) < ?', [now()])
+            ->chunkById(200, function ($sessions) use ($trackedSince, $noShowCompensationPercent, $lateMinutes, &$completed) {
+                foreach ($sessions as $session) {
+                    $completed += ClassSession::whereKey($session->id)
+                        ->where('status', 'scheduled')
+                        ->update(['status' => 'completed'] + $this->outcomeAttributes($session, $trackedSince, $noShowCompensationPercent, $lateMinutes));
+                }
+            });
+
+        return $completed;
+    }
+
+    /**
+     * إعادة حسم نتيجة حضور جلسة مكتملة بعد تسجيل الأدمن حضوراً متأخراً (SessionJoinLogService::recordByAdmin)
+     * — بنفس قواعد completeEndedSessions. إن لم تتغير النتيجة تبقى القيم المثبَّتة كما هي (نسبة
+     * التعويض وقت الإغلاق)، وإلا تُحسب من جديد بالإعداد الحالي.
+     */
+    public function recomputeCompletedOutcome(ClassSession $session): void
+    {
+        $session = $this->withOutcomeContext(ClassSession::query())->whereKey($session->id)->where('status', 'completed')->first();
+
+        if (! $session) {
+            return;
+        }
+
+        $attributes = $this->outcomeAttributes(
+            $session,
+            SessionJoinLog::trackingStartedAt(),
+            (float) $this->settings->get('student_no_show_teacher_compensation_percent', 0),
+            (int) $this->settings->get('student_no_show_after_minutes', 20),
+        );
+
+        if ($attributes['attendance_outcome'] === $session->attendance_outcome) {
+            return;
+        }
+
+        $old = $session->only(array_keys($attributes));
+        $session->update($attributes);
+
+        $this->audit('session.attendance_outcome_recomputed', $session, $old, $attributes);
+    }
+
+    /** سجلات الانضمام وأعلام الدفع التي يحتاجها outcomeAttributes — استعلام واحد لكل دفعة */
+    private function withOutcomeContext($query)
+    {
+        return $query
             ->with('joinLogs')
             ->withExists([
                 'attendees as has_paid_attendee' => fn ($q) => ClassSession::constrainToPaidAttendee($q),
@@ -492,43 +537,43 @@ class SessionService
                 'booking as has_paid_booking' => fn ($q) => $q->whereIn('status', ClassSession::PAID_BOOKING_STATUSES),
                 'booking as is_free_booking' => fn ($q) => $q->whereHas('package', fn ($p) => $p->where('student_price', '<=', 0)),
                 'booking as is_excluded_from_payouts' => fn ($q) => $q->where('excluded_from_payouts', true),
-            ])
-            ->chunkById(200, function ($sessions) use ($trackedSince, $noShowCompensationPercent, $lateMinutes, &$completed) {
-                foreach ($sessions as $session) {
-                    $isPaid = $session->has_any_attendee ? $session->has_paid_attendee : $session->has_paid_booking;
+            ]);
+    }
 
-                    $outcome = $isPaid
-                        ? $this->attendanceOutcome($session, $trackedSince, $lateMinutes)
-                        : ClassSession::OUTCOME_NO_PAID_ATTENDEE;
+    /**
+     * نتيجة الحضور ونسبة مستحق المعلم وتعويض غياب الطلاب لجلسة منتهية (محمّلة بـ withOutcomeContext).
+     *
+     * @return array{attendance_outcome: string, teacher_payout_percent: ?int, teacher_compensation_amount: ?float, teacher_compensation_percent: ?float}
+     */
+    private function outcomeAttributes(ClassSession $session, ?Carbon $trackedSince, float $noShowCompensationPercent, int $lateMinutes): array
+    {
+        $isPaid = $session->has_any_attendee ? $session->has_paid_attendee : $session->has_paid_booking;
 
-                    // غياب الطلاب: نسبة من قيمة الجلسة مرة واحدة بدل مستحقها، يتحمّلها هامش المنصة.
-                    // لا تعويض عن جلسة تعويضية — يُصرف مرة واحدة على الأصلية لكل سلسلة تعويض.
-                    // ولا عن جلسة باقة مجانية — لا مستحق للمعلم عنها أصلاً فلا شيء يُعوَّض.
-                    // ولا عن جلسة باقة حملة — المعلم يأخذ عنها راتباً ثابتاً لا مستحقاً لكل جلسة
-                    $compensated = $outcome === ClassSession::OUTCOME_STUDENT_NO_SHOW && ! $session->is_makeup && ! $session->is_free_booking && ! $session->is_excluded_from_payouts;
-                    $compensation = $compensated
-                        ? round(($this->payouts->sessionValues(collect([$session]))[$session->id] ?? 0.0) * $noShowCompensationPercent / 100, 2)
-                        : null;
+        $outcome = $isPaid
+            ? $this->attendanceOutcome($session, $trackedSince, $lateMinutes)
+            : ClassSession::OUTCOME_NO_PAID_ATTENDEE;
 
-                    $completed += ClassSession::whereKey($session->id)
-                        ->where('status', 'scheduled')
-                        ->update([
-                            'status' => 'completed',
-                            'attendance_outcome' => $outcome,
-                            'teacher_payout_percent' => match ($outcome) {
-                                ClassSession::OUTCOME_STUDENT_NO_SHOW,
-                                ClassSession::OUTCOME_TEACHER_ABSENT,
-                                ClassSession::OUTCOME_NO_PAID_ATTENDEE => 0,
-                                ClassSession::OUTCOME_UNTRACKED => null,
-                                default => 100,
-                            },
-                            'teacher_compensation_amount' => $compensation,
-                            'teacher_compensation_percent' => $compensated ? $noShowCompensationPercent : null,
-                        ]);
-                }
-            });
+        // غياب الطلاب: نسبة من قيمة الجلسة مرة واحدة بدل مستحقها، يتحمّلها هامش المنصة.
+        // لا تعويض عن جلسة تعويضية — يُصرف مرة واحدة على الأصلية لكل سلسلة تعويض.
+        // ولا عن جلسة باقة مجانية — لا مستحق للمعلم عنها أصلاً فلا شيء يُعوَّض.
+        // ولا عن جلسة باقة حملة — المعلم يأخذ عنها راتباً ثابتاً لا مستحقاً لكل جلسة
+        $compensated = $outcome === ClassSession::OUTCOME_STUDENT_NO_SHOW && ! $session->is_makeup && ! $session->is_free_booking && ! $session->is_excluded_from_payouts;
+        $compensation = $compensated
+            ? round(($this->payouts->sessionValues(collect([$session]))[$session->id] ?? 0.0) * $noShowCompensationPercent / 100, 2)
+            : null;
 
-        return $completed;
+        return [
+            'attendance_outcome' => $outcome,
+            'teacher_payout_percent' => match ($outcome) {
+                ClassSession::OUTCOME_STUDENT_NO_SHOW,
+                ClassSession::OUTCOME_TEACHER_ABSENT,
+                ClassSession::OUTCOME_NO_PAID_ATTENDEE => 0,
+                ClassSession::OUTCOME_UNTRACKED => null,
+                default => 100,
+            },
+            'teacher_compensation_amount' => $compensation,
+            'teacher_compensation_percent' => $compensated ? $noShowCompensationPercent : null,
+        ];
     }
 
     /**

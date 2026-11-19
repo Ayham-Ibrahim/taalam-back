@@ -18,8 +18,9 @@ use Illuminate\Support\Carbon;
 use Tests\TestCase;
 
 /**
- * تسجيل الأدمن حضور المعلم أو أحد الطلاب يدوياً — أثناء الجلسة فقط، بموعد بدئها (فيُعدّ حاضراً في
- * الوقت مهما تأخر التسجيل)، ويُحتسب كحضور طبيعي عند انتهاء الجلسة ومنه المستحقات.
+ * تسجيل الأدمن حضور المعلم أو أحد الطلاب يدوياً — من بدء الجلسة فصاعداً، بموعد بدئها (فيُعدّ حاضراً
+ * في الوقت مهما تأخر التسجيل)، ويُحتسب كحضور طبيعي عند انتهاء الجلسة ومنه المستحقات، أو يعيد حسم
+ * نتيجة جلسة أُغلقت.
  */
 class AdminMarkAttendanceTest extends TestCase
 {
@@ -94,14 +95,59 @@ class AdminMarkAttendanceTest extends TestCase
         $this->assertDatabaseCount('session_join_logs', 0);
     }
 
-    public function test_rejected_after_the_session(): void
+    /** انتهى وقتها ولم تُغلق بعد — يُسجَّل ويُحسم عند الإغلاق كالمعتاد */
+    public function test_allowed_after_the_session_ended_before_it_is_closed(): void
     {
         [$teacher] = $this->createTeacher();
         [$session, , $attendee] = $this->createSession($teacher, now()->subMinutes(61));
 
-        $this->asAdmin()->postJson("/api/class-sessions/{$session->id}/attendance", ['role' => 'student', 'student_id' => $attendee->student_id])
-            ->assertStatus(422);
-        $this->assertDatabaseCount('session_join_logs', 0);
+        $this->asAdmin()->postJson("/api/class-sessions/{$session->id}/attendance", ['role' => 'teacher'])->assertOk();
+        $this->asAdmin()->postJson("/api/class-sessions/{$session->id}/attendance", ['role' => 'student', 'student_id' => $attendee->student_id])->assertOk();
+
+        $this->completeAndAssertAttended($session, $teacher);
+    }
+
+    /** جلسة أُغلقت بغياب المعلم — تسجيل الحضور بعدها يعيد حسم نتيجتها ومستحقها فوراً */
+    public function test_marking_a_completed_session_recomputes_its_outcome(): void
+    {
+        [$teacher] = $this->createTeacher();
+        [$session, , $attendee] = $this->createSession($teacher, now()->subHours(3));
+        app(SessionService::class)->completeEndedSessions();
+        $this->assertSame(ClassSession::OUTCOME_TEACHER_ABSENT, $session->fresh()->attendance_outcome);
+
+        $this->asAdmin()->postJson("/api/class-sessions/{$session->id}/attendance", ['role' => 'teacher'])->assertOk();
+        $this->assertSame(ClassSession::OUTCOME_STUDENT_NO_SHOW, $session->fresh()->attendance_outcome);
+
+        $this->asAdmin()->postJson("/api/class-sessions/{$session->id}/attendance", ['role' => 'student', 'student_id' => $attendee->student_id])->assertOk();
+
+        $session->refresh();
+        $this->assertSame(ClassSession::OUTCOME_ATTENDED, $session->attendance_outcome);
+        $this->assertEquals(100, (float) $session->teacher_payout_percent);
+        $this->assertNull($session->teacher_compensation_amount);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'session.attendance_outcome_recomputed']);
+
+        $payout = app(PayoutService::class)->generateForPeriod($teacher, now()->subDay(), now()->addDay());
+        $this->assertEquals(100.0, (float) $payout->gross_amount);
+    }
+
+    /** ما بُني على نتيجة الجلسة المكتملة (كشف مستحقات، تعويضية، طلب معلّق) يمنع تعديل حضورها */
+    public function test_rejected_for_a_completed_session_whose_outcome_was_built_upon(): void
+    {
+        [$teacher, $teacherUser] = $this->createTeacher();
+
+        [$paidOut, $studentUser] = $this->createSession($teacher, now()->subHours(3));
+        $this->logJoin($paidOut, $teacherUser, 'teacher', $paidOut->scheduled_at);
+        $this->logJoin($paidOut, $studentUser, 'student', $paidOut->scheduled_at);
+        app(SessionService::class)->completeEndedSessions();
+        app(PayoutService::class)->generateForPeriod($teacher, now()->subDay(), now()->addDay());
+        $this->asAdmin()->postJson("/api/class-sessions/{$paidOut->id}/attendance", ['role' => 'teacher'])->assertStatus(422);
+
+        [$withMakeup] = $this->createSession($teacher, now()->subHours(2));
+        app(SessionService::class)->completeEndedSessions();
+        app(SessionService::class)->createMakeupSession($withMakeup->fresh(), now()->addDays(2));
+        $this->asAdmin()->postJson("/api/class-sessions/{$withMakeup->id}/attendance", ['role' => 'teacher'])->assertStatus(422);
+
+        $this->assertSame(ClassSession::OUTCOME_TEACHER_ABSENT, $withMakeup->fresh()->attendance_outcome);
     }
 
     public function test_rejected_for_a_cancelled_session(): void

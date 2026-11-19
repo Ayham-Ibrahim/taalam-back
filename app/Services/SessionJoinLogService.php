@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\ClassSession;
+use App\Models\PayoutItem;
 use App\Models\SessionJoinLog;
 use App\Models\User;
 use App\Traits\LogsAuditEvents;
@@ -20,23 +21,30 @@ class SessionJoinLogService
 {
     use LogsAuditEvents;
 
+    public function __construct(private readonly SessionService $sessions) {}
+
     /**
-     * الأدمن يسجّل حضور المعلم أو أحد طلاب الجلسة يدوياً من نافذة روابطها — أثناء الجلسة فقط (نفس
-     * نافذة الانضمام: قبل الموعد بـ EARLY_JOIN_MINUTES حتى نهايته). يُكتب الدخول بموعد بدء الجلسة،
-     * فيُعدّ حاضراً في الوقت مهما تأخر تسجيل الأدمن، ويُحتسب كحضور طبيعي عند انتهاء الجلسة
-     * (SessionService::completeEndedSessions) ومنه المستحقات. join_count يبقى كما هو (0 لسجل جديد):
+     * الأدمن يسجّل حضور المعلم أو أحد طلاب الجلسة يدوياً من نافذة روابطها — من بدء نافذة الانضمام
+     * (قبل الموعد بـ EARLY_JOIN_MINUTES) فصاعداً، أثناء الجلسة أو بعد انتهائها. يُكتب الدخول بموعد بدء
+     * الجلسة، فيُعدّ حاضراً في الوقت مهما تأخر تسجيل الأدمن. join_count يبقى كما هو (0 لسجل جديد):
      * عدد مرات الدخول الفعلي عبر المنصة، فيُميَّز به الحضور اليدوي في العرض.
+     *
+     * جلسة لم تُغلق بعد تُحسم نتيجتها عند إغلاقها (SessionService::completeEndedSessions). جلسة مكتملة
+     * أُغلقت بنتيجتها فتُعاد حسماً فوراً (recomputeCompletedOutcome) ومنها المستحقات — إلا إن بُني على
+     * نتيجتها ما لا يُعاد حسابه: أُدرجت في كشف مستحقات، أو لها جلسة تعويضية أو طلب تعويض/تغيير معلّق.
      */
     public function recordByAdmin(ClassSession $session, User $admin, string $role, ?int $studentId = null): void
     {
-        $now = now();
         $windowStart = $session->scheduled_at->clone()->subMinutes(SessionService::EARLY_JOIN_MINUTES);
-        $windowEnd = $session->scheduled_at->clone()->addMinutes($session->duration_min);
 
-        if ($session->status !== 'scheduled' || $now->lt($windowStart) || $now->gt($windowEnd)) {
+        if (! in_array($session->status, ['scheduled', 'completed'], true) || now()->lt($windowStart)) {
             throw ValidationException::withMessages([
-                'session' => ['تسجيل الحضور متاح أثناء وقت الجلسة فقط'],
+                'session' => ['تسجيل الحضور متاح من بدء وقت الجلسة فقط'],
             ]);
+        }
+
+        if ($session->status === 'completed') {
+            $this->assertOutcomeCanChange($session);
         }
 
         $user = $role === 'teacher'
@@ -67,7 +75,26 @@ class SessionJoinLogService
                 'user_id' => $user->id,
                 'student_id' => $role === 'student' ? $studentId : null,
             ], null, $admin->id);
+
+            if ($session->status === 'completed') {
+                $this->sessions->recomputeCompletedOutcome($session);
+            }
         });
+    }
+
+    /** ما بُني على نتيجة الجلسة المكتملة ولا يُعاد حسابه تلقائياً — يمنع تغييرها */
+    private function assertOutcomeCanChange(ClassSession $session): void
+    {
+        $blocker = match (true) {
+            PayoutItem::where('class_session_id', $session->id)->exists() => 'أُدرجت الجلسة في كشف مستحقات — لا يمكن تعديل حضورها',
+            $session->makeupSessions()->exists() => 'للجلسة جلسة تعويضية — لا يمكن تعديل حضورها',
+            $session->rescheduleRequests()->where('status', 'pending')->exists() => 'على الجلسة طلب تعويض أو تغيير موعد معلّق — يُبت فيه أولاً',
+            default => null,
+        };
+
+        if ($blocker) {
+            throw ValidationException::withMessages(['session' => [$blocker]]);
+        }
     }
 
     public function record(ClassSession $session, User $user): void
