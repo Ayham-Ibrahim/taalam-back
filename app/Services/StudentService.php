@@ -70,6 +70,24 @@ class StudentService
      * العمق: كلمة مرور جديدة تُبطل كل دخول سابق فوراً)، ويُرسِلها للطالب
      * بالبريد (PasswordResetByAdmin) تماماً كما تُرسَل عند إنشاء الحساب.
      */
+    /** الأدمن يعدّل اسم/بريد/هاتف الطالب — يُسجَّل الفرق فقط في سجل التدقيق */
+    public function updateAccountByAdmin(Student $student, array $data, User $admin): Student
+    {
+        $student->loadMissing('user');
+        $user = $student->user;
+
+        $user->fill($data);
+        $changed = $user->getDirty();
+
+        if ($changed) {
+            $old = array_intersect_key($user->getOriginal(), $changed);
+            $user->save();
+            $this->audit('student.account_updated_by_admin', $student, $old, $changed, null, $admin->id);
+        }
+
+        return $student;
+    }
+
     public function resetPasswordByAdmin(Student $student, string $newPassword, User $admin): void
     {
         $student->loadMissing('user');

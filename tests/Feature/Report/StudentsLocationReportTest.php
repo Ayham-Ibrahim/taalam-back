@@ -3,10 +3,12 @@
 namespace Tests\Feature\Report;
 
 use App\Models\Booking;
+use App\Models\ClassSession;
 use App\Models\Country;
 use App\Models\Curriculum;
 use App\Models\Package;
 use App\Models\Region;
+use App\Models\SessionAttendee;
 use App\Models\Student;
 use App\Models\Subject;
 use App\Models\Teacher;
@@ -128,6 +130,9 @@ class StudentsLocationReportTest extends TestCase
         $this->booking($physicsOnly, 'confirmed', 100, $physics);
         $physicsUnpaid = $this->student('SHJ', $this->british, grade: 9);
         $this->booking($physicsUnpaid, 'expired', 100, $physics); // لم يدفع — ليست مادته
+        $trial = $this->package->replicate()->fill(['subject_id' => null, 'is_trial' => true, 'sessions_count' => 1, 'teacher_price' => 0, 'platform_margin_percent' => 0, 'student_price' => 0, 'platform_revenue' => 0]);
+        $trial->save();
+        $this->booking($physicsOnly, 'confirmed', 0, $trial); // جلسة تعريفية بلا مادة — لا عمود لها
         $this->student('DXB', $this->american); // بلا صف
 
         $token = $this->adminToken();
@@ -141,6 +146,7 @@ class StudentsLocationReportTest extends TestCase
 
         $subjects = collect($response->json('data.bySubject'));
         $this->assertCount(2, $subjects);
+        $this->assertNotContains(null, $subjects->pluck('subject')->all());
         $physicsRow = $subjects->firstWhere('subject', 'فيزياء');
         $this->assertSame(2, $physicsRow['students']);
         $this->assertEquals(300, $physicsRow['revenue']);
@@ -153,6 +159,7 @@ class StudentsLocationReportTest extends TestCase
         $this->assertSame(2, $sharjahGrades['total']);
 
         $subjectMatrix = $response->json('data.subjectMatrix');
+        $this->assertCount(2, $subjectMatrix['columns']);
         $physicsCol = collect($subjectMatrix['columns'])->search(fn ($c) => $c['subject'] === 'فيزياء');
         $this->assertSame(1, collect($subjectMatrix['rows'])->firstWhere('region', 'الشارقة')['counts'][$physicsCol]);
         $this->assertSame(1, collect($subjectMatrix['rows'])->firstWhere('region', 'دبي')['counts'][$physicsCol]);
@@ -184,6 +191,53 @@ class StudentsLocationReportTest extends TestCase
         $this->assertSame(8, collect($list)->firstWhere('studentId', $physicsOnly->id)['grade']);
     }
 
+    public function test_running_counts_only_bookings_that_have_not_ended(): void
+    {
+        $finished = $this->student('DXB', $this->british); // confirmed مدفوع لكن انقضت كل جلساته
+        $finishedBooking = $this->booking($finished, 'confirmed', 160);
+        $this->addSession($finishedBooking, now()->subDays(3));
+        $this->addSession($finishedBooking, now()->addDay(), 'cancelled'); // الملغاة لا تُبقيه جارياً
+        $upcoming = $this->student('DXB', $this->british);
+        $booking = $this->booking($upcoming, 'confirmed', 160);
+        $this->addSession($booking, now()->subDays(3));
+        $this->addSession($booking, now()->addDay());
+        $awaiting = $this->student('SHJ', $this->british); // مؤكد بلا جلسات بعد — ينتظر الجدولة
+        $this->booking($awaiting, 'confirmed', 160);
+        $expired = $this->student('SHJ', $this->british); // تجاوز مدة صلاحيته
+        $this->booking($expired, 'confirmed', 160)->update(['expires_at' => now()->subDays(2)]);
+
+        $token = $this->adminToken();
+        $response = $this->as($token)->getJson('/api/reports/students-location')
+            ->assertJsonPath('data.totals.paying', 4)
+            ->assertJsonPath('data.totals.running', 2);
+        $this->assertSame(2, $response->json('data.bySubject.0.running'));
+
+        $list = collect($this->as($token)->getJson('/api/reports/students-location/students')->json('data'));
+        $this->assertFalse($list->firstWhere('studentId', $finished->id)['hasRunningPackage']);
+        $this->assertTrue($list->firstWhere('studentId', $upcoming->id)['hasRunningPackage']);
+    }
+
+    public function test_students_without_country_or_region_can_be_filtered(): void
+    {
+        $this->student('DXB', $this->british);
+        $countryOnly = Student::create(['user_id' => User::factory()->student()->create()->id, 'country_id' => Country::where('code', 'AE')->value('id')]);
+        $noLocation = Student::create(['user_id' => User::factory()->student()->create()->id]);
+        $token = $this->adminToken();
+
+        $this->as($token)->getJson('/api/reports/students-location/students?country_id=none')
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.studentId', $noLocation->id);
+
+        $query = http_build_query(['country_id' => $countryOnly->country_id, 'region_id' => 'none']);
+        $this->as($token)->getJson("/api/reports/students-location/students?{$query}")
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.studentId', $countryOnly->id);
+        $this->as($token)->getJson("/api/reports/students-location?{$query}")
+            ->assertJsonPath('data.totals.students', 1);
+
+        $this->as($token)->getJson('/api/reports/students-location?country_id=abc')->assertStatus(422);
+    }
+
     public function test_export_downloads_an_excel_file(): void
     {
         $this->student('DXB', $this->british);
@@ -212,11 +266,11 @@ class StudentsLocationReportTest extends TestCase
         ]);
     }
 
-    private function booking(Student $student, string $status, float $amount, ?Package $package = null): void
+    private function booking(Student $student, string $status, float $amount, ?Package $package = null): Booking
     {
         $package ??= $this->package;
 
-        Booking::create([
+        return Booking::create([
             'reference' => 'BK-'.strtoupper(uniqid()),
             'student_id' => $student->id,
             'teacher_id' => $package->teacher_id,
@@ -229,6 +283,25 @@ class StudentsLocationReportTest extends TestCase
             'sessions_total' => 4,
             'sessions_remaining' => 4,
             'status' => $status,
+        ]);
+    }
+
+    private function addSession(Booking $booking, $scheduledAt, string $status = 'scheduled'): void
+    {
+        $session = ClassSession::create([
+            'booking_id' => $booking->id,
+            'teacher_id' => $booking->teacher_id,
+            'sequence_no' => $booking->sessions()->count() + 1,
+            'scheduled_at' => $scheduledAt,
+            'duration_min' => 60,
+            'status' => $status,
+        ]);
+
+        SessionAttendee::create([
+            'class_session_id' => $session->id,
+            'student_id' => $booking->student_id,
+            'booking_id' => $booking->id,
+            'attendance' => 'registered',
         ]);
     }
 
