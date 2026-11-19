@@ -7,8 +7,8 @@ use App\Services\StudentsLocationReportService;
 use Maatwebsite\Excel\Concerns\WithMultipleSheets;
 
 /**
- * تقرير التسويق (الموقع × المنهج) بأربع أوراق ضمن نفس الفلاتر: حسب الموقع، حسب المنهج،
- * مصفوفة الموقع × المنهج، وقائمة الطلاب أنفسهم (للتواصل مع شريحة بعينها).
+ * تقرير التسويق (الموقع × المنهج) ضمن نفس الفلاتر: حسب الموقع، حسب المنهج، حسب الصف، حسب المادة،
+ * مصفوفات الموقع × المنهج/الصف/المادة، وقائمة الطلاب أنفسهم (للتواصل مع شريحة بعينها).
  */
 class StudentsLocationReportExport implements WithMultipleSheets
 {
@@ -28,7 +28,11 @@ class StudentsLocationReportExport implements WithMultipleSheets
         return [
             $this->locationSheet($report),
             $this->curriculumSheet($report),
-            $this->matrixSheet($report['matrix']),
+            $this->gradeSheet($report),
+            $this->subjectSheet($report),
+            $this->matrixSheet('الموقع × المنهج', $report['matrix'], fn (array $c) => $c['curriculum'] ?? 'بدون منهج'),
+            $this->matrixSheet('الموقع × الصف', $report['gradeMatrix'], fn (array $c) => $c['grade'] ? 'الصف '.$c['grade'] : 'بدون صف'),
+            $this->matrixSheet('الموقع × المادة', $report['subjectMatrix'], fn (array $c) => $c['subject'] ?? '—'),
             $this->studentsSheet($this->reportService->allStudents($this->filters)),
         ];
     }
@@ -50,9 +54,26 @@ class StudentsLocationReportExport implements WithMultipleSheets
         ], $report['byCurriculum']), ['الإجمالي', ...$this->metrics($report['totals'])]);
     }
 
-    private function matrixSheet(array $matrix): ReportSheet
+    private function gradeSheet(array $report): ReportSheet
     {
-        $columns = array_map(fn (array $c) => $c['curriculum'] ?? 'بدون منهج', $matrix['columns']);
+        return new ReportSheet('حسب الصف', ['الصف', ...self::METRIC_HEADINGS], array_map(fn (array $row) => [
+            $row['grade'] ? 'الصف '.$row['grade'] : 'بدون صف',
+            ...$this->metrics($row),
+        ], $report['byGrade']), ['الإجمالي', ...$this->metrics($report['totals'])]);
+    }
+
+    /** الطالب يُعد في كل مادة يدرسها — فلا صف إجمالي (مجموعه لا يساوي عدد الطلاب) */
+    private function subjectSheet(array $report): ReportSheet
+    {
+        return new ReportSheet('حسب المادة', ['المادة', ...self::METRIC_HEADINGS], array_map(fn (array $row) => [
+            $row['subject'] ?? '—',
+            ...$this->metrics($row),
+        ], $report['bySubject']));
+    }
+
+    private function matrixSheet(string $title, array $matrix, callable $columnLabel): ReportSheet
+    {
+        $columns = array_map($columnLabel, $matrix['columns']);
 
         $rows = array_map(fn (array $row) => [
             $row['country'] ?? 'غير محدد',
@@ -63,7 +84,7 @@ class StudentsLocationReportExport implements WithMultipleSheets
 
         $totals = array_map(fn (int $i) => array_sum(array_map(fn (array $row) => $row['counts'][$i], $matrix['rows'])), array_keys($matrix['columns']));
 
-        return new ReportSheet('الموقع × المنهج', ['الدولة', 'الولاية', ...$columns, 'الإجمالي'], $rows, [
+        return new ReportSheet($title, ['الدولة', 'الولاية', ...$columns, 'الإجمالي'], $rows, [
             'الإجمالي', '', ...$totals, array_sum(array_column($matrix['rows'], 'total')),
         ]);
     }
@@ -72,7 +93,7 @@ class StudentsLocationReportExport implements WithMultipleSheets
     {
         return new ReportSheet('الطلاب', [
             'الطالب', 'البريد', 'الهاتف', 'هاتف ولي الأمر', 'الدولة', 'الولاية', 'نوع التعليم',
-            'المنهج', 'المرحلة', 'الصف', 'تاريخ التسجيل', 'هل دفع؟', 'يدرس حالياً؟', 'إجمالي ما دفعه (AED)',
+            'المنهج', 'المرحلة', 'الصف', 'المواد', 'تاريخ التسجيل', 'هل دفع؟', 'يدرس حالياً؟', 'إجمالي ما دفعه (AED)',
         ], array_map(fn (array $s) => [
             $s['name'],
             $s['email'],
@@ -84,11 +105,12 @@ class StudentsLocationReportExport implements WithMultipleSheets
             $s['curriculum'] ?? '—',
             $s['stage'] ?? '—',
             $s['grade'] ?? '—',
+            $s['subjects'] ? implode('، ', $s['subjects']) : '—',
             $s['registeredAt'],
             $s['isPaying'] ? 'نعم' : 'لا',
             $s['hasRunningPackage'] ? 'نعم' : 'لا',
             $s['revenue'],
-        ], $students), ['الإجمالي', count($students), '', '', '', '', '', '', '', '', '', '', '', array_sum(array_column($students, 'revenue'))]);
+        ], $students), ['الإجمالي', count($students), '', '', '', '', '', '', '', '', '', '', '', '', array_sum(array_column($students, 'revenue'))]);
     }
 
     private function metrics(array $row): array

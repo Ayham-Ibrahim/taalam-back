@@ -10,7 +10,7 @@ use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Maatwebsite\Excel\Facades\Excel;
 
-/** تقرير التسويق: الطلاب حسب الموقع × المنهج — نفس صلاحية تقرير الطلاب (StudentPolicy::viewAny) */
+/** تقرير التسويق: الطلاب حسب الموقع × المنهج، والصف والمادة — نفس صلاحية تقرير الطلاب (StudentPolicy::viewAny) */
 class StudentsLocationReportController extends Controller
 {
     public function __construct(private readonly StudentsLocationReportService $reportService) {}
@@ -47,6 +47,8 @@ class StudentsLocationReportController extends Controller
             'region_id' => ['nullable', 'integer', 'exists:regions,id'],
             'curriculum_id' => ['nullable', 'integer', 'exists:curricula,id'],
             'education_type' => ['nullable', Rule::in(['school', 'university', 'training'])],
+            'grade' => ['nullable', 'integer', 'min:1', 'max:12'],
+            'subject_id' => ['nullable', 'integer', 'exists:subjects,id'],
             'from' => ['nullable', 'date'],
             'to' => ['nullable', 'date', 'after_or_equal:from'],
         ]);
