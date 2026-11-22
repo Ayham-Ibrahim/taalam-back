@@ -256,7 +256,7 @@ class AuthService
         if ($user->isTeacher()) {
             $user->load(['teacher:id,user_id,teacher_type,status']);
         } elseif ($user->isStudent()) {
-            $user->load(['student:id,user_id,education_type,stage_id,university_id']);
+            $user->load(['student:id,user_id,education_type,stage_id,university_id,country_id,region_id']);
         } elseif ($user->isAcademicSupport()) {
             $user->load(['academicSupporter:id,user_id,status']);
         }
