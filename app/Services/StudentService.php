@@ -25,7 +25,7 @@ class StudentService
      */
     public function createByAdmin(array $data, User $admin, ?int $notificationDelaySeconds = null): Student
     {
-        return DB::transaction(function () use ($data, $notificationDelaySeconds) {
+        return DB::transaction(function () use ($data, $admin, $notificationDelaySeconds) {
             $user = User::create([
                 'name' => $data['name'],
                 'email' => $data['email'],
@@ -40,6 +40,7 @@ class StudentService
                 'user_id' => $user->id,
                 'country_id' => $data['country_id'] ?? null,
                 'region_id' => $data['region_id'] ?? null,
+                'created_by' => $admin->id,
             ]);
 
             $this->notifications->send(

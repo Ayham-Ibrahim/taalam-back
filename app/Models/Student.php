@@ -29,6 +29,7 @@ class Student extends Model
         'guardian_phone',
         'imported',
         'imported_by',
+        'created_by',
     ];
 
     /**
@@ -58,6 +59,23 @@ class Student extends Model
     public function user()
     {
         return $this->belongsTo(User::class);
+    }
+
+    /** منشئ الحساب — null يعني أن الطالب سجّل بنفسه */
+    public function creator()
+    {
+        return $this->belongsTo(User::class, 'created_by');
+    }
+
+    /** self | admin | import | sibling — يحتاج creator محمَّلاً (بعمود role) */
+    public function registrationSource(): string
+    {
+        return match (true) {
+            $this->created_by === null => 'self',
+            (bool) $this->imported => 'import',
+            $this->creator?->role === 'student' => 'sibling',
+            default => 'admin',
+        };
     }
 
     public function curriculum()

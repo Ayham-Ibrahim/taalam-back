@@ -53,6 +53,28 @@ class StudentDirectoryTest extends TestCase
         $this->assertFalse($names->contains('طالب مدرسي'));
     }
 
+    public function test_student_list_shows_who_registered_each_student(): void
+    {
+        $admin = User::factory()->admin()->create(['name' => 'أدمن المنصة']);
+        $adminToken = $admin->createToken('t')->plainTextToken;
+
+        $this->as($adminToken)->postJson('/api/students/create-account', [
+            'name' => 'طالب الإدارة',
+            'email' => 'by-admin@example.com',
+            'password' => 'Password123!',
+        ])->assertStatus(201);
+
+        $selfUser = User::factory()->student()->create(['name' => 'طالب ذاتي']);
+        Student::create(['user_id' => $selfUser->id]);
+
+        $rows = collect($this->as($adminToken)->getJson('/api/students')->assertStatus(200)->json('data'))->keyBy('name');
+
+        $this->assertSame('admin', $rows['طالب الإدارة']['registration_source']);
+        $this->assertSame('أدمن المنصة', $rows['طالب الإدارة']['created_by']);
+        $this->assertSame('self', $rows['طالب ذاتي']['registration_source']);
+        $this->assertNull($rows['طالب ذاتي']['created_by']);
+    }
+
     public function test_non_admin_cannot_list_students(): void
     {
         $teacherUser = User::factory()->teacher()->create();
