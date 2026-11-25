@@ -26,6 +26,8 @@ class StudentsExport implements WithMultipleSheets
 
     private const GENDER_LABELS = ['male' => 'ذكر', 'female' => 'أنثى'];
 
+    private const REGISTRATION_SOURCE_LABELS = ['self' => 'تسجيل ذاتي', 'admin' => 'الإدارة', 'import' => 'استيراد', 'sibling' => 'أخ'];
+
     private const ACCOUNT_TYPE_LABELS = [User::ACCOUNT_REGULAR => 'عادي', User::ACCOUNT_CAMPAIGN => 'حملة', User::ACCOUNT_GUEST => 'زائر'];
 
     /** نفس تعريفات تقرير التسويق: المدفوع والجاري */
@@ -42,6 +44,7 @@ class StudentsExport implements WithMultipleSheets
         'university' => 'university:id,name_ar',
         'major' => 'major:id,name_ar',
         'course_field' => 'courseField:id,name_ar',
+        'registered_by' => 'creator:id,name,role',
     ];
 
     /** أعمدة تحتاج إحصاءات الحجوزات */
@@ -83,6 +86,8 @@ class StudentsExport implements WithMultipleSheets
             'account_type' => ['نوع الحساب', fn (Student $s) => $label(self::ACCOUNT_TYPE_LABELS, $s->user?->account_type)],
             'is_active' => ['الحساب نشط؟', fn (Student $s) => $yesNo($s->user?->is_active)],
             'imported' => ['مستورد؟', fn (Student $s) => $yesNo($s->imported)],
+            'registered_by' => ['سُجِّل بواسطة', fn (Student $s) => self::REGISTRATION_SOURCE_LABELS[$s->registrationSource()]
+                .($s->creator ? ' — '.$s->creator->name : '')],
             'bookings_count' => ['عدد الباقات', fn (Student $s) => (int) $s->paid_bookings_count],
             'is_paying' => ['هل دفع؟', fn (Student $s) => $yesNo($s->is_paying)],
             'has_running' => ['يدرس حالياً؟', fn (Student $s) => $yesNo($s->has_running)],

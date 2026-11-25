@@ -67,7 +67,7 @@ class StudentController extends Controller
         $this->authorize('viewAny', Student::class);
 
         $students = $this->filteredQuery($request)
-            ->with(['user:id,name,email,phone,avatar_path,is_active,created_at', 'locationCountry:id,name_ar', 'region:id,name_ar'])
+            ->with(['user:id,name,email,phone,avatar_path,is_active,created_at', 'locationCountry:id,name_ar', 'region:id,name_ar', 'creator:id,name,role'])
             ->paginate($request->integer('per_page', 20));
 
         return $this->paginate($students->through(fn (Student $student) => new StudentIndexResource($student)));

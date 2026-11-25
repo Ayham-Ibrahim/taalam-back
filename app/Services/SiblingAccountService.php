@@ -61,6 +61,7 @@ class SiblingAccountService
                 'guardian_name' => $data['guardian_name'] ?? null,
                 'guardian_phone' => $data['guardian_phone'] ?? null,
                 ...$location,
+                'created_by' => $primary->id,
             ]);
 
             $sibling->setRelation('student', $student);

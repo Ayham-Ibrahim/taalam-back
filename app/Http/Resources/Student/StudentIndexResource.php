@@ -28,6 +28,8 @@ class StudentIndexResource extends JsonResource
             'region' => $this->whenLoaded('region', fn () => $this->region?->name_ar),
             'region_id' => $this->region_id,
             'imported' => $this->imported,
+            'registration_source' => $this->registrationSource(),
+            'created_by' => $this->whenLoaded('creator', fn () => $this->creator?->name),
             'created_at' => $this->user->created_at,
         ];
     }
