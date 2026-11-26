@@ -26,7 +26,11 @@ class UpdateTeacherProfileRequest extends FormRequest
 
     public function rules(): array
     {
-        $isTrainingCenter = $this->route('teacher')?->isTrainingCenter();
+        // نوع المعلم الجديد إن كان الأدمن يبدّله ضمن نفس الطلب (قبل أن يُحفَظ) — وإلا
+        // النوع الحالي كما هو. يحسم أي الحقول (اسم المركز بالإنجليزية/السجل التجاري)
+        // إلزامية الآن، لا نوع المعلم القديم قبل التبديل.
+        $targetType = $this->input('teacher_type') ?? $this->route('teacher')?->teacher_type;
+        $isTrainingCenter = $targetType === 'training_center';
 
         return [
             'name' => ['nullable', 'string', 'max:150'],
@@ -64,6 +68,13 @@ class UpdateTeacherProfileRequest extends FormRequest
             'language_ids.*' => ['integer', 'exists:languages,id'],
             'major_ids' => ['nullable', 'array', 'max:20'],
             'major_ids.*' => ['integer', 'exists:majors,id'],
+
+            // تبديل نوع المعلم (مدرسي/جامعي/مركز تدريب) للأدمن حصراً — غير ظاهر إطلاقاً
+            // بخريطة $this->validated() لغير الأدمن، فلا يملك المعلم طريقاً لتبديل نوعه
+            // بنفسه عبر نفس هذا المسار المشترك.
+            ...($this->user()->isAdmin() ? [
+                'teacher_type' => ['sometimes', Rule::in(['school', 'university', 'training_center'])],
+            ] : []),
         ];
     }
 }

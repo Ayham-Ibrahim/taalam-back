@@ -210,7 +210,13 @@ class TeacherService
             $teacher->subjects()->sync($subjectIds);
         }
 
-        if ($curriculumIds !== null) {
+        // المناهج للمعلم المدرسي فقط — نفس منطق التخصصات الجامعية أدناه بالضبط: أي
+        // نوع آخر (جامعي/مركز تدريب) تُمسح مناهجه بدل أن تبقى عالقة فتُسرّب بفلتر
+        // "تعليم مدرسي" رغم تغيّر النوع (كانت هذه ثغرة فعلية قبل تبديل النوع أصلاً —
+        // المناهج كانت تُحفَظ بلا أي تحقق من النوع).
+        if ($teacher->teacher_type !== 'school') {
+            $teacher->curricula()->detach();
+        } elseif ($curriculumIds !== null) {
             $teacher->curricula()->sync($curriculumIds);
         }
 

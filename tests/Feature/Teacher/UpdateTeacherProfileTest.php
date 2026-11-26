@@ -59,6 +59,42 @@ class UpdateTeacherProfileTest extends TestCase
         $response->assertStatus(200)->assertJsonPath('data.display_name_en', 'Bright Future Academy');
     }
 
+    public function test_admin_can_change_teacher_type(): void
+    {
+        [$teacher] = $this->createTeacher();
+        $adminToken = User::factory()->admin()->create()->createToken('t')->plainTextToken;
+
+        $response = $this->as($adminToken)->putJson("/api/teachers/{$teacher->id}", ['teacher_type' => 'university']);
+
+        $response->assertStatus(200)->assertJsonPath('data.teacher_type', 'university');
+    }
+
+    /** المعلم لا يملك طريقاً لتبديل نوعه بنفسه عبر نفس المسار المشترك — يُتجاهَل بصمت لا 422 */
+    public function test_teacher_cannot_change_their_own_type(): void
+    {
+        [$teacher, $token] = $this->createTeacher();
+
+        $response = $this->as($token)->putJson("/api/teachers/{$teacher->id}", ['teacher_type' => 'university']);
+
+        $response->assertStatus(200);
+        $this->assertSame('school', $teacher->fresh()->teacher_type);
+    }
+
+    /** تبديل النوع بعيداً عن المدرسي يمسح مناهجه القديمة بدل أن تبقى عالقة وتُسرَّب بفلتر مدرسي رغم تغيّر النوع */
+    public function test_changing_type_away_from_school_clears_curricula(): void
+    {
+        [$teacher] = $this->createTeacher();
+        $curriculum = \App\Models\Curriculum::create(['code' => 'NAT', 'name_ar' => 'المنهج الوطني']);
+        $teacher->curricula()->sync([$curriculum->id]);
+        $adminToken = User::factory()->admin()->create()->createToken('t')->plainTextToken;
+
+        // university لا حقول إلزامية إضافية لها خلافاً لـ training_center — يبقي الاختبار مركّزاً على المناهج فقط
+        $this->as($adminToken)->putJson("/api/teachers/{$teacher->id}", ['teacher_type' => 'university'])
+            ->assertStatus(200);
+
+        $this->assertCount(0, $teacher->fresh()->curricula);
+    }
+
     /**
      * @return array{0: Teacher, 1: string}
      */
