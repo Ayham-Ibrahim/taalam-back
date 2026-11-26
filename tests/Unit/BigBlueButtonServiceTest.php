@@ -131,4 +131,51 @@ class BigBlueButtonServiceTest extends TestCase
 
         $this->assertSame([], $urls);
     }
+
+    public function test_meeting_exists_treats_an_ended_meeting_still_held_by_bbb_as_missing(): void
+    {
+        Http::fake(['*getMeetingInfo*' => Http::response(
+            '<response><returncode>SUCCESS</returncode><running>false</running><hasBeenForciblyEnded>false</hasBeenForciblyEnded><endTime>1700000000000</endTime></response>',
+            200,
+        )]);
+
+        $this->assertFalse(app(BigBlueButtonService::class)->meetingExists('meeting-a'));
+    }
+
+    public function test_meeting_exists_accepts_a_created_meeting_nobody_has_joined_yet(): void
+    {
+        Http::fake(['*getMeetingInfo*' => Http::response(
+            '<response><returncode>SUCCESS</returncode><running>false</running><hasBeenForciblyEnded>false</hasBeenForciblyEnded><endTime>0</endTime></response>',
+            200,
+        )]);
+
+        $this->assertTrue(app(BigBlueButtonService::class)->meetingExists('meeting-a'));
+    }
+
+    public function test_create_meeting_sends_expiry_params_and_confirms_the_room_is_ready(): void
+    {
+        Http::fake([
+            '*getMeetingInfo*' => Http::response('<response><returncode>SUCCESS</returncode><endTime>0</endTime></response>', 200),
+            '*create*' => Http::response('<response><returncode>SUCCESS</returncode></response>', 200),
+        ]);
+
+        $this->assertTrue(app(BigBlueButtonService::class)->createMeeting('meeting-a', 'Session', 'ap', 'mp', 60, 60));
+
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/create?')
+            && str_contains($request->url(), 'meetingExpireIfNoUserJoinedInMinutes=60')
+            && str_contains($request->url(), 'meetingExpireWhenLastUserLeftInMinutes=10'));
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/getMeetingInfo?'));
+    }
+
+    public function test_create_meeting_omits_the_no_user_expiry_when_not_requested(): void
+    {
+        Http::fake([
+            '*getMeetingInfo*' => Http::response('<response><returncode>SUCCESS</returncode><endTime>0</endTime></response>', 200),
+            '*create*' => Http::response('<response><returncode>SUCCESS</returncode></response>', 200),
+        ]);
+
+        app(BigBlueButtonService::class)->createMeeting('meeting-a', 'Session', 'ap', 'mp', 60);
+
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), 'meetingExpireIfNoUserJoinedInMinutes'));
+    }
 }

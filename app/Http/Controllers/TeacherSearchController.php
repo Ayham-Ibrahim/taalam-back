@@ -98,6 +98,9 @@ class TeacherSearchController extends Controller
                 'languages:id,name_ar,code',
             ])
             ->orderByDesc('ranking_score')
+            // كاسر تعادل ثابت — بدونه يعيد MySQL المتعادلين بترتيب غير محدد
+            // فيتكرر نفس المعلم بين الصفحات ويختفي غيره
+            ->orderByDesc('id')
             ->paginate($request->integer('per_page', 20));
 
         // مقاعد بطاقة نتائج البحث الخفيفة تحتاج بيانات إضافية مجمَّعة لكل

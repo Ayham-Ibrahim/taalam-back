@@ -299,6 +299,16 @@ class ClassSessionController extends Controller
 
         $result = $this->sessionService->resolveJoinUrl($session, $user);
 
+        // ضغط مبكر (رابط بريد التذكير يصل قبل الموعد بساعتين، أو ساعة جهاز متقدمة قليلاً):
+        // صفحة انتظار بعدّاد تُعيد المحاولة وتُدخله تلقائياً بدل رسالة خطأ.
+        if (! $result['joinable'] && ($result['reason'] ?? null) === 'not_started') {
+            return response()->view('session-join-waiting', [
+                'secondsUntilJoinable' => $result['seconds_until_joinable'],
+                'earlyJoinMinutes' => SessionService::EARLY_JOIN_MINUTES,
+                'platformUrl' => frontend_url('/login'),
+            ]);
+        }
+
         if (! $result['joinable']) {
             return response()->view('session-join-unavailable', [
                 'message' => $result['message'],

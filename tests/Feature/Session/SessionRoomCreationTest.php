@@ -11,6 +11,7 @@ use App\Models\Student;
 use App\Models\Subject;
 use App\Models\Teacher;
 use App\Models\User;
+use App\Services\BigBlueButtonService;
 use App\Services\BookingService;
 use App\Services\SessionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -120,6 +121,90 @@ class SessionRoomCreationTest extends TestCase
         $this->assertNotNull($paid->fresh()->join_url_student);
         $this->assertNull($unpaid->fresh()->bbb_meeting_id);
         $this->assertNull($ended->fresh()->bbb_meeting_id);
+    }
+
+    public function test_prewarm_creates_missing_rooms_only_for_paid_sessions_starting_soon_or_in_progress(): void
+    {
+        $teacher = $this->createTeacher();
+        $package = $this->createPackage($teacher, 'individual');
+
+        $soon = $this->withRoom($this->sessionFor($teacher, $package, 'confirmed', now()->addMinutes(8)));
+        $inProgress = $this->withRoom($this->sessionFor($teacher, $package, 'confirmed', now()->subMinutes(20)));
+        $alreadyUp = $this->withRoom($this->sessionFor($teacher, $package, 'confirmed', now()->addMinutes(3)));
+        $this->withRoom($this->sessionFor($teacher, $package, 'confirmed', now()->addHour()));
+        $this->withRoom($this->sessionFor($teacher, $package, 'confirmed', now()->subHours(2)));
+        $this->withRoom($this->sessionFor($teacher, $package, 'pending_payment', now()->addMinutes(5)));
+
+        $bbb = $this->mock(BigBlueButtonService::class);
+        $bbb->shouldReceive('meetingExists')->andReturnUsing(fn (string $id) => $id === $alreadyUp->bbb_meeting_id);
+        $bbb->shouldReceive('createMeeting')
+            ->twice()
+            ->withArgs(function (string $id, string $name, string $attendeePw, string $moderatorPw, int $duration, int $expireIfNoUserJoined) use ($soon, $inProgress) {
+                // الغرفة تبقى حتى نهاية الجلسة وإن لم يدخلها أحد بعد.
+                return in_array($id, [$soon->bbb_meeting_id, $inProgress->bbb_meeting_id], true)
+                    && $expireIfNoUserJoined === $duration && $expireIfNoUserJoined > 0;
+            })
+            ->andReturn(true);
+
+        $this->assertSame(2, app(SessionService::class)->prewarmUpcomingRooms());
+    }
+
+    /**
+     * BBB معلّق: فشل create لجلستين متتاليتين يوقف الدورة بدل انتظار مهلة كل جلسة
+     * (worker وحيد بـ --timeout=90 والتذكيرات خلفه في الطابور).
+     */
+    public function test_prewarm_stops_early_after_two_consecutive_create_failures(): void
+    {
+        $teacher = $this->createTeacher();
+        $package = $this->createPackage($teacher, 'individual');
+
+        foreach ([2, 3, 4, 5] as $minutes) {
+            $this->withRoom($this->sessionFor($teacher, $package, 'confirmed', now()->addMinutes($minutes)));
+        }
+
+        $bbb = $this->mock(BigBlueButtonService::class);
+        $bbb->shouldReceive('meetingExists')->andReturn(false);
+        $bbb->shouldReceive('createMeeting')->twice()->andReturn(false);
+
+        $this->assertSame(0, app(SessionService::class)->prewarmUpcomingRooms());
+    }
+
+    public function test_prewarm_resets_the_failure_count_after_a_success(): void
+    {
+        $teacher = $this->createTeacher();
+        $package = $this->createPackage($teacher, 'individual');
+
+        foreach ([2, 3, 4, 5] as $minutes) {
+            $this->withRoom($this->sessionFor($teacher, $package, 'confirmed', now()->addMinutes($minutes)));
+        }
+
+        $bbb = $this->mock(BigBlueButtonService::class);
+        $bbb->shouldReceive('meetingExists')->andReturn(false);
+        $bbb->shouldReceive('createMeeting')->times(4)->andReturn(false, true, false, true);
+
+        $this->assertSame(2, app(SessionService::class)->prewarmUpcomingRooms());
+    }
+
+    public function test_prewarm_job_is_unique_and_never_retried(): void
+    {
+        $job = new \App\Jobs\PrewarmBbbRoomsJob;
+
+        $this->assertInstanceOf(\Illuminate\Contracts\Queue\ShouldBeUnique::class, $job);
+        $this->assertSame(1, $job->tries);
+        $this->assertSame(300, $job->uniqueFor);
+    }
+
+    private function withRoom(ClassSession $session): ClassSession
+    {
+        $session->update([
+            'bbb_meeting_id' => 'meeting-'.$session->id,
+            'bbb_attendee_pw' => 'ap',
+            'bbb_moderator_pw' => 'mp',
+            'join_url_student' => 'https://bbb.example.com/join?s',
+            'join_url_teacher' => 'https://bbb.example.com/join?t',
+        ]);
+
+        return $session;
     }
 
     private function sessionFor(Teacher $teacher, Package $package, string $bookingStatus, Carbon $scheduledAt): ClassSession

@@ -253,6 +253,35 @@ class SessionJoinTest extends TestCase
         $this->assertNull(collect($index->json('data'))->firstWhere('id', $session->id)['join_url_student']);
     }
 
+    /**
+     * رابط بريد التذكير يصل قبل الموعد بساعتين — الضغط عليه مبكراً يعرض صفحة انتظار
+     * بعدّاد محسوب بساعة السيرفر (تُعيد المحاولة تلقائياً) بدل رسالة "لم تبدأ".
+     */
+    public function test_the_signed_reminder_link_shows_a_countdown_page_when_clicked_before_the_join_window(): void
+    {
+        Carbon::setTestNow(now()->startOfSecond());
+        [$teacher] = $this->createVerifiedTeacher();
+        [, $session, $studentUser] = $this->createBookingWithSession($teacher, now()->addMinutes(30));
+
+        $url = \Illuminate\Support\Facades\URL::temporarySignedRoute(
+            'class-sessions.join-redirect',
+            now()->addHours(2),
+            ['session' => $session->id, 'user' => $studentUser->id],
+        );
+
+        $response = $this->get($url)
+            ->assertOk()
+            ->assertViewIs('session-join-waiting')
+            ->assertViewHas('secondsUntilJoinable', 25 * 60);
+
+        // CSP الـ API تمنع أي سكربت/نمط مضمّن — العدّاد يعمل فقط لأنهما مُعلَّمان بنفس nonce الترويسة
+        preg_match("/script-src 'nonce-([^']+)'/", (string) $response->headers->get('Content-Security-Policy'), $nonce);
+        $this->assertNotEmpty($nonce);
+        $response->assertSee('<script nonce="'.$nonce[1].'">', false);
+
+        $this->assertDatabaseMissing('session_join_logs', ['class_session_id' => $session->id]);
+    }
+
     public function test_the_signed_reminder_link_shows_a_clean_page_for_an_unpaid_booking(): void
     {
         [$teacher] = $this->createVerifiedTeacher();

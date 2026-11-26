@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use Closure;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\View;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -15,6 +16,11 @@ class SecurityHeaders
 {
     public function handle(Request $request, Closure $next): Response
     {
+        // صفحات HTML القليلة تحت api/* (صفحات joinRedirect) تُعلّم <style>/<script> المضمّنة بهذا
+        // الـ nonce — فتعمل وحدها تحت CSP دون فتح 'unsafe-inline'
+        $cspNonce = base64_encode(random_bytes(16));
+        View::share('cspNonce', $cspNonce);
+
         $response = $next($request);
 
         $response->headers->set('X-Content-Type-Options', 'nosniff');
@@ -23,9 +29,14 @@ class SecurityHeaders
         $response->headers->set('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
         $response->headers->set('Cross-Origin-Opener-Policy', 'same-origin');
 
-        // استجابات JSON بحتة — لا تحمّل أي مورد فرعي، فـ CSP صارمة بلا أثر جانبي
+        // استجابات JSON بحتة — لا تحمّل أي مورد فرعي، فـ CSP صارمة بلا أثر جانبي. صفحة HTML
+        // (joinRedirect: انتظار/تعذّر) تحتاج فقط أنماطها وسكربتها المضمّنة المُعلَّمة بالـ nonce.
         if ($request->is('api/*')) {
-            $response->headers->set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
+            $isHtml = str_contains((string) $response->headers->get('Content-Type'), 'text/html');
+
+            $response->headers->set('Content-Security-Policy', $isHtml
+                ? "default-src 'none'; style-src 'nonce-{$cspNonce}'; script-src 'nonce-{$cspNonce}'; frame-ancestors 'none'"
+                : "default-src 'none'; frame-ancestors 'none'");
         }
 
         // HSTS فقط فوق HTTPS فعلياً — إضافتها على HTTP محلي بلا فائدة وقد تُربك التطوير

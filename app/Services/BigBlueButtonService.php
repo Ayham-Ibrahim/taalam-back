@@ -16,10 +16,24 @@ use Throwable;
 class BigBlueButtonService
 {
     /**
+     * مهلة حذف الغرفة بعد خروج آخر مشارك — افتراضي BBB دقيقة واحدة فقط، فكان انقطاع
+     * إنترنت قصير للطرفين معاً يُنهي الغرفة ويُظهر "الاجتماع انتهى" عند العودة.
+     */
+    private const EXPIRE_WHEN_LAST_USER_LEFT_MINUTES = 10;
+
+    /** محاولات التأكد من جاهزية الغرفة بعد create قبل إرجاع النجاح (انظر waitUntilReady). */
+    private const READY_CHECK_ATTEMPTS = 3;
+
+    private const READY_CHECK_DELAY_MS = 700;
+
+    /**
      * $durationMinutes: يُنهي BBB الاجتماع تلقائياً بعد هذه المدة من لحظة create
      * (0 = بلا حد).
+     * $expireIfNoUserJoinedMinutes: يحذف BBB أي غرفة لم يدخلها أحد خلال 5 دقائق من
+     * create افتراضياً — فغرفة مُجهَّزة قبل الموعد كانت تُحذف قبل أن يصل أحد، فتُنشأ
+     * من جديد لحظة أول ضغطة "انضمام" ويُحوَّل صاحبها قبل جاهزيتها. 0 = افتراضي BBB.
      */
-    public function createMeeting(string $meetingId, string $meetingName, string $attendeePw, string $moderatorPw, int $durationMinutes = 0): bool
+    public function createMeeting(string $meetingId, string $meetingName, string $attendeePw, string $moderatorPw, int $durationMinutes = 0, int $expireIfNoUserJoinedMinutes = 0): bool
     {
         if ($this->fakeRooms()) {
             return true;
@@ -30,14 +44,21 @@ class BigBlueButtonService
         }
 
         try {
-            $response = Http::timeout(10)->get($this->signedUrl('create', [
+            $params = [
                 'name' => $meetingName,
                 'meetingID' => $meetingId,
                 'attendeePW' => $attendeePw,
                 'moderatorPW' => $moderatorPw,
                 'record' => 'true',
                 'duration' => (string) max(0, $durationMinutes),
-            ]));
+                'meetingExpireWhenLastUserLeftInMinutes' => (string) self::EXPIRE_WHEN_LAST_USER_LEFT_MINUTES,
+            ];
+
+            if ($expireIfNoUserJoinedMinutes > 0) {
+                $params['meetingExpireIfNoUserJoinedInMinutes'] = (string) $expireIfNoUserJoinedMinutes;
+            }
+
+            $response = Http::timeout(10)->get($this->signedUrl('create', $params));
 
             $xml = $response->ok() ? @simplexml_load_string($response->body()) : null;
             $success = $xml !== false && $xml !== null && (string) $xml->returncode === 'SUCCESS';
@@ -48,9 +69,11 @@ class BigBlueButtonService
                     'status' => $response->status(),
                     'body' => $response->body(),
                 ]);
+
+                return false;
             }
 
-            return $success;
+            return $this->waitUntilReady($meetingId);
         } catch (Throwable $e) {
             Log::warning('bbb.create_meeting_exception', ['meetingId' => $meetingId, 'message' => $e->getMessage()]);
 
@@ -108,6 +131,10 @@ class BigBlueButtonService
      * مشروطاً بوجود شخص منضمّ مسبقاً). getMeetingInfo تُرجع returncode=FAILED
      * فقط حين يكون الاجتماع غير موجود فعلياً على الخادم (SUCCESS بصرف النظر
      * عن عدد المشاركين الحاليين، صفراً أو أكثر).
+     *
+     * اجتماع انتهى (خرج الجميع، أو انتهت مدته، أو أُنهي) يبقى في ذاكرة BBB قليلاً
+     * فيُرجع getMeetingInfo نجاحاً له، لكن join يرفضه بـ XML خام (meetingForciblyEnded)
+     * — فيُعامَل هنا كغير موجود كي يُعاد إنشاؤه بدل إعطاء رابط ميت.
      */
     public function meetingExists(string $meetingId): bool
     {
@@ -120,18 +147,47 @@ class BigBlueButtonService
         }
 
         try {
-            $response = Http::timeout(10)->get($this->signedUrl('getMeetingInfo', [
+            $response = Http::timeout(5)->get($this->signedUrl('getMeetingInfo', [
                 'meetingID' => $meetingId,
             ]));
 
             $xml = $response->ok() ? @simplexml_load_string($response->body()) : null;
 
-            return $xml !== false && $xml !== null && (string) $xml->returncode === 'SUCCESS';
+            if ($xml === false || $xml === null || (string) $xml->returncode !== 'SUCCESS') {
+                return false;
+            }
+
+            $ended = (string) $xml->hasBeenForciblyEnded === 'true'
+                || ((string) $xml->endTime !== '' && (string) $xml->endTime !== '0');
+
+            return ! $ended;
         } catch (Throwable $e) {
             Log::warning('bbb.get_meeting_info_exception', ['meetingId' => $meetingId, 'message' => $e->getMessage()]);
 
             return false;
         }
+    }
+
+    /**
+     * create يُرجع SUCCESS قبل أن تصبح الغرفة قابلة للانضمام فعلاً أحياناً (خصوصاً
+     * تحت الضغط)، فكان من يُحوَّل فوراً بعد إنشائها يرى XML خام (notFound). نتأكد
+     * من ظهورها في getMeetingInfo قبل اعتبار الإنشاء ناجحاً.
+     */
+    private function waitUntilReady(string $meetingId): bool
+    {
+        for ($attempt = 1; $attempt <= self::READY_CHECK_ATTEMPTS; $attempt++) {
+            if ($this->meetingExists($meetingId)) {
+                return true;
+            }
+
+            if ($attempt < self::READY_CHECK_ATTEMPTS) {
+                usleep(self::READY_CHECK_DELAY_MS * 1000);
+            }
+        }
+
+        Log::warning('bbb.meeting_not_ready_after_create', ['meetingId' => $meetingId]);
+
+        return false;
     }
 
     /**

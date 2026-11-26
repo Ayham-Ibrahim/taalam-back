@@ -5,6 +5,7 @@ use App\Jobs\CreateMissingBbbRoomsJob;
 use App\Jobs\EscalateRescheduleRequestsJob;
 use App\Jobs\ExpireStaleBookingsJob;
 use App\Jobs\FetchSessionRecordingsJob;
+use App\Jobs\PrewarmBbbRoomsJob;
 use App\Jobs\SendSessionQualityRatingRequestsJob;
 use App\Jobs\SendSubscriptionEndedEmailsJob;
 use App\Jobs\SendSubscriptionEndingSoonNotificationsJob;
@@ -81,6 +82,9 @@ Schedule::job(new SendSubscriptionEndingSoonNotificationsJob)->everyFiveMinutes(
 
 // شبكة أمان: إنشاء غرفة BBB لأي جلسة مدفوعة قادمة بقيت بلا رابط انضمام لأي سبب.
 Schedule::job(new CreateMissingBbbRoomsJob)->everyFiveMinutes();
+
+// تجهيز غرف BBB للجلسات القريبة/الجارية كي تكون جاهزة لحظة الضغط على "انضمام".
+Schedule::job(new PrewarmBbbRoomsJob)->everyMinute();
 
 // جلب روابط تسجيلات الجلسات المنتهية من BBB فور توفّرها (تستغرق معالجتها وقتاً على BBB نفسه).
 Schedule::job(new FetchSessionRecordingsJob)->everyFifteenMinutes();
