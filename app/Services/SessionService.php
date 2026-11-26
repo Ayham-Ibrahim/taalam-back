@@ -32,6 +32,12 @@ class SessionService
 
     private const PREWARM_MAX_CONSECUTIVE_FAILURES = 2;
 
+    /**
+     * لا تبدأ دورة التجهيز جلسة جديدة بعد هذه المدة: أسوأ جلسة واحدة ~31 ثانية (فحص 5 +
+     * create 10 + جاهزية ~16) + فحص isReachable 5 ← تنتهي الدورة قبل --timeout=90 للـ worker.
+     */
+    private const PREWARM_TIME_BUDGET_SECONDS = 45;
+
     public function __construct(
         private readonly SettingsService $settings,
         private readonly BigBlueButtonService $bbb,
@@ -457,9 +463,21 @@ class SessionService
      * أو الجارية الآن على BBB، فتكون جاهزة لحظة الضغط على "انضمام" — بدل أن يُنشئها
      * أول من يضغط ثم يُحوَّل قبل جاهزيتها. غرفة موجودة تُترك كما هي (فحص واحد فقط).
      *
-     * فشل create لـ PREWARM_MAX_CONSECUTIVE_FAILURES جلسات متتالية يعني غالباً أن BBB
-     * معطّل/معلّق — نتوقف عن بقية الجلسات في هذه الدورة بدل انتظار مهلة كل طلب (فيبقى
-     * التشغيل دون --timeout الـ worker)؛ الدورة التالية بعد دقيقة، وزر الانضمام احتياط.
+     * جلسة انضمّ إليها أحد (session_join_logs) لا تُجهَّز: غرفتها إن اختفت فإما أنهاها
+     * المعلم عمداً ("إنهاء الاجتماع للجميع" — status تبقى scheduled حتى نهاية الموعد)
+     * فلا يصح فتحها تلقائياً للطلاب، أو خرج الجميع فحذفها BBB — وحينها يعيد resolveJoinUrl
+     * إنشاءها عند أول ضغطة "انضمام" كما قبل. الحالة تُقرأ من القاعدة لا من BBB، لأن BBB
+     * ينسى الاجتماع المنتهي بعد قليل فيبدو كأنه لم يُنشأ أصلاً.
+     *
+     * فشل create لـ PREWARM_MAX_CONSECUTIVE_FAILURES جلسات متتالية: نسأل BBB مرة واحدة
+     * إن كان يستجيب أصلاً. معطّل/معلّق ← نتوقف عن بقية الجلسات في هذه الدورة بدل انتظار
+     * مهلة كل طلب (فيبقى التشغيل دون --timeout الـ worker)؛ الدورة التالية بعد دقيقة، وزر
+     * الانضمام احتياط. يستجيب ← الفشل يخص تلك الجلسات بعينها، فنكمل — وإلا فأقدم جلستين
+     * عالقتين (مرتبتين أولاً في كل دورة) تمنعان تجهيز كل ما بعدهما حتى ينتهي موعدهما.
+     *
+     * BBB بطيء لكنه يستجيب لا يوقفه شيء مما سبق، فلا تبدأ الدورة جلسة جديدة بعد
+     * PREWARM_TIME_BUDGET_SECONDS — يُقتل الـ worker بعد 90 ثانية فيبقى قفل ShouldBeUnique
+     * دقائق بلا تجهيز، وتتأخر التذكيرات خلفه. الباقي للدورة التالية بعد دقيقة.
      */
     public function prewarmUpcomingRooms(): int
     {
@@ -471,13 +489,26 @@ class SessionService
             ->where('scheduled_at', '<=', now()->addMinutes(self::PREWARM_MINUTES))
             ->whereRaw('DATE_ADD(scheduled_at, INTERVAL duration_min MINUTE) > ?', [now()])
             ->whereHas('attendees', fn ($a) => ClassSession::constrainToPaidAttendee($a))
+            // انضمام ضمن نافذة الموعد الحالي فقط (كـ attendanceOutcome) — جلسة نُقل موعدها
+            // بعد انضمام مبكر (تغيير الموعد مسموح حتى scheduled_at) تبقى سجلاتها القديمة.
+            ->whereDoesntHave('joinLogs', fn ($q) => $q->whereRaw(
+                'session_join_logs.last_joined_at >= DATE_SUB(class_sessions.scheduled_at, INTERVAL ? MINUTE)',
+                [self::EARLY_JOIN_MINUTES],
+            ))
             ->orderBy('scheduled_at')
             ->get();
 
         $created = 0;
         $consecutiveFailures = 0;
+        $deadline = now()->addSeconds(self::PREWARM_TIME_BUDGET_SECONDS);
 
         foreach ($sessions as $session) {
+            if (now()->gte($deadline)) {
+                Log::warning('bbb.prewarm_time_budget_exceeded', ['session_id' => $session->id, 'created' => $created]);
+
+                break;
+            }
+
             if ($this->bbb->meetingExists($session->bbb_meeting_id)) {
                 continue;
             }
@@ -496,11 +527,17 @@ class SessionService
                 continue;
             }
 
-            if (++$consecutiveFailures >= self::PREWARM_MAX_CONSECUTIVE_FAILURES) {
+            if (++$consecutiveFailures < self::PREWARM_MAX_CONSECUTIVE_FAILURES) {
+                continue;
+            }
+
+            if (! $this->bbb->isReachable()) {
                 Log::warning('bbb.prewarm_stopped_early', ['session_id' => $session->id, 'created' => $created]);
 
                 break;
             }
+
+            $consecutiveFailures = 0;
         }
 
         return $created;

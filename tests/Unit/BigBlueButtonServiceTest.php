@@ -178,4 +178,21 @@ class BigBlueButtonServiceTest extends TestCase
 
         Http::assertNotSent(fn ($request) => str_contains($request->url(), 'meetingExpireIfNoUserJoinedInMinutes'));
     }
+
+    public function test_is_reachable_checks_the_api_root_without_a_checksum(): void
+    {
+        Http::fake(['https://bbb.example.com/bigbluebutton/api' => Http::response('<response><returncode>SUCCESS</returncode><version>2.0</version></response>', 200)]);
+
+        $this->assertTrue(app(BigBlueButtonService::class)->isReachable());
+        Http::assertSent(fn ($request) => $request->url() === 'https://bbb.example.com/bigbluebutton/api');
+    }
+
+    public function test_is_reachable_is_false_when_bbb_errors_or_times_out(): void
+    {
+        Http::fake(['*' => Http::response('Bad Gateway', 502)]);
+        $this->assertFalse(app(BigBlueButtonService::class)->isReachable());
+
+        Http::fake(fn () => throw new \Illuminate\Http\Client\ConnectionException('timed out'));
+        $this->assertFalse(app(BigBlueButtonService::class)->isReachable());
+    }
 }
