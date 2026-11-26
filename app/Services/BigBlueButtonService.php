@@ -251,6 +251,32 @@ class BigBlueButtonService
     }
 
     /**
+     * هل خادم BBB يستجيب أصلاً؟ جذر الـ API يُرجع returncode=SUCCESS ورقم الإصدار بلا
+     * checksum — فيفرّق بين BBB معطّل/معلّق وبين فشل create لجلسة بعينها.
+     */
+    public function isReachable(): bool
+    {
+        if ($this->fakeRooms()) {
+            return true;
+        }
+
+        if (! $this->isConfigured()) {
+            return false;
+        }
+
+        try {
+            $response = Http::timeout(5)->get(rtrim((string) config('services.bbb.url'), '/'));
+            $xml = $response->ok() ? @simplexml_load_string($response->body()) : null;
+
+            return $xml !== false && $xml !== null && (string) $xml->returncode === 'SUCCESS';
+        } catch (Throwable $e) {
+            Log::warning('bbb.reachability_check_exception', ['message' => $e->getMessage()]);
+
+            return false;
+        }
+    }
+
+    /**
      * وضع الغرف الوهمية (BBB_FAKE_ROOMS) — للتطوير المحلي فقط: يُعتبر كل اجتماع
      * مُنشأً وموجوداً بلا أي اتصال بخادم BBB، فينجح الانضمام ويُسجَّل الحضور.
      * محصور بـ APP_ENV=local حتى لا يُفعَّل خطأً على الإنتاج.

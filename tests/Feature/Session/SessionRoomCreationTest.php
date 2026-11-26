@@ -150,6 +150,55 @@ class SessionRoomCreationTest extends TestCase
     }
 
     /**
+     * انضمّ إليها أحد ثم اختفت غرفتها (أنهاها المعلم، أو خرج الجميع) — لا يعيد التجهيز
+     * فتحها تلقائياً؛ أول ضغطة "انضمام" تعيد إنشاءها عبر resolveJoinUrl.
+     */
+    public function test_prewarm_skips_sessions_someone_already_joined(): void
+    {
+        $teacher = $this->createTeacher();
+        $package = $this->createPackage($teacher, 'individual');
+
+        $joined = $this->withRoom($this->sessionFor($teacher, $package, 'confirmed', now()->subMinutes(20)));
+        $joined->joinLogs()->create([
+            'user_id' => $teacher->user_id,
+            'role' => 'teacher',
+            'first_joined_at' => now()->subMinutes(20),
+            'last_joined_at' => now()->subMinutes(20),
+        ]);
+        $fresh = $this->withRoom($this->sessionFor($teacher, $package, 'confirmed', now()->addMinutes(5)));
+
+        $bbb = $this->mock(BigBlueButtonService::class);
+        $bbb->shouldReceive('meetingExists')->andReturn(false);
+        $bbb->shouldReceive('createMeeting')
+            ->once()
+            ->withArgs(fn (string $id) => $id === $fresh->bbb_meeting_id)
+            ->andReturn(true);
+
+        $this->assertSame(1, app(SessionService::class)->prewarmUpcomingRooms());
+    }
+
+    /** انضمام مبكر ثم نُقل الموعد: السجل القديم لا يمنع تجهيز الغرفة في الموعد الجديد. */
+    public function test_prewarm_ignores_joins_from_before_a_reschedule(): void
+    {
+        $teacher = $this->createTeacher();
+        $package = $this->createPackage($teacher, 'individual');
+
+        $rescheduled = $this->withRoom($this->sessionFor($teacher, $package, 'confirmed', now()->addMinutes(5)));
+        $rescheduled->joinLogs()->create([
+            'user_id' => $teacher->user_id,
+            'role' => 'teacher',
+            'first_joined_at' => now()->subDay(),
+            'last_joined_at' => now()->subDay(),
+        ]);
+
+        $bbb = $this->mock(BigBlueButtonService::class);
+        $bbb->shouldReceive('meetingExists')->andReturn(false);
+        $bbb->shouldReceive('createMeeting')->once()->andReturn(true);
+
+        $this->assertSame(1, app(SessionService::class)->prewarmUpcomingRooms());
+    }
+
+    /**
      * BBB معلّق: فشل create لجلستين متتاليتين يوقف الدورة بدل انتظار مهلة كل جلسة
      * (worker وحيد بـ --timeout=90 والتذكيرات خلفه في الطابور).
      */
@@ -165,8 +214,53 @@ class SessionRoomCreationTest extends TestCase
         $bbb = $this->mock(BigBlueButtonService::class);
         $bbb->shouldReceive('meetingExists')->andReturn(false);
         $bbb->shouldReceive('createMeeting')->twice()->andReturn(false);
+        $bbb->shouldReceive('isReachable')->once()->andReturn(false);
 
         $this->assertSame(0, app(SessionService::class)->prewarmUpcomingRooms());
+    }
+
+    /**
+     * BBB يستجيب لكن create فشل لأقدم جلستين لسبب يخصهما — لا تمنعان تجهيز ما بعدهما
+     * (مرتبتان أولاً في كل دورة، فكان التوقف يتكرر كل دقيقة حتى ينتهي موعدهما).
+     */
+    public function test_prewarm_continues_past_session_specific_failures_while_bbb_is_reachable(): void
+    {
+        $teacher = $this->createTeacher();
+        $package = $this->createPackage($teacher, 'individual');
+
+        foreach ([2, 3, 4, 5] as $minutes) {
+            $this->withRoom($this->sessionFor($teacher, $package, 'confirmed', now()->addMinutes($minutes)));
+        }
+
+        $bbb = $this->mock(BigBlueButtonService::class);
+        $bbb->shouldReceive('meetingExists')->andReturn(false);
+        $bbb->shouldReceive('createMeeting')->times(4)->andReturn(false, false, true, true);
+        $bbb->shouldReceive('isReachable')->once()->andReturn(true);
+
+        $this->assertSame(2, app(SessionService::class)->prewarmUpcomingRooms());
+    }
+
+    /** BBB بطيء لكنه ينجح: لا تبدأ الدورة جلسة جديدة بعد 45 ثانية (worker بـ --timeout=90). */
+    public function test_prewarm_stops_starting_new_sessions_after_its_time_budget(): void
+    {
+        $teacher = $this->createTeacher();
+        $package = $this->createPackage($teacher, 'individual');
+
+        foreach ([2, 3, 4, 5] as $minutes) {
+            $this->withRoom($this->sessionFor($teacher, $package, 'confirmed', now()->addMinutes($minutes)));
+        }
+
+        $this->freezeTime();
+
+        $bbb = $this->mock(BigBlueButtonService::class);
+        $bbb->shouldReceive('meetingExists')->andReturn(false);
+        $bbb->shouldReceive('createMeeting')->twice()->andReturnUsing(function () {
+            $this->travel(25)->seconds();
+
+            return true;
+        });
+
+        $this->assertSame(2, app(SessionService::class)->prewarmUpcomingRooms());
     }
 
     public function test_prewarm_resets_the_failure_count_after_a_success(): void
