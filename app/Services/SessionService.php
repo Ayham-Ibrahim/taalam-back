@@ -24,6 +24,14 @@ class SessionService
     /** يُسمح بالانضمام قبل الموعد المجدول بهذه المدة — ريثما يستعد الطرفان قبل بدء الجلسة فعلياً. */
     public const EARLY_JOIN_MINUTES = 5;
 
+    /**
+     * تُجهَّز غرفة BBB قبل الموعد بهذه المدة (prewarmUpcomingRooms) كي تكون جاهزة لحظة
+     * فتح الانضمام بدل إنشائها عند أول ضغطة. أكبر من EARLY_JOIN_MINUTES عمداً.
+     */
+    public const PREWARM_MINUTES = 10;
+
+    private const PREWARM_MAX_CONSECUTIVE_FAILURES = 2;
+
     public function __construct(
         private readonly SettingsService $settings,
         private readonly BigBlueButtonService $bbb,
@@ -48,7 +56,7 @@ class SessionService
         $attendeePw = Str::random(16);
         $moderatorPw = Str::random(16);
 
-        $created = $this->bbb->createMeeting($meetingId, "TAALAM Session #{$session->id}", $attendeePw, $moderatorPw, $this->bbbDurationMinutes($session));
+        $created = $this->bbb->createMeeting($meetingId, "TAALAM Session #{$session->id}", $attendeePw, $moderatorPw, $this->bbbDurationMinutes($session), $this->bbbExpireIfNoUserJoinedMinutes($session));
 
         if (! $created) {
             Log::info("bbb.room_not_created_yet", ['session_id' => $session->id]);
@@ -78,7 +86,7 @@ class SessionService
      * لأي اجتماع لم ينضم إليه أحد بعد حتى لو أُنشئ بنجاح تام، فتمنع أول
      * انضمام لأي جلسة إلى الأبد؛ راجع توثيق BigBlueButtonService::meetingExists).
      *
-     * @return array{joinable: bool, url?: string, message?: string}
+     * @return array{joinable: bool, url?: string, message?: string, reason?: string, seconds_until_joinable?: int}
      */
     public function resolveJoinUrl(ClassSession $session, User $user): array
     {
@@ -93,8 +101,15 @@ class SessionService
         $endsAt = $session->scheduled_at->clone()->addMinutes($session->duration_min);
         $joinableFrom = $session->scheduled_at->clone()->subMinutes(self::EARLY_JOIN_MINUTES);
 
+        // seconds_until_joinable محسوب بساعة السيرفر: صفحة الانتظار تعدّ تنازلياً منه لا
+        // من ساعة جهاز المستخدم (التي قد تتقدم دقيقة أو اثنتين فيظهر الزر ويُرفض الدخول).
         if ($now->lt($joinableFrom)) {
-            return ['joinable' => false, 'message' => 'لم تبدأ هذه الجلسة بعد، يرجى الانتظار حتى موعدها ثم إعادة المحاولة.'];
+            return [
+                'joinable' => false,
+                'reason' => 'not_started',
+                'seconds_until_joinable' => (int) ceil($now->diffInSeconds($joinableFrom)),
+                'message' => 'لم تبدأ هذه الجلسة بعد، يُفتح الانضمام قبل موعدها بـ '.self::EARLY_JOIN_MINUTES.' دقائق.',
+            ];
         }
 
         if ($now->gt($endsAt)) {
@@ -122,6 +137,7 @@ class SessionService
             $session->bbb_attendee_pw,
             $session->bbb_moderator_pw,
             $this->bbbDurationMinutes($session),
+            $this->bbbExpireIfNoUserJoinedMinutes($session),
         )) {
             return ['joinable' => true, 'url' => $joinUrl];
         }
@@ -139,6 +155,20 @@ class SessionService
         $endsAt = $session->scheduled_at->clone()->addMinutes($session->duration_min);
 
         return max(1, (int) ceil(now()->diffInSeconds($endsAt, false) / 60));
+    }
+
+    /**
+     * غرفة تُنشأ قرب موعدها تبقى حتى نهايته وإن لم يدخلها أحد بعد (بدل حذف BBB لها بعد
+     * 5 دقائق). غرفة تُنشأ مبكراً (وقت الحجز) تبقى على افتراضي BBB — لا نُبقيها أياماً
+     * على الخادم؛ prewarmUpcomingRooms يعيد إنشاءها قبل الموعد.
+     */
+    private function bbbExpireIfNoUserJoinedMinutes(ClassSession $session): int
+    {
+        if (now()->diffInMinutes($session->scheduled_at, false) > self::PREWARM_MINUTES) {
+            return 0;
+        }
+
+        return $this->bbbDurationMinutes($session);
     }
 
     public function markPresent(SessionAttendee $attendee): SessionAttendee
@@ -420,6 +450,60 @@ class SessionService
         }
 
         return $sessions->count();
+    }
+
+    /**
+     * كل دقيقة (PrewarmBbbRoomsJob): تجهيز غرف الجلسات التي تبدأ خلال PREWARM_MINUTES
+     * أو الجارية الآن على BBB، فتكون جاهزة لحظة الضغط على "انضمام" — بدل أن يُنشئها
+     * أول من يضغط ثم يُحوَّل قبل جاهزيتها. غرفة موجودة تُترك كما هي (فحص واحد فقط).
+     *
+     * فشل create لـ PREWARM_MAX_CONSECUTIVE_FAILURES جلسات متتالية يعني غالباً أن BBB
+     * معطّل/معلّق — نتوقف عن بقية الجلسات في هذه الدورة بدل انتظار مهلة كل طلب (فيبقى
+     * التشغيل دون --timeout الـ worker)؛ الدورة التالية بعد دقيقة، وزر الانضمام احتياط.
+     */
+    public function prewarmUpcomingRooms(): int
+    {
+        $sessions = ClassSession::query()
+            ->where('status', 'scheduled')
+            ->whereNotNull('bbb_meeting_id')
+            ->whereNotNull('bbb_attendee_pw')
+            ->whereNotNull('bbb_moderator_pw')
+            ->where('scheduled_at', '<=', now()->addMinutes(self::PREWARM_MINUTES))
+            ->whereRaw('DATE_ADD(scheduled_at, INTERVAL duration_min MINUTE) > ?', [now()])
+            ->whereHas('attendees', fn ($a) => ClassSession::constrainToPaidAttendee($a))
+            ->orderBy('scheduled_at')
+            ->get();
+
+        $created = 0;
+        $consecutiveFailures = 0;
+
+        foreach ($sessions as $session) {
+            if ($this->bbb->meetingExists($session->bbb_meeting_id)) {
+                continue;
+            }
+
+            if ($this->bbb->createMeeting(
+                $session->bbb_meeting_id,
+                "TAALAM Session #{$session->id}",
+                $session->bbb_attendee_pw,
+                $session->bbb_moderator_pw,
+                $this->bbbDurationMinutes($session),
+                $this->bbbExpireIfNoUserJoinedMinutes($session),
+            )) {
+                $created++;
+                $consecutiveFailures = 0;
+
+                continue;
+            }
+
+            if (++$consecutiveFailures >= self::PREWARM_MAX_CONSECUTIVE_FAILURES) {
+                Log::warning('bbb.prewarm_stopped_early', ['session_id' => $session->id, 'created' => $created]);
+
+                break;
+            }
+        }
+
+        return $created;
     }
 
     /**

@@ -114,7 +114,8 @@ class SessionJoinLogTest extends TestCase
         [$teacher] = $this->createVerifiedTeacher();
         [, $session, $studentUser] = $this->createBookingWithSession($teacher, now()->addHour());
 
-        $this->get($this->signedJoinLink($session, $studentUser))->assertStatus(422)->assertSee('لم تبدأ');
+        // قبل نافذة الانضمام: صفحة انتظار بعدّاد (تُعيد المحاولة وحدها) بدل رسالة خطأ.
+        $this->get($this->signedJoinLink($session, $studentUser))->assertOk()->assertViewIs('session-join-waiting');
 
         $this->assertSame(0, SessionJoinLog::count());
     }
