@@ -204,6 +204,15 @@ class TeacherService
         }
 
         $teacher->fill($data);
+
+        // اسم المركز بالإنجليزية والسجل التجاري خاصين بالمركز التدريبي فقط — أي نوع
+        // آخر تُمسح هذه الحقول بدل أن تبقى عالقة بقيم قديمة لا تخص النوع الجديد
+        // (نفس منطق مسح المناهج/التخصصات أدناه عند تبديل النوع).
+        if ($teacher->teacher_type !== 'training_center') {
+            $teacher->display_name_en = null;
+            $teacher->commercial_register = null;
+        }
+
         $teacher->save();
 
         if ($subjectIds !== null) {

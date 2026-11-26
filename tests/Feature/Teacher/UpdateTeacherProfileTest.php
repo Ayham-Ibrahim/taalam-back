@@ -95,6 +95,26 @@ class UpdateTeacherProfileTest extends TestCase
         $this->assertCount(0, $teacher->fresh()->curricula);
     }
 
+    /** تبديل النوع بعيداً عن مركز تدريب يمسح اسمه بالإنجليزية وسجله التجاري بدل أن يبقيا عالقين بقيم لا تخص النوع الجديد */
+    public function test_changing_type_away_from_training_center_clears_its_fields(): void
+    {
+        $centerUser = User::factory()->teacher()->create();
+        $center = Teacher::create([
+            'user_id' => $centerUser->id,
+            'teacher_type' => 'training_center',
+            'display_name_en' => 'Bright Future Academy',
+            'commercial_register' => 'CR-12345',
+        ]);
+        $adminToken = User::factory()->admin()->create()->createToken('t')->plainTextToken;
+
+        $this->as($adminToken)->putJson("/api/teachers/{$center->id}", ['teacher_type' => 'university'])
+            ->assertStatus(200);
+
+        $fresh = $center->fresh();
+        $this->assertNull($fresh->display_name_en);
+        $this->assertNull($fresh->commercial_register);
+    }
+
     /**
      * @return array{0: Teacher, 1: string}
      */
