@@ -206,7 +206,8 @@ class RescheduleRequestController extends Controller
             'status' => $rescheduleRequest->status,
             'reason' => $rescheduleRequest->reason,
             'rejectionReason' => $rescheduleRequest->rejection_reason,
-            'withinFreeWindow' => $rescheduleRequest->within_free_window,
+            // null لطلب التعويضية — الجلسة الأصلية فائتة أصلاً
+            'hoursBeforeSession' => $rescheduleRequest->hours_before_session,
             'originalScheduledAt' => $this->toIso($rescheduleRequest->current_scheduled_at),
             'proposedScheduledAt' => $this->toIso($rescheduleRequest->proposed_scheduled_at),
             'alternativeScheduledAt' => $this->toIso($rescheduleRequest->admin_alternative_at),
