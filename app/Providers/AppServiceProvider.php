@@ -122,6 +122,26 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perHour(20)->by('guest-trial:'.$request->ip());
         });
 
+        // إرسال رسائل المحادثة — 30/دقيقة لكل مستخدم: أسرع من أي كتابة بشرية، ويوقف سكربت
+        // يغرق الطرف الآخر. يشمل الإرسال والتعديل.
+        RateLimiter::for('chat-send', function (Request $request) use ($apiRateLimitingEnabled) {
+            if (! $apiRateLimitingEnabled) {
+                return Limit::none();
+            }
+
+            return Limit::perMinute(30)->by('chat-send:'.$request->user()?->id);
+        });
+
+        // الإبلاغ من المحادثة يرسل بريداً لكل الأدمن — 10/ساعة لكل مستخدم تكفي أي استخدام
+        // شرعي، والتكرار لنفس الرسالة لا يُنشئ شكوى جديدة أصلاً (ComplaintService::fileChatReport)
+        RateLimiter::for('chat-report', function (Request $request) use ($apiRateLimitingEnabled) {
+            if (! $apiRateLimitingEnabled) {
+                return Limit::none();
+            }
+
+            return Limit::perHour(10)->by('chat-report:'.$request->user()?->id);
+        });
+
         // رفع ملفات (صورة شخصية، وثيقة توثيق) — عملية مكلفة (تخزين + تحقق أبعاد/نوع)
         // لكل مستخدم موثّق فقط (المسارات كلها خلف auth:sanctum أصلاً)؛ 15/دقيقة يكفي
         // أي استخدام شرعي (إعادة محاولة رفع بعد خطأ) ويمنع استنزاف مساحة التخزين.

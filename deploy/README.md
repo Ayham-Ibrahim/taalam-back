@@ -109,3 +109,92 @@ php artisan tinker --execute="echo is_writable(storage_path()) ? 'storage قاب
 ```
 
 ثم تأكد عمليًا بتنزيل فاتورة حقيقية لحجز/تسجيل مدفوع من الواجهة — هذا يغطي فعلياً `storage/fonts` و`storage/app/private` معاً دفعة واحدة.
+
+## 4. المحادثة اللحظية (Laravel Reverb)
+
+المحادثة بين الطالب والمعلم/الداعم تُرسَل عبر HTTP ثم تُبث عبر WebSocket. بلا Reverb
+تبقى المحادثة تعمل (الإرسال والجلب)، لكن لا يصل شيء لحظياً إلا بعد تحديث الصفحة.
+
+**1. متغيرات `.env` على السيرفر** (أنشئ القيم مرة واحدة، والفرونت يحتاج نفس `REVERB_APP_KEY`):
+
+```bash
+BROADCAST_CONNECTION=reverb
+REVERB_APP_ID=<رقم عشوائي>
+REVERB_APP_KEY=<سلسلة عشوائية>      # php -r 'echo bin2hex(random_bytes(10));'
+REVERB_APP_SECRET=<سلسلة عشوائية>
+# العنوان العام الذي يتصل به المتصفح (عبر Nginx)
+REVERB_HOST=<دومين الباك>
+REVERB_PORT=443
+REVERB_SCHEME=https
+# ما يستمع عليه reverb:start داخلياً خلف Nginx
+REVERB_SERVER_HOST=127.0.0.1
+REVERB_SERVER_PORT=8080
+# دومينات الفرونت فقط (المضيف بلا https://) — يمنع فتح WebSocket من مواقع أخرى
+REVERB_ALLOWED_ORIGINS=t3allem.com,www.t3allem.com
+```
+
+ثم `php artisan config:cache`.
+
+**2. Supervisor:**
+
+```bash
+cp deploy/supervisor-reverb.conf /etc/supervisor/conf.d/taalam-reverb.conf
+supervisorctl reread && supervisorctl update && supervisorctl start taalam-reverb
+supervisorctl status taalam-reverb
+```
+
+**3. Nginx** — داخل `server { ... }` الخاص بدومين الباك (HTTPS)، يمرر مسارات WebSocket
+إلى Reverb:
+
+```nginx
+location ~ ^/(app|apps)/ {
+    proxy_http_version 1.1;
+    proxy_set_header Host $http_host;
+    proxy_set_header Scheme $scheme;
+    proxy_set_header SERVER_PORT $server_port;
+    proxy_set_header REMOTE_ADDR $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "Upgrade";
+    proxy_read_timeout 60s;
+    proxy_pass http://127.0.0.1:8080;
+}
+```
+
+ثم `nginx -t && systemctl reload nginx`.
+
+**ملاحظات:**
+- رسائل النظام (تأكيد حجز، مرفق جلسة) تُبث عبر الطابور لا داخل الطلب — تعتمد على
+  الـ Queue Worker في القسم 2.
+- `REVERB_MAX_REQUEST_SIZE` افتراضياً 65536 في `config/reverb.php`: رسالة بحدها الأقصى (2000 حرف
+  عربي) تتجاوز 10 آلاف بايت، فكانت تُرفض بـ "Payload too large" بالحد الافتراضي لـ Reverb.
+- مهلة اتصال Laravel بـ Reverb قصيرة (`REVERB_CLIENT_TIMEOUT=3` ثوانٍ) كي لا يعلق إرسال الرسالة
+  إن لم يستجب Reverb.
+
+**4. خطوات كل نشر** — أضف بعد `php artisan migrate`:
+
+```bash
+php artisan reverb:restart
+```
+
+**5. مرة واحدة عند الإطلاق** — المحادثة تُفتح عند حدث التأكيد فقط، فالعلاقات المؤكدة قبل
+الإطلاق تحتاج إنشاء محادثاتها (آمن التكرار، بلا رسائل نظام):
+
+```bash
+php artisan chat:backfill-conversations --dry-run   # العدد فقط
+php artisan chat:backfill-conversations
+```
+
+**6. الفرونت** — قيم Reverb تُدمج وقت البناء (`npm run build`)، فتُضبط في `.env` الفرونت قبله:
+
+```bash
+VITE_REVERB_APP_KEY=<نفس REVERB_APP_KEY في الباك>
+VITE_REVERB_HOST=<دومين الباك>
+VITE_REVERB_PORT=443
+VITE_REVERB_SCHEME=https
+```
+
+بلا `VITE_REVERB_APP_KEY` تعمل المحادثة بالاستطلاع الدوري (أبطأ، بلا "يكتب الآن" ولا مؤشر الاتصال).
+
+**مصادقة القنوات من الفرونت:** `POST /api/broadcasting/auth` بنفس توكن Sanctum
+(`Authorization: Bearer ...`). القنوات: `presence-conversation.{id}` و `private-user.{id}`.

@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Complaint;
+use App\Models\Message;
 use App\Models\Student;
 use App\Models\Teacher;
 use App\Models\User;
@@ -44,6 +45,46 @@ class ComplaintService
         ]);
 
         $this->notifyAdmins($complaint, $student !== null ? 'student' : 'teacher');
+
+        return $complaint;
+    }
+
+    /**
+     * زر الإبلاغ داخل المحادثة: الشكوى مرتبطة بالمحادثة والرسالة — هذا الربط وحده ما يفتح
+     * للأدمن الاطلاع على المحادثة. filed_by_user_id دائماً (الداعم المستقل لا يملك
+     * student/teacher)، و student_id/teacher_id متى كان للمُبلِّغ ملف منهما كي تظهر
+     * الشكوى في قائمته كبقية شكاواه.
+     */
+    public function fileChatReport(Message $message, User $reporter, ?string $description): Complaint
+    {
+        // إبلاغ مكرر عن نفس الرسالة من نفس المستخدم وشكواه ما زالت مفتوحة: نفس الشكوى بلا
+        // شكوى جديدة ولا بريد جديد لكل الأدمن (كان كل نقرة تُنشئ شكوى وتُرسل بريداً)
+        $existing = Complaint::query()
+            ->where('reported_message_id', $message->id)
+            ->where('filed_by_user_id', $reporter->id)
+            ->whereNotIn('status', ['resolved', 'closed'])
+            ->first();
+
+        if ($existing) {
+            return $existing;
+        }
+
+        $reporter->loadMissing(['student', 'teacher']);
+
+        $complaint = Complaint::create([
+            'reference' => 'CM-'.strtoupper(Str::random(10)),
+            'student_id' => $reporter->student?->id,
+            'teacher_id' => $reporter->student ? null : $reporter->teacher?->id,
+            'filed_by_user_id' => $reporter->id,
+            'conversation_id' => $message->conversation_id,
+            'reported_message_id' => $message->id,
+            'category' => 'chat_report',
+            'description' => $description ?: 'إبلاغ عن رسالة في المحادثة',
+            'status' => 'open',
+            'sla_due_at' => now()->addHours((int) $this->settings->get('sla_complaint_hours', 24)),
+        ]);
+
+        $this->notifyAdmins($complaint, $reporter->role);
 
         return $complaint;
     }
