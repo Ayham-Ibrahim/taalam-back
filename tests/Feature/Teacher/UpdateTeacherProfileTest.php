@@ -4,7 +4,9 @@ namespace Tests\Feature\Teacher;
 
 use App\Models\Teacher;
 use App\Models\User;
+use App\Notifications\TeacherEmailChangedByAdmin;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Notification;
 use Tests\TestCase;
 
 class UpdateTeacherProfileTest extends TestCase
@@ -113,6 +115,54 @@ class UpdateTeacherProfileTest extends TestCase
         $fresh = $center->fresh();
         $this->assertNull($fresh->display_name_en);
         $this->assertNull($fresh->commercial_register);
+    }
+
+    public function test_admin_can_change_teacher_email(): void
+    {
+        Notification::fake();
+        [$teacher] = $this->createTeacher();
+        $adminToken = User::factory()->admin()->create()->createToken('t')->plainTextToken;
+
+        $response = $this->as($adminToken)->putJson("/api/teachers/{$teacher->id}", ['email' => 'new-email@example.com']);
+
+        $response->assertStatus(200)->assertJsonPath('data.user.email', 'new-email@example.com');
+        $this->assertSame('new-email@example.com', $teacher->fresh()->user->email);
+        Notification::assertSentTo($teacher->user, TeacherEmailChangedByAdmin::class);
+    }
+
+    /** تعديل حقل آخر غير الإيميل لا يُطلق إشعار "تغيّر البريد" بالخطأ */
+    public function test_updating_other_fields_does_not_send_email_changed_notification(): void
+    {
+        Notification::fake();
+        [$teacher, $token] = $this->createTeacher();
+
+        $this->as($token)->putJson("/api/teachers/{$teacher->id}", ['bio' => 'نبذة جديدة'])->assertStatus(200);
+
+        Notification::assertNotSentTo($teacher->user, TeacherEmailChangedByAdmin::class);
+    }
+
+    /** المعلم لا يملك طريقاً لتبديل بريده بنفسه عبر نفس المسار المشترك — يُتجاهَل بصمت لا 422 */
+    public function test_teacher_cannot_change_their_own_email(): void
+    {
+        [$teacher, $token] = $this->createTeacher();
+        $originalEmail = $teacher->user->email;
+
+        $response = $this->as($token)->putJson("/api/teachers/{$teacher->id}", ['email' => 'hijacked@example.com']);
+
+        $response->assertStatus(200);
+        $this->assertSame($originalEmail, $teacher->fresh()->user->email);
+    }
+
+    public function test_admin_cannot_set_a_duplicate_teacher_email(): void
+    {
+        [$teacher] = $this->createTeacher();
+        $otherUser = User::factory()->teacher()->create(['email' => 'taken@example.com']);
+        Teacher::create(['user_id' => $otherUser->id, 'teacher_type' => 'school']);
+        $adminToken = User::factory()->admin()->create()->createToken('t')->plainTextToken;
+
+        $response = $this->as($adminToken)->putJson("/api/teachers/{$teacher->id}", ['email' => 'taken@example.com']);
+
+        $response->assertStatus(422)->assertJsonValidationErrors('email');
     }
 
     /**

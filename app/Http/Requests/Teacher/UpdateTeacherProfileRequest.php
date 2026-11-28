@@ -69,11 +69,15 @@ class UpdateTeacherProfileRequest extends FormRequest
             'major_ids' => ['nullable', 'array', 'max:20'],
             'major_ids.*' => ['integer', 'exists:majors,id'],
 
-            // تبديل نوع المعلم (مدرسي/جامعي/مركز تدريب) للأدمن حصراً — غير ظاهر إطلاقاً
-            // بخريطة $this->validated() لغير الأدمن، فلا يملك المعلم طريقاً لتبديل نوعه
-            // بنفسه عبر نفس هذا المسار المشترك.
+            // تبديل نوع المعلم (مدرسي/جامعي/مركز تدريب) وتعديل البريد الإلكتروني للأدمن
+            // حصراً — غير ظاهرين إطلاقاً بخريطة $this->validated() لغير الأدمن، فلا يملك
+            // المعلم طريقاً لتبديل نوعه أو بريده بنفسه عبر نفس هذا المسار المشترك.
             ...($this->user()->isAdmin() ? [
                 'teacher_type' => ['sometimes', Rule::in(['school', 'university', 'training_center'])],
+                'email' => [
+                    'sometimes', 'string', 'email', 'max:150',
+                    Rule::unique('users', 'email')->ignore($this->route('teacher')->user_id),
+                ],
             ] : []),
         ];
     }

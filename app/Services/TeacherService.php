@@ -15,6 +15,7 @@ use App\Models\User;
 use App\Models\VerificationDocument;
 use App\Notifications\AccountCreatedByAdmin;
 use App\Notifications\PasswordResetByAdmin;
+use App\Notifications\TeacherEmailChangedByAdmin;
 use App\Notifications\TeacherInvited;
 use App\Notifications\TeacherVerificationReviewed;
 use App\Traits\LogsAuditEvents;
@@ -193,14 +194,31 @@ class TeacherService
         $languageIds = $data['language_ids'] ?? null;
         $majorIds = $data['major_ids'] ?? null;
         $name = $data['name'] ?? null;
+        $email = $data['email'] ?? null;
 
-        unset($data['subject_ids'], $data['curriculum_ids'], $data['language_ids'], $data['major_ids'], $data['name']);
+        unset($data['subject_ids'], $data['curriculum_ids'], $data['language_ids'], $data['major_ids'], $data['name'], $data['email']);
 
-        // name يعيش على users لا teachers — Teacher::$fillable لا يتضمّنه أصلاً،
-        // فمررناه عبر fill() كان سيُتجاهَل بصمت دون أي تحديث فعلي.
-        if ($name !== null && $name !== '') {
+        // name/email يعيشان على users لا teachers — Teacher::$fillable لا يتضمّنهما
+        // أصلاً، فمررهما عبر fill() كان سيُتجاهَل بصمت دون أي تحديث فعلي.
+        if ($name !== null || $email !== null) {
             $teacher->loadMissing('user');
+        }
+
+        if ($name !== null && $name !== '') {
             $teacher->user->update(['name' => $name]);
+        }
+
+        // البريد حقل دخول حساس — يُعدَّل من الأدمن فقط (مضمون عبر UpdateTeacherProfileRequest)،
+        // فيُسجَّل بسجل التدقيق كأي تعديل حساس آخر، بنفس قاعدة مسح الحقول القديمة: لا تغيير بصمت.
+        if ($email !== null && $email !== $teacher->user->email) {
+            $oldEmail = $teacher->user->email;
+            $teacher->user->update(['email' => $email]);
+            $this->audit('teacher.email_updated_by_admin', $teacher, ['email' => $oldEmail], ['email' => $email]);
+            $this->notifications->send(
+                $teacher->user,
+                new TeacherEmailChangedByAdmin($oldEmail, $email),
+                'teacher.email_updated_by_admin',
+            );
         }
 
         $teacher->fill($data);
