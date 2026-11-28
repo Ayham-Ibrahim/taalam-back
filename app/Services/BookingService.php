@@ -83,6 +83,8 @@ class BookingService
 
         if ($package->isCampaign()) {
             $this->assertSlotsWithinCampaignWindows($package, $anchors, $durationMinutes);
+        } else {
+            $this->assertSlotsWithinTeacherAvailabilityHours($package, $anchors, $durationMinutes);
         }
 
         $this->conflicts->assertNoConflict($student, $package->teacher_id, $anchors, $durationMinutes);
@@ -560,6 +562,47 @@ class BookingService
             if (! $fits) {
                 throw ValidationException::withMessages([
                     'slots' => ['أحد المواعيد المختارة خارج الأوقات المتاحة لهذه الباقة'],
+                ]);
+            }
+        }
+    }
+
+    /**
+     * ساعات توفّر المعلم الأسبوعية (teacher_availability_times) — اختيارية صراحة: يوم بلا
+     * أي نافذة ساعات يبقى متاحاً طوال اليوم (الافتراضي)، ويوم له نافذة واحدة أو أكثر يُقيَّد
+     * الحجز بها حصراً. تُفحص بمنطقة المعلم (لا الطالب) لأن الساعات أُدخلت بتوقيته هو.
+     * باقة الحملة لا تمر هنا إطلاقاً — نوافذها الخاصة بها فقط (أعلاه).
+     */
+    private function assertSlotsWithinTeacherAvailabilityHours(Package $package, Collection $anchors, int $durationMinutes): void
+    {
+        $teacher = $package->teacher()->with('user')->first();
+        $windows = $teacher->availabilityTimes()->get(['day_of_week', 'start_time', 'end_time']);
+
+        if ($windows->isEmpty()) {
+            return;
+        }
+
+        $timezone = $teacher->user->timezone ?? 'UTC';
+
+        foreach ($anchors as $anchor) {
+            $start = $anchor->copy()->setTimezone($timezone);
+            $end = $start->copy()->addMinutes($durationMinutes);
+            $dayWindows = $windows->where('day_of_week', $start->dayOfWeek);
+
+            if ($dayWindows->isEmpty()) {
+                continue;
+            }
+
+            $fits = $dayWindows->contains(function ($window) use ($start, $end) {
+                $windowStart = $start->copy()->setTimeFromTimeString((string) $window->start_time);
+                $windowEnd = $start->copy()->setTimeFromTimeString((string) $window->end_time);
+
+                return $start->gte($windowStart) && $end->lte($windowEnd);
+            });
+
+            if (! $fits) {
+                throw ValidationException::withMessages([
+                    'slots' => ['أحد المواعيد المختارة خارج ساعات توفّر المعلم بهذا اليوم'],
                 ]);
             }
         }

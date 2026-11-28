@@ -137,14 +137,14 @@ class TeacherController extends Controller
         }
 
         $teacher->load([
-            'user:id,name,avatar_path', 'subjects', 'curricula', 'languages', 'majors', 'videos', 'faqs',
+            'user:id,name,avatar_path,timezone', 'subjects', 'curricula', 'languages', 'majors', 'videos', 'faqs',
             'experiences', 'activeBadgeAwards', 'availabilityTimes',
         ]);
         if ($isManager) {
             // الأحدث أولاً — قد يرفع المعلم أكثر من وثيقة لنفس النوع بعد رفض
             // سابق؛ الواجهة تعرض أول تطابق لكل نوع فقط، فيجب أن يكون الأحدث.
             $teacher->load([
-                'user:id,name,email,phone,avatar_path',
+                'user:id,name,email,phone,avatar_path,timezone',
                 'verificationDocuments' => fn ($q) => $q->latest(),
             ]);
         } else {

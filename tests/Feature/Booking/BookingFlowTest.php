@@ -175,6 +175,85 @@ class BookingFlowTest extends TestCase
         $this->assertSame(0, DB::table('payments')->count());
     }
 
+    /** يوم بلا أي نافذة ساعات توفّر (teacher_availability_times) يبقى متاحاً طوال اليوم — الافتراضي */
+    public function test_booking_request_accepted_at_any_time_when_teacher_has_no_availability_hours(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher(timezone: 'UTC');
+        $package = $this->createActiveIndividualPackage($teacher, teacherPrice: 100, margin: 60);
+        $student = $this->createStudent();
+
+        $nextWednesday = Carbon::now()->next(3);
+        $package->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
+
+        $booking = app(BookingService::class)->requestIndividualBooking(
+            $student, $package, $this->weeklySlots($nextWednesday, 4, '23:30'),
+        );
+
+        $this->assertSame('pending_teacher_confirmation', $booking->status);
+    }
+
+    /** نافذة ساعات محددة ليوم ما تقيّد الحجز بها حصراً — موعد خارجها يُرفض */
+    public function test_booking_request_rejected_when_time_outside_teacher_availability_hours(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher(timezone: 'UTC');
+        $package = $this->createActiveIndividualPackage($teacher, teacherPrice: 100, margin: 60);
+        $student = $this->createStudent();
+
+        $nextWednesday = Carbon::now()->next(3);
+        $package->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
+        $teacher->availabilityTimes()->create(['day_of_week' => $nextWednesday->dayOfWeek, 'start_time' => '09:00', 'end_time' => '12:00']);
+
+        try {
+            app(BookingService::class)->requestIndividualBooking(
+                $student, $package, $this->weeklySlots($nextWednesday, 4, '14:00'),
+            );
+            $this->fail('يفترض أن تفشل العملية لوقوع الموعد خارج ساعات توفّر المعلم');
+        } catch (ValidationException) {
+            // متوقع
+        }
+
+        $this->assertSame(0, DB::table('bookings')->count());
+    }
+
+    /** موعد داخل النافذة المحددة يُقبل بشكل طبيعي */
+    public function test_booking_request_accepted_when_time_within_teacher_availability_hours(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher(timezone: 'UTC');
+        $package = $this->createActiveIndividualPackage($teacher, teacherPrice: 100, margin: 60);
+        $student = $this->createStudent();
+
+        $nextWednesday = Carbon::now()->next(3);
+        $package->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
+        $teacher->availabilityTimes()->create(['day_of_week' => $nextWednesday->dayOfWeek, 'start_time' => '09:00', 'end_time' => '12:00']);
+
+        $booking = app(BookingService::class)->requestIndividualBooking(
+            $student, $package, $this->weeklySlots($nextWednesday, 4, '10:00'),
+        );
+
+        $this->assertSame('pending_teacher_confirmation', $booking->status);
+    }
+
+    /** نافذة ساعات محددة ليوم آخر لا تقيّد يوماً مختلفاً بلا نافذة خاصة به — يبقى متاحاً طوال اليوم */
+    public function test_availability_hours_restriction_on_one_day_does_not_affect_another_unrestricted_day(): void
+    {
+        [$teacher] = $this->createVerifiedTeacher(timezone: 'UTC');
+        $package = $this->createActiveIndividualPackage($teacher, teacherPrice: 100, margin: 60);
+        $student = $this->createStudent();
+
+        $nextWednesday = Carbon::now()->next(3);
+        $nextMonday = Carbon::now()->next(1);
+        $package->schedules()->create(['day_of_week' => $nextWednesday->dayOfWeek]);
+        $package->schedules()->create(['day_of_week' => $nextMonday->dayOfWeek]);
+        // نافذة الأربعاء فقط — الإثنين بلا أي نافذة فيبقى مفتوحاً طوال اليوم
+        $teacher->availabilityTimes()->create(['day_of_week' => $nextWednesday->dayOfWeek, 'start_time' => '09:00', 'end_time' => '12:00']);
+
+        $booking = app(BookingService::class)->requestIndividualBooking(
+            $student, $package, $this->weeklySlots($nextMonday, 4, '20:00'),
+        );
+
+        $this->assertSame('pending_teacher_confirmation', $booking->status);
+    }
+
     public function test_confirm_booking_transitions_status_and_dispatches_bbb_job(): void
     {
         Queue::fake();
@@ -646,9 +725,9 @@ class BookingFlowTest extends TestCase
     /**
      * @return array{0: Teacher, 1: string}
      */
-    private function createVerifiedTeacher(): array
+    private function createVerifiedTeacher(?string $timezone = null): array
     {
-        $teacherUser = User::factory()->teacher()->create();
+        $teacherUser = User::factory()->teacher()->create($timezone ? ['timezone' => $timezone] : []);
         $teacher = Teacher::create(['user_id' => $teacherUser->id, 'teacher_type' => 'school', 'status' => 'verified']);
         $token = $teacherUser->createToken('t')->plainTextToken;
 

@@ -66,6 +66,8 @@ class PublicTeacherResource extends JsonResource
                 'id' => $this->user->id,
                 'name' => $this->user->name,
                 'avatar_path' => $this->user->avatar_path,
+                // منطقة المعلم الزمنية — لازمة لتفسير ساعات availability_times أعلاه بدقة بدل افتراض UTC
+                'timezone' => $this->user->timezone,
             ],
             'subjects' => $this->whenLoaded('subjects', fn () => $this->subjects->map(fn ($s) => [
                 'id' => $s->id, 'name_ar' => $s->name_ar,
