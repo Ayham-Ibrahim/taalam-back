@@ -80,6 +80,15 @@ class MakeupRequestTest extends TestCase
         $this->assertTrue(ClassSession::where('makeup_for_session_id', $this->session->id)->exists());
     }
 
+    public function test_a_makeup_time_closer_than_the_min_hours_ahead_is_rejected(): void
+    {
+        $this->propose($this->studentUser, now()->addHour())
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('proposed_scheduled_at');
+
+        $this->assertSame(0, RescheduleRequest::count());
+    }
+
     public function test_student_absence_is_not_compensated_automatically(): void
     {
         [, $studentUser, $session] = $this->createMissedSession(ClassSession::OUTCOME_STUDENT_NO_SHOW);

@@ -291,6 +291,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('enrollments/{enrollment}/coupon', [EnrollmentController::class, 'applyCoupon']);
     Route::get('enrollments/{enrollment}/invoice', [EnrollmentController::class, 'downloadInvoice']);
 
+    Route::get('reschedule-policy', [RescheduleRequestController::class, 'policy']);
     Route::get('reschedule-requests', [RescheduleRequestController::class, 'index']);
     Route::get('reschedule-requests/{rescheduleRequest}', [RescheduleRequestController::class, 'show']);
     Route::post('class-sessions/{session}/reschedule-requests', [RescheduleRequestController::class, 'store']);

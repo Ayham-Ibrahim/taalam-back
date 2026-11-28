@@ -50,6 +50,14 @@ class RescheduleRequestController extends Controller
         return $this->paginate($requests);
     }
 
+    /** قيود اختيار الموعد في نافذتي تغيير الموعد والتعويضية — من الإعدادات، والباك يفرضها أيضاً */
+    public function policy()
+    {
+        return $this->success([
+            'min_hours_ahead' => $this->rescheduleService->minHoursAhead(),
+        ]);
+    }
+
     public function show(Request $request, RescheduleRequest $rescheduleRequest)
     {
         $this->authorize('view', $rescheduleRequest);
