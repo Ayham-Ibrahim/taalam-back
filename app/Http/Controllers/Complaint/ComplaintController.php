@@ -20,11 +20,12 @@ class ComplaintController extends Controller
         $user = $request->user()->loadMissing(['student', 'teacher']);
 
         $complaints = Complaint::query()
-            ->with(['student.user:id,name', 'teacher.user:id,name', 'booking.package.subject', 'session.booking.package.subject'])
+            ->with(['student.user:id,name', 'teacher.user:id,name', 'filer:id,name', 'booking.package.subject', 'session.booking.package.subject'])
             ->when(! $user->isAdmin(), function ($q) use ($user) {
                 $q->where(function ($q) use ($user) {
                     $q->where('student_id', $user->student?->id ?? 0)
-                        ->orWhere('teacher_id', $user->teacher?->id ?? 0);
+                        ->orWhere('teacher_id', $user->teacher?->id ?? 0)
+                        ->orWhere('filed_by_user_id', $user->id);
                 });
             })
             ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))
@@ -41,6 +42,7 @@ class ComplaintController extends Controller
         return $this->success($complaint->load([
             'student.user:id,name',
             'teacher.user:id,name',
+            'filer:id,name',
             'booking:id,reference',
             'session:id,scheduled_at',
             'resolver:id,name',

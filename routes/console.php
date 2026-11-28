@@ -16,11 +16,59 @@ use App\Support\RegionMatcher;
 use Database\Seeders\TrialPackagesSeeder;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schedule;
 
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
+
+// مرة واحدة عند إطلاق المحادثة (ويمكن إعادته بأمان): المحادثة تُفتح عند حدث التأكيد فقط،
+// فالعلاقات المؤكدة قبل الإطلاق تبقى بلا محادثة. يُنشئها لكل زوج (طالب، معلم/داعم) بينهما
+// حجز أو تسجيل كورس أو باقة دعم أُكِّدت يوماً — بلا رسائل نظام. insertOrIgnore على القيد الفريد.
+Artisan::command('chat:backfill-conversations {--dry-run : عرض العدد دون حفظ}', function () {
+    $bookingPairs = DB::table('bookings')
+        ->join('students', 'students.id', '=', 'bookings.student_id')
+        ->join('teachers', 'teachers.id', '=', 'bookings.teacher_id')
+        ->where(fn ($q) => $q->whereNotNull('bookings.confirmed_at')->orWhereIn('bookings.status', ['confirmed', 'active', 'completed']))
+        ->select('students.user_id as student_user_id', 'teachers.user_id as provider_user_id');
+
+    $enrollmentPairs = DB::table('enrollments')
+        ->join('students', 'students.id', '=', 'enrollments.student_id')
+        ->join('courses', 'courses.id', '=', 'enrollments.course_id')
+        ->join('teachers', 'teachers.id', '=', 'courses.teacher_id')
+        ->where(fn ($q) => $q->whereNotNull('enrollments.confirmed_at')->orWhereIn('enrollments.status', ['confirmed', 'in_progress', 'completed']))
+        ->select('students.user_id as student_user_id', 'teachers.user_id as provider_user_id');
+
+    $supportPairs = DB::table('support_package_purchases')
+        ->join('students', 'students.id', '=', 'support_package_purchases.student_id')
+        ->join('academic_supporters', 'academic_supporters.id', '=', 'support_package_purchases.academic_supporter_id')
+        ->whereNotNull('support_package_purchases.confirmed_at')
+        ->select('students.user_id as student_user_id', 'academic_supporters.user_id as provider_user_id');
+
+    $pairs = $bookingPairs->union($enrollmentPairs)->union($supportPairs)->get()
+        ->reject(fn ($pair) => $pair->student_user_id === $pair->provider_user_id);
+
+    if ($this->option('dry-run')) {
+        $this->info("أزواج مؤهلة: {$pairs->count()} (dry-run — لم يُحفظ شيء)");
+
+        return;
+    }
+
+    $now = now();
+    $created = 0;
+    foreach ($pairs->chunk(500) as $chunk) {
+        $created += DB::table('conversations')->insertOrIgnore($chunk->map(fn ($pair) => [
+            'student_user_id' => $pair->student_user_id,
+            'provider_user_id' => $pair->provider_user_id,
+            'status' => 'active',
+            'created_at' => $now,
+            'updated_at' => $now,
+        ])->values()->all());
+    }
+
+    $this->info("أزواج مؤهلة: {$pairs->count()}، محادثات جديدة: {$created}");
+})->purpose('إنشاء محادثات للعلاقات المؤكدة السابقة لإطلاق نظام المحادثة');
 
 // مرة واحدة بعد إضافة جدولي countries/regions (ويمكن إعادته بأمان): يطابق students.city
 // و students.country النصّيين القديمين مع الولايات/الدول للطلاب بلا موقع، ويطبع القيم غير

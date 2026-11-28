@@ -17,6 +17,7 @@ use App\Notifications\RescheduleRequestEscalated;
 use App\Notifications\RescheduleRequestReviewed;
 use App\Notifications\RescheduleRequestSubmitted;
 use App\Notifications\RescheduleResponseRequested;
+use App\Services\SettingsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Notification;
@@ -70,6 +71,18 @@ class CounterpartyRescheduleTest extends TestCase
 
         $deadline = RescheduleRequest::firstOrFail()->counterparty_deadline;
         $this->assertTrue($deadline->between(now()->addHours(4)->subMinute(), now()->addHours(4)->addMinute()));
+    }
+
+    public function test_the_cutoff_before_the_session_follows_the_setting(): void
+    {
+        // الإعداد موجود من الـ migration — نغيّر قيمته كما يفعل الأدمن
+        app(SettingsService::class)->set('counterparty_cutoff_hours_before_session', 3);
+        [$teacherUser, , $session] = $this->createIndividualSession(now()->addHours(6));
+
+        $this->propose($teacherUser, now()->addDays(2), $session)->assertStatus(201);
+
+        $deadline = RescheduleRequest::firstOrFail()->counterparty_deadline;
+        $this->assertTrue($deadline->between(now()->addHours(3)->subMinute(), now()->addHours(3)->addMinute()));
     }
 
     public function test_counterparty_acceptance_applies_the_new_time_immediately(): void
@@ -227,6 +240,31 @@ class CounterpartyRescheduleTest extends TestCase
 
         $this->assertNull(RescheduleRequest::firstOrFail()->counterparty_response);
         Notification::assertNotSentTo($this->studentUser, RescheduleResponseRequested::class);
+    }
+
+    public function test_a_proposed_time_closer_than_the_min_hours_ahead_is_rejected(): void
+    {
+        // الافتراضي ساعتان
+        $this->propose($this->teacherUser, now()->addMinutes(90))
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('proposed_scheduled_at');
+        $this->assertSame(0, RescheduleRequest::count());
+
+        $this->propose($this->teacherUser, now()->addHours(2)->addMinutes(5))->assertStatus(201);
+    }
+
+    public function test_min_hours_ahead_follows_the_setting_and_is_exposed_to_the_frontend(): void
+    {
+        // الإعداد موجود من الـ migration — نغيّر قيمته كما يفعل الأدمن
+        app(SettingsService::class)->set('reschedule_min_hours_ahead', 5);
+
+        $this->as($this->token($this->studentUser))
+            ->getJson('/api/reschedule-policy')
+            ->assertOk()
+            ->assertJsonPath('data.min_hours_ahead', 5);
+
+        $this->propose($this->teacherUser, now()->addHours(4))->assertStatus(422);
+        $this->propose($this->teacherUser, now()->addHours(6))->assertStatus(201);
     }
 
     public function test_session_payload_tells_only_the_counterparty_to_respond(): void

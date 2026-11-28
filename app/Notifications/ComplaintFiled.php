@@ -19,7 +19,8 @@ class ComplaintFiled extends Notification implements ShouldQueue
     use Queueable, TracksNotificationLog;
 
     /**
-     * @param  string  $filerRole  'student' | 'teacher' — من قدّم الشكوى فعلياً
+     * @param  string  $filerRole  'student' | 'teacher' | 'academic_support' — من قدّم الشكوى فعلياً
+     *                             (الأخير: إبلاغ داعم مستقل من داخل المحادثة)
      */
     public function __construct(
         private readonly string $reference,
@@ -37,7 +38,7 @@ class ComplaintFiled extends Notification implements ShouldQueue
         return (new MailMessage)
             ->greeting("Hello {$notifiable->name},")
             ->subject('New Complaint Filed — Review Required')
-            ->line("A new complaint ({$this->reference}) has been filed by a {$this->filerRole}.")
+            ->line("A new complaint ({$this->reference}) has been filed by a ".str_replace('academic_support', 'academic supporter', $this->filerRole).'.')
             ->line("Category: {$this->category}")
             ->line('Please review it from the admin complaints dashboard.');
     }

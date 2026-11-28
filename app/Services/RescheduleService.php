@@ -32,9 +32,6 @@ class RescheduleService
 {
     use LogsAuditEvents;
 
-    /** مهلة رد الطرف الآخر تنتهي قبل الجلسة الأصلية بهذه المدة على الأقل — ليبقى للأدمن وقت يتصرف فيه */
-    public const COUNTERPARTY_CUTOFF_HOURS_BEFORE_SESSION = 2;
-
     public function __construct(
         private readonly SettingsService $settings,
         private readonly NotificationService $notifications,
@@ -60,6 +57,8 @@ class RescheduleService
                 'proposed_scheduled_at' => ['يجب أن يكون موعد الجلسة التعويضية في المستقبل'],
             ]);
         }
+
+        $this->assertProposedTimeFarEnough($proposedAt, 'موعد الجلسة التعويضية');
 
         $this->assertSessionIsPaid($session, $requester, $requesterRole);
 
@@ -161,6 +160,7 @@ class RescheduleService
         $this->assertSessionIsPaid($session, $requester, $requesterRole);
 
         if ($proposedAt) {
+            $this->assertProposedTimeFarEnough($proposedAt, 'الموعد المقترح');
             $this->assertNewTimeHasNoConflict($session, $proposedAt);
         } elseif (empty($reason)) {
             throw ValidationException::withMessages([
@@ -230,11 +230,34 @@ class RescheduleService
         }
 
         $responseHours = (int) $this->settings->get('counterparty_response_hours', 12);
+        // المهلة تنتهي قبل $anchor بهذه المدة على الأقل — ليبقى للأدمن وقت يتصرف فيه
+        $cutoffHours = max(0, (int) $this->settings->get('counterparty_cutoff_hours_before_session', 2));
         $deadline = now()->addHours($responseHours)
-            ->min($anchor->copy()->subHours(self::COUNTERPARTY_CUTOFF_HOURS_BEFORE_SESSION));
+            ->min($anchor->copy()->subHours($cutoffHours));
 
         // أقل من ساعة للرد لا تكفي فعلياً — الأدمن أسرع وأضمن
         return $deadline->gt(now()->addHour()) ? $deadline : null;
+    }
+
+    /** أقل مهلة بالساعات بين إرسال الطلب والموعد المقترح (0 = يكفي أن يكون في المستقبل) */
+    public function minHoursAhead(): int
+    {
+        return max(0, (int) $this->settings->get('reschedule_min_hours_ahead', 2));
+    }
+
+    /**
+     * يمنع اقتراح موعد قريب جداً لا يكفي ليرى الطرف الآخر الطلب ويستعد له —
+     * لطلبات الطالب/المعلم فقط، لا لموعد بديل يحدده الأدمن.
+     */
+    private function assertProposedTimeFarEnough(Carbon $proposedAt, string $subject): void
+    {
+        $minHours = $this->minHoursAhead();
+
+        if ($minHours > 0 && $proposedAt->lt(now()->addHours($minHours))) {
+            throw ValidationException::withMessages([
+                'proposed_scheduled_at' => [$subject.' يجب أن يكون بعد '.$minHours.' ساعة على الأقل من الآن'],
+            ]);
+        }
     }
 
     private function adminSlaDueAt(): Carbon
