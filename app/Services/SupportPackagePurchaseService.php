@@ -23,6 +23,7 @@ class SupportPackagePurchaseService
     public function __construct(
         private readonly SettingsService $settings,
         private readonly CouponService $coupons,
+        private readonly ConversationService $conversations,
     ) {}
 
     public function initiate(Student $student, SupportPackage $supportPackage, ?string $couponCode = null): SupportPackagePurchase
@@ -92,6 +93,8 @@ class SupportPackagePurchaseService
 
         $purchase->loadMissing(['academicSupporter.user', 'student.user', 'supportPackage']);
         $purchase->academicSupporter->user->notify(new SupportPackagePurchaseConfirmed($purchase));
+
+        $this->conversations->openForSupportPurchase($purchase);
 
         return $purchase;
     }

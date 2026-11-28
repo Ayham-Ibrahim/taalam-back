@@ -19,7 +19,10 @@ class SessionAttachmentService
 {
     use LogsAuditEvents;
 
-    public function __construct(private readonly NotificationService $notifications) {}
+    public function __construct(
+        private readonly NotificationService $notifications,
+        private readonly ConversationService $conversations,
+    ) {}
 
     public function upload(ClassSession $session, User $user, UploadedFile $file, ?string $title): SessionAttachment
     {
@@ -58,12 +61,15 @@ class SessionAttachmentService
         $attachment->setRelation('uploader', $user);
         $attachment->setRelation('session', $session);
 
-        $this->recipientsFor($attachment, $session)
-            ->each(fn (User $recipient) => $this->notifications->send(
-                $recipient,
-                new SessionAttachmentUploaded($attachment),
-                'session.attachment_uploaded',
-            ));
+        $recipients = $this->recipientsFor($attachment, $session);
+
+        $recipients->each(fn (User $recipient) => $this->notifications->send(
+            $recipient,
+            new SessionAttachmentUploaded($attachment),
+            'session.attachment_uploaded',
+        ));
+
+        $this->postAttachmentSystemMessages($attachment, $session, $recipients);
 
         return $attachment;
     }
@@ -95,6 +101,25 @@ class SessionAttachmentService
      *
      * @return Collection<int, User>
      */
+    /**
+     * رسالة نظام في محادثة كل زوج (طالب، معلم الجلسة) معني بالمرفق — بلا إنشاء محادثة.
+     * المحادثة طرفاها الطالب والمعلم دائماً، فرفع الأدمن يُعلَن بين المعلم وكل طالب.
+     */
+    private function postAttachmentSystemMessages(SessionAttachment $attachment, ClassSession $session, Collection $recipients): void
+    {
+        $teacherUserId = $session->teacher?->user_id;
+        $meta = ['event' => 'session_attachment_uploaded', 'class_session_id' => $session->id, 'attachment_id' => $attachment->id];
+        $text = 'تم رفع مرفق للجلسة: '.$attachment->original_name;
+
+        foreach ($recipients as $recipient) {
+            $studentSide = $attachment->uploader_role === 'student' ? $attachment->uploaded_by : $recipient->id;
+
+            if ($teacherUserId && $studentSide !== $teacherUserId) {
+                $this->conversations->postSystemMessageBetween($studentSide, $teacherUserId, $text, $meta);
+            }
+        }
+    }
+
     private function recipientsFor(SessionAttachment $attachment, ClassSession $session): Collection
     {
         $teacherUser = $session->loadMissing('teacher.user')->teacher?->user;

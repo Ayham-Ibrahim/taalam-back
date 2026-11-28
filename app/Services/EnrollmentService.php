@@ -24,6 +24,7 @@ class EnrollmentService
         private readonly SettingsService $settings,
         private readonly ScheduleConflictService $conflicts,
         private readonly CouponService $coupons,
+        private readonly ConversationService $conversations,
     ) {}
 
     public function initiateEnrollment(Student $student, Course $course, ?string $couponCode = null): Enrollment
@@ -100,6 +101,8 @@ class EnrollmentService
                 'course_id' => $course->id,
             ], $reason, $admin->id);
 
+            $this->conversations->openForEnrollment($enrollment);
+
             return $enrollment->fresh();
         });
     }
@@ -159,6 +162,8 @@ class EnrollmentService
         foreach ($enrollment->course->sessions as $session) {
             CreateBbbRoomJob::dispatch($session->id);
         }
+
+        $this->conversations->openForEnrollment($enrollment);
 
         return $enrollment;
     }

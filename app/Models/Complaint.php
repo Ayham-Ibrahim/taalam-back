@@ -10,8 +10,11 @@ class Complaint extends Model
         'reference',
         'student_id',
         'teacher_id',
+        'filed_by_user_id',
         'booking_id',
         'class_session_id',
+        'conversation_id',
+        'reported_message_id',
         'category',
         'description',
         'status',
@@ -48,6 +51,21 @@ class Complaint extends Model
     public function session()
     {
         return $this->belongsTo(ClassSession::class, 'class_session_id');
+    }
+
+    public function filer()
+    {
+        return $this->belongsTo(User::class, 'filed_by_user_id');
+    }
+
+    public function conversation()
+    {
+        return $this->belongsTo(Conversation::class);
+    }
+
+    public function reportedMessage()
+    {
+        return $this->belongsTo(Message::class, 'reported_message_id')->withTrashed();
     }
 
     public function resolver()

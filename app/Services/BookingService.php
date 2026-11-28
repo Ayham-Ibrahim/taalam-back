@@ -33,6 +33,7 @@ class BookingService
         private readonly ScheduleConflictService $conflicts,
         private readonly CouponService $coupons,
         private readonly NotificationService $notifications,
+        private readonly ConversationService $conversations,
     ) {}
 
     /**
@@ -705,6 +706,8 @@ class BookingService
                 'package_id' => $package->id,
             ], $reason, $admin->id);
 
+            $this->conversations->openForBooking($booking);
+
             return $booking->fresh(['sessions']);
         });
     }
@@ -737,6 +740,8 @@ class BookingService
             ->merge($booking->attendedSessions)
             ->unique('id')
             ->each(fn (ClassSession $session) => CreateBbbRoomJob::dispatch($session->id));
+
+        $this->conversations->openForBooking($booking);
 
         return $booking;
     }

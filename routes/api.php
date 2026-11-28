@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Admin\AdminConversationController;
 use App\Http\Controllers\Admin\AdminDashboardController;
 use App\Http\Controllers\Admin\AuditLogController;
 use App\Http\Controllers\Admin\ImportBatchController;
@@ -13,6 +14,8 @@ use App\Http\Controllers\Booking\BookingController;
 use App\Http\Controllers\Booking\EnrollmentController;
 use App\Http\Controllers\Booking\GuestTrialBookingController;
 use App\Http\Controllers\Campaign\CampaignController;
+use App\Http\Controllers\Chat\ConversationController;
+use App\Http\Controllers\Chat\MessageController;
 use App\Http\Controllers\Complaint\ComplaintController;
 use App\Http\Controllers\Coupon\CouponController;
 use App\Http\Controllers\Coupon\MultiPackageCouponController;
@@ -337,6 +340,24 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('complaints', [ComplaintController::class, 'store']);
     Route::post('complaints/{complaint}/resolve', [ComplaintController::class, 'resolve']);
     Route::post('complaints/{complaint}/escalate', [ComplaintController::class, 'escalate']);
+
+    // المحادثة بين الطالب والمعلم/الداعم — تُفتح تلقائياً عند التأكيد ولا تُنشأ من هنا
+    Route::get('conversations', [ConversationController::class, 'index']);
+    Route::post('conversations', [ConversationController::class, 'store']);
+    Route::get('conversations/{conversation}', [ConversationController::class, 'show']);
+    Route::post('conversations/{conversation}/read', [ConversationController::class, 'markRead']);
+    Route::get('conversations/{conversation}/presence', [ConversationController::class, 'presence']);
+    Route::get('conversations/{conversation}/messages', [MessageController::class, 'index']);
+    Route::middleware('throttle:chat-send')->post('conversations/{conversation}/messages', [MessageController::class, 'store']);
+    Route::middleware('throttle:chat-send')->patch('messages/{message}', [MessageController::class, 'update']);
+    Route::delete('messages/{message}', [MessageController::class, 'destroy']);
+    // withTrashed: الإبلاغ عن رسالة حذفها مرسلها بعد أن رآها الطرف الآخر
+    Route::middleware('throttle:chat-report')->post('messages/{message}/report', [MessageController::class, 'report'])->withTrashed();
+    Route::get('chat/unread-count', [ConversationController::class, 'unreadCount']);
+    // الأدمن: الاطلاع من الشكوى المرتبطة فقط، والحظر ورفعه
+    Route::get('admin/complaints/{complaint}/conversation', [AdminConversationController::class, 'showFromComplaint']);
+    Route::post('admin/conversations/{conversation}/block', [AdminConversationController::class, 'block']);
+    Route::post('admin/conversations/{conversation}/unblock', [AdminConversationController::class, 'unblock']);
 
     // ترتيب مقصود: export مسار حرفي ثابت — يجب تسجيله قبل payouts/{payout} كي
     // لا يحاول Route Model Binding مطابقة "export" كأنه معرّف مستحقات رقمي.
